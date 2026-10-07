@@ -386,33 +386,42 @@ fn dialog_content(
     padding: bool,
     t: &GhdTheme,
 ) -> Stateful<Div> {
+    // The padding sits on a wrapper inside the scroll container: taffy adds
+    // a scroll container's own end padding to its scroll extent even when
+    // the content's negative margins (the tabbed dialogs bleed to the edges
+    // with `-20px`) already cover it, so every such dialog scrolled ~40 px
+    // past its end.
     let base = div()
         .id("dialog-content")
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
-        .when(padding, |d| d.p(SPACING_DOUBLE()))
         .text_size(FONT_SIZE())
         .line_height(zpx(18.));
+    let inner = div().when(padding, |d| d.p(SPACING_DOUBLE()));
     match kind {
-        DialogKind::Normal => base.child(content),
+        DialogKind::Normal if !padding => base.child(content),
+        DialogKind::Normal => base.child(inner.child(content)),
         DialogKind::Warning | DialogKind::Error => {
             let color = if kind == DialogKind::Warning {
                 t.dialog_warning
             } else {
                 t.dialog_error
             };
-            base.flex()
-                .flex_row()
-                .items_start()
-                .gap(SPACING_DOUBLE())
-                .child(
-                    octicon(Octicon::Alert, color)
-                        .size(zpx(24.))
-                        .flex_none()
-                        .mt(zpx(5.)),
-                )
-                .child(div().flex_1().min_w_0().child(content))
+            base.child(
+                inner
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap(SPACING_DOUBLE())
+                    .child(
+                        octicon(Octicon::Alert, color)
+                            .size(zpx(24.))
+                            .flex_none()
+                            .mt(zpx(5.)),
+                    )
+                    .child(div().flex_1().min_w_0().child(content)),
+            )
         }
     }
 }
