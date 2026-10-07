@@ -913,8 +913,11 @@ pub fn apply(theme: GhdTheme, cx: &mut App) {
         ThemeMode::Light
     };
     KitTheme::change(mode, None, cx);
-    {
-        let kit = KitTheme::global_mut(cx);
+    // `update`, not `global_mut`: it carries the colours into the kit's
+    // tokens and its Base projection, which paints the kit's scrollbars (a
+    // Textarea's); edited in place they kept the stock palette's track and
+    // thumb in dark mode
+    KitTheme::update(cx, |kit| {
         kit.font_family = kit_ui_font();
         kit.font_size = sizes::FONT_SIZE();
         kit.mono_font_family = kit_mono_font();
@@ -978,7 +981,7 @@ pub fn apply(theme: GhdTheme, cx: &mut App) {
         c.skeleton = theme.box_alt_background;
         c.drag_border = theme.focus;
         c.drop_target = theme.text_field_focus_shadow;
-    }
+    });
     cx.set_global(theme);
 }
 
