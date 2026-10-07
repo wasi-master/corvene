@@ -131,11 +131,11 @@ impl Render for ReleasesList {
             s.selected.and_then(|id| {
                 let rs = s.repo_states.get(&id)?;
                 let releases = corvene_core::releases::releases_of(s, rs)?.clone();
-                let gh = s.repository(id).and_then(|r| r.non_fork_github().cloned());
-                Some((id, releases, gh))
+                let target = github_list::sign_in_target(s, id);
+                Some((id, releases, target))
             })
         };
-        let Some((id, releases, gh)) = loaded else {
+        let Some((id, releases, (target_name, target_endpoint))) = loaded else {
             self.focused = false;
             return div().into_any_element();
         };
@@ -157,13 +157,7 @@ impl Render for ReleasesList {
         }
         let list_focused = self.focus.contains_focused(window, cx);
         let body = if releases.signed_out {
-            github_list::signed_out(
-                "releases",
-                gh.as_ref().map(|g| g.full_name()).unwrap_or_default(),
-                gh.as_ref().map(|g| g.endpoint.clone()).unwrap_or_default(),
-                cx,
-            )
-            .into_any_element()
+            github_list::signed_out("releases", target_name, target_endpoint, cx).into_any_element()
         } else if !releases.loaded {
             github_list::loading("releases", "releases-spin", &t).into_any_element()
         } else if let Some(message) = releases.error.clone().filter(|_| releases.rows.is_empty()) {

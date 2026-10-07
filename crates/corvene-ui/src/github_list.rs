@@ -126,6 +126,35 @@ pub fn error(message: String, retry: impl Fn(&mut Window, &mut App) + 'static, c
         )
 }
 
+/// The repository a signed-out list names and the API endpoint its sign-in
+/// link is for: the matched GitHub repository, else what the origin remote
+/// points at (a repository added while signed out has no match yet, which
+/// left the name blank and the link on GitHub Enterprise).
+pub fn sign_in_target(s: &corvene_core::AppState, id: u64) -> (String, String) {
+    const DOTCOM: &str = "https://api.github.com";
+    if let Some(gh) = s.repository(id).and_then(|r| r.non_fork_github()) {
+        return (gh.full_name(), gh.endpoint.clone());
+    }
+    let info = s.repo_states.get(&id).and_then(|rs| rs.info.as_ref());
+    let remote = info.and_then(|i| i.remote("origin").or(i.remotes.first()));
+    match remote.and_then(|r| corvene_core::split_remote(&r.url)) {
+        Some((host, path)) => {
+            let path = path.trim_matches('/');
+            let path = path.strip_suffix(".git").unwrap_or(path).to_string();
+            let endpoint = if host.eq_ignore_ascii_case("github.com") {
+                DOTCOM.to_string()
+            } else {
+                corvene_github::endpoint::get_enterprise_api_url(&format!("https://{host}"))
+            };
+            (path, endpoint)
+        }
+        None => (
+            s.repository(id).map(|r| r.name()).unwrap_or_default(),
+            DOTCOM.to_string(),
+        ),
+    }
+}
+
 /// No account for the repository's endpoint (after the pull request
 /// list's `signed_out_pull_requests`): a sign-in link for it.
 pub fn signed_out(what: &str, repository_name: String, endpoint: String, cx: &App) -> Div {
