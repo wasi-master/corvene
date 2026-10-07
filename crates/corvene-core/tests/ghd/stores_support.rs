@@ -123,6 +123,7 @@ pub fn app_state() -> TestAppState {
         changelists: HashMap::new(),
         file_icon_theme: None,
         hosts: Default::default(),
+        markdown_images: Default::default(),
     };
     TestAppState { state, _dir: dir }
 }
