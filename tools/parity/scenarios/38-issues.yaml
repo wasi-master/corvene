@@ -79,15 +79,15 @@ steps:
     wait: 400
   # the first label and the second assignee
   - ghd: {skip: true}
-    corvene: {click: [417, 447]}
+    corvene: {click: [417, 499]}
     wait: 300
   - ghd: {skip: true}
-    corvene: {click: [703, 471]}
+    corvene: {click: [703, 523]}
     wait: 400
   - snap: {name: new-issue-filled, corvene_only: true}
   # Create Issue: the stub answers #101, listed first and selected
   - ghd: {skip: true}
-    corvene: {click: [904, 628]}
+    corvene: {click: [904, 680]}
     wait: 2000
   - snap: {name: created, corvene_only: true}
   # Create Branch from the new issue: the dialog prefilled with 101-crash-on-launch

@@ -2,7 +2,8 @@
 //! counterpart (GHD's Create Issue on GitHub opens the browser's form).
 //! A title, a Markdown description, and the repository's labels and
 //! assignable users as two filterable checkbox lists (read through the API
-//! when the dialog opens, `Dispatcher::load_issue_meta`). Create Issue
+//! when the dialog opens, `Dispatcher::load_issue_meta`). The description
+//! has github.com's Write / Preview tabs. Create Issue
 //! posts it (`Dispatcher::create_issue`); ⏎ in the title and ⌘⏎ in the
 //! description submit too.
 
@@ -10,7 +11,7 @@ use std::collections::BTreeSet;
 
 use corvene_core::{AppState, Dispatcher};
 use corvene_github::NewIssue;
-use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -21,7 +22,7 @@ use crate::icons::{Octicon, octicon, spin};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::{checkbox, labeled, resizable_text_area, text_box};
+use crate::widgets::{checkbox, labeled, text_box};
 
 pub struct NewIssueDialog {
     state: Entity<AppState>,
@@ -32,6 +33,8 @@ pub struct NewIssueDialog {
     assignee_filter: Entity<InputState>,
     labels: BTreeSet<String>,
     assignees: BTreeSet<String>,
+    /// The description's Preview tab is showing.
+    preview: bool,
 }
 
 impl NewIssueDialog {
@@ -82,6 +85,7 @@ impl NewIssueDialog {
             assignee_filter,
             labels: BTreeSet::new(),
             assignees: BTreeSet::new(),
+            preview: false,
         }
     }
 
@@ -210,7 +214,7 @@ impl Render for NewIssueDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.ghd().clone();
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
-        let (labels, assignees, loading, repo_name) = {
+        let (labels, assignees, loading, repo_name, html_url) = {
             let s = self.state.read(cx);
             let issues = s
                 .repo_states
@@ -224,6 +228,9 @@ impl Render for NewIssueDialog {
                     .and_then(|r| r.non_fork_github())
                     .map(|gh| gh.full_name())
                     .unwrap_or_default(),
+                s.repository(self.repo)
+                    .and_then(|r| r.non_fork_github())
+                    .map(|gh| gh.html_url.clone()),
             )
         };
         let label_query = self.label_filter.read(cx).value().trim().to_string();
@@ -340,17 +347,24 @@ impl Render for NewIssueDialog {
             ))
             .child(labeled(
                 "Description",
-                div()
-                    .border_1()
-                    .border_color(t.box_border_contrast)
-                    .rounded(BORDER_RADIUS())
-                    .bg(t.box_background)
-                    .overflow_hidden()
-                    .child(resizable_text_area(
-                        "new-issue-body",
-                        Textarea::new(&self.body),
-                        cx,
-                    )),
+                crate::markdown_editor::markdown_editor(
+                    "new-issue-body",
+                    &self.body,
+                    self.preview,
+                    html_url.as_deref(),
+                    zpx(110.),
+                    {
+                        let this = this.clone();
+                        move |preview, _, cx| {
+                            this.update(cx, |d, cx| {
+                                d.preview = preview;
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    },
+                    cx,
+                ),
                 cx,
             ))
             .child(

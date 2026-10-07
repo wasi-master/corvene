@@ -46,6 +46,7 @@ pub mod keyboard_nav;
 pub mod keymap;
 pub mod link_menu;
 pub mod markdown;
+pub mod markdown_editor;
 #[cfg(not(target_os = "macos"))]
 pub mod menu_bar;
 pub mod missing_repository;
