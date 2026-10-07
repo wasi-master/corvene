@@ -21,6 +21,10 @@ use crate::error::{ApiErrorBody, GitHubError, Result};
 /// viewer cuts off far below this.
 const MAX_JOB_LOG_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Comments per page of an issue's conversation (flag `345-issues`), as
+/// github.com shows them before "Load more".
+pub const ISSUE_COMMENTS_PAGE: usize = 30;
+
 /// The response headers the paging helpers read (GHD `Response.headers`):
 /// `(name, value)` pairs, names matched without regard to case.
 pub type ResponseHeaders = [(String, String)];
@@ -299,6 +303,69 @@ pub struct ApiIssue {
     /// Enterprise Server.
     #[serde(default)]
     pub state_reason: Option<String>,
+    #[serde(default)]
+    pub reactions: Option<ApiReactions>,
+    /// The conversation is locked (only collaborators can comment).
+    #[serde(default)]
+    pub locked: bool,
+}
+
+/// The reaction rollup on an issue or comment (`reactions`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ApiReactions {
+    #[serde(default)]
+    pub total_count: u64,
+    #[serde(rename = "+1", default)]
+    pub plus_one: u64,
+    #[serde(rename = "-1", default)]
+    pub minus_one: u64,
+    #[serde(default)]
+    pub laugh: u64,
+    #[serde(default)]
+    pub hooray: u64,
+    #[serde(default)]
+    pub confused: u64,
+    #[serde(default)]
+    pub heart: u64,
+    #[serde(default)]
+    pub rocket: u64,
+    #[serde(default)]
+    pub eyes: u64,
+}
+
+impl ApiReactions {
+    /// The non-zero counts as (emoji, count), in GitHub's order.
+    pub fn counts(&self) -> Vec<(&'static str, u64)> {
+        [
+            ("👍", self.plus_one),
+            ("👎", self.minus_one),
+            ("😄", self.laugh),
+            ("🎉", self.hooray),
+            ("😕", self.confused),
+            ("❤️", self.heart),
+            ("🚀", self.rocket),
+            ("👀", self.eyes),
+        ]
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .collect()
+    }
+}
+
+/// `PATCH /repos/{owner}/{repo}/issues/{number}` body (flag `345-issues`):
+/// only the fields set are changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct IssueUpdate {
+    /// `open` | `closed`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// `completed` | `not_planned` | `reopened`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignees: Option<Vec<String>>,
 }
 
 /// `IAPIFullIdentity` (`GET /users/{login}`), also the `IAPIIdentity` on
@@ -356,6 +423,9 @@ pub struct ApiIssueComment {
     pub html_url: String,
     pub user: ApiIdentity,
     pub created_at: String,
+    /// Flag `345-issues`: the reaction rollup.
+    #[serde(default)]
+    pub reactions: Option<ApiReactions>,
 }
 
 /// `null` → `""` for bodies the API may send as `null`.
@@ -1637,6 +1707,121 @@ impl Client {
             encode_path_component(name)
         );
         self.post_json(&path, &serde_json::to_value(new)?)
+    }
+
+    /// Flag `345-issues`: `GET /repos/{owner}/{name}/issues/{number}`.
+    pub fn issue(&self, owner: &str, name: &str, number: u64) -> Result<ApiIssue> {
+        self.get_json(&format!(
+            "repos/{}/{}/issues/{number}",
+            encode_path_component(owner),
+            encode_path_component(name)
+        ))
+    }
+
+    /// Flag `345-issues`: one page of an issue's comments, oldest first
+    /// (`GET /repos/{owner}/{name}/issues/{number}/comments`), and the path
+    /// of the next page. `page` is a path from an earlier answer; `None`
+    /// reads the first page.
+    pub fn issue_comments_page(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        page: Option<&str>,
+    ) -> Result<(Vec<ApiIssueComment>, Option<String>)> {
+        let path = match page {
+            Some(page) => page.to_string(),
+            None => format!(
+                "repos/{}/{}/issues/{number}/comments?per_page={ISSUE_COMMENTS_PAGE}",
+                encode_path_component(owner),
+                encode_path_component(name)
+            ),
+        };
+        let mut response = self.get_response(&path, "application/vnd.github+json")?;
+        let headers = header_pairs(response.headers());
+        let comments: Option<Vec<ApiIssueComment>> = response.body_mut().read_json()?;
+        Ok((
+            comments.unwrap_or_default(),
+            get_next_page_path_from_link(&headers),
+        ))
+    }
+
+    /// Flag `345-issues`: `POST /repos/{owner}/{name}/issues/{number}/comments`.
+    pub fn create_issue_comment(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<ApiIssueComment> {
+        self.post_json(
+            &format!(
+                "repos/{}/{}/issues/{number}/comments",
+                encode_path_component(owner),
+                encode_path_component(name)
+            ),
+            &serde_json::json!({ "body": body }),
+        )
+    }
+
+    /// Flag `345-issues`: `PATCH /repos/{owner}/{name}/issues/{number}`
+    /// (state, labels, assignees), the issue as it is afterwards.
+    pub fn update_issue(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        update: &IssueUpdate,
+    ) -> Result<ApiIssue> {
+        let url = self.endpoint.api(&format!(
+            "repos/{}/{}/issues/{number}",
+            encode_path_component(owner),
+            encode_path_component(name)
+        ));
+        debug!(%url, "PATCH");
+        let mut response = self
+            .agent
+            .patch(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send_json(serde_json::to_value(update)?)?;
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        Ok(response.body_mut().read_json()?)
+    }
+
+    /// Flag `345-issues`: lock (`PUT`) or unlock (`DELETE`)
+    /// `/repos/{owner}/{name}/issues/{number}/lock`.
+    pub fn set_issue_locked(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        locked: bool,
+    ) -> Result<()> {
+        let path = format!(
+            "repos/{}/{}/issues/{number}/lock",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        if !locked {
+            return self.send_no_content(true, &path, None);
+        }
+        let url = self.endpoint.api(&path);
+        debug!(%url, "PUT");
+        let response = self
+            .agent
+            .put(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send_empty()?;
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        Ok(())
     }
 
     /// Flag `345-issues`: GitHub's own "create a branch for this issue"

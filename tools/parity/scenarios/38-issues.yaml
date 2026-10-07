@@ -92,7 +92,7 @@ steps:
   - snap: {name: created, corvene_only: true}
   # Create Branch from the new issue: the dialog prefilled with 101-crash-on-launch
   - ghd: {skip: true}
-    corvene: {click: [1192, 136]}
+    corvene: {click: [1160, 136]}
     wait: 1200
   - snap: {name: create-branch, corvene_only: true}
   - ghd: {skip: true}

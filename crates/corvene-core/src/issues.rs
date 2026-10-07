@@ -19,8 +19,15 @@
 //! account can push and the host knows the mutation, GitHub Enterprise
 //! Server 3.7 and later; otherwise the local link is all there is).
 //! Closing restores History's selection.
+//!
+//! The selected issue's conversation is read with it
+//! ([`IssueConversation`]: its comments, a page at a time) and written
+//! through the same account: a comment (also "Close with comment" /
+//! "Reopen with comment"), closing as completed or not planned,
+//! reopening, its labels and assignees, and locking. A write updates the
+//! issue's row from GitHub's answer and reloads the lists.
 
-use corvene_github::{ApiIssue, Client, NewIssue};
+use corvene_github::{ApiIssue, ApiIssueComment, ApiReactions, Client, IssueUpdate, NewIssue};
 use corvene_models::{GitHubRepository, Section};
 use tracing::{info, warn};
 
@@ -75,6 +82,91 @@ pub struct IssueRow {
     /// Logins.
     pub assignees: Vec<String>,
     pub comments: u64,
+    pub author_avatar: Option<String>,
+    /// The description's reactions: (emoji, count), the non-zero ones.
+    pub reactions: Vec<(String, u64)>,
+    /// The conversation is locked.
+    pub locked: bool,
+}
+
+fn reaction_counts(reactions: Option<&ApiReactions>) -> Vec<(String, u64)> {
+    reactions
+        .map(|r| {
+            r.counts()
+                .into_iter()
+                .map(|(emoji, n)| (emoji.to_string(), n))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One comment of an issue's conversation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IssueComment {
+    pub id: u64,
+    pub author: String,
+    pub avatar_url: Option<String>,
+    pub body: String,
+    /// ISO-8601.
+    pub created_at: String,
+    pub html_url: String,
+    pub reactions: Vec<(String, u64)>,
+}
+
+impl From<ApiIssueComment> for IssueComment {
+    fn from(c: ApiIssueComment) -> Self {
+        Self {
+            id: c.id,
+            author: c.user.login,
+            avatar_url: c.user.avatar_url,
+            body: c.body,
+            created_at: c.created_at,
+            html_url: c.html_url,
+            reactions: reaction_counts(c.reactions.as_ref()),
+        }
+    }
+}
+
+/// What a state button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IssueStateChange {
+    CloseCompleted,
+    CloseNotPlanned,
+    Reopen,
+}
+
+impl IssueStateChange {
+    fn update(self) -> IssueUpdate {
+        let (state, reason) = match self {
+            Self::CloseCompleted => ("closed", "completed"),
+            Self::CloseNotPlanned => ("closed", "not_planned"),
+            Self::Reopen => ("open", "reopened"),
+        };
+        IssueUpdate {
+            state: Some(state.to_string()),
+            state_reason: Some(reason.to_string()),
+            ..IssueUpdate::default()
+        }
+    }
+}
+
+/// The selected issue's comments and the writes on it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IssueConversation {
+    pub number: u64,
+    /// Oldest first.
+    pub comments: Vec<IssueComment>,
+    pub loading: bool,
+    pub loaded: bool,
+    /// The last read failed (its message).
+    pub error: Option<String>,
+    /// The next page's path ("Load more").
+    pub next_page: Option<String>,
+    pub loading_more: bool,
+    /// A write is on its way (the buttons wait).
+    pub busy: bool,
+    /// Counts the comments posted from here, so the composer clears.
+    pub posted: u64,
 }
 
 impl IssueRow {
@@ -91,12 +183,19 @@ impl IssueRow {
             body: issue.body.unwrap_or_default(),
             html_url,
             node_id: issue.node_id,
-            author: issue.user.map(|u| u.login).unwrap_or_default(),
+            author: issue
+                .user
+                .as_ref()
+                .map(|u| u.login.clone())
+                .unwrap_or_default(),
             created_at: issue.created_at,
             updated_at: issue.updated_at,
             labels: issue.labels.into_iter().map(IssueLabel::from).collect(),
             assignees: issue.assignees.into_iter().map(|u| u.login).collect(),
             comments: issue.comments,
+            author_avatar: issue.user.and_then(|u| u.avatar_url),
+            reactions: reaction_counts(issue.reactions.as_ref()),
+            locked: issue.locked,
         }
     }
 
@@ -166,6 +265,8 @@ pub struct IssuesViewState {
     pub meta_loaded: bool,
     /// History's selection when the list opened, restored on close.
     pub saved_selection: Vec<String>,
+    /// The selected issue's comments.
+    pub conversation: Option<IssueConversation>,
 }
 
 impl IssuesViewState {
@@ -219,6 +320,33 @@ impl IssuesViewState {
 
     pub fn selected_row(&self) -> Option<&IssueRow> {
         self.find(self.selected?)
+    }
+
+    /// The selected issue's conversation, once asked for.
+    pub fn selected_conversation(&self) -> Option<&IssueConversation> {
+        let number = self.selected?;
+        self.conversation.as_ref().filter(|c| c.number == number)
+    }
+
+    /// GitHub's answer to a write: the issue's row, moved to the open or
+    /// closed list when its state changed (first in it).
+    pub fn apply_issue(&mut self, row: IssueRow) {
+        let list = if row.open {
+            &mut self.open
+        } else {
+            &mut self.closed
+        };
+        if let Some(existing) = list.iter_mut().find(|r| r.number == row.number) {
+            *existing = row;
+            return;
+        }
+        self.open.retain(|r| r.number != row.number);
+        self.closed.retain(|r| r.number != row.number);
+        if row.open {
+            self.open.insert(0, row);
+        } else {
+            self.closed.insert(0, row);
+        }
     }
 
     /// The labels the chips row offers: the repository's when read, else
@@ -287,6 +415,29 @@ pub fn with_closes_issue(url: &str, number: u64) -> String {
 struct Loaded {
     open: Vec<IssueRow>,
     closed: Vec<IssueRow>,
+}
+
+/// What an account's client needs, sent to the background.
+struct IssuesApi {
+    endpoint: corvene_github::Endpoint,
+    token: String,
+    sso_hint: bool,
+    error_details: bool,
+}
+
+impl IssuesApi {
+    fn client(self) -> Client {
+        Client::new(self.endpoint, self.token)
+            .with_sso_hint(self.sso_hint)
+            .with_error_details(self.error_details)
+    }
+}
+
+/// GitHub's answers to an issue write.
+struct IssueWritten {
+    issue: Option<ApiIssue>,
+    comment: Option<ApiIssueComment>,
+    locked: Option<bool>,
 }
 
 impl Dispatcher {
@@ -475,14 +626,372 @@ impl Dispatcher {
 
     /// The selected issue, shown in the commit view's place.
     pub fn select_issue(id: u64, number: Option<u64>, cx: &mut dyn Host) {
-        Self::state(cx).update(cx, |s, cx| {
-            if let Some(issues) = s.repo_state_mut(id).issues.as_mut()
-                && issues.selected != number
-            {
+        let load = Self::state(cx).update(cx, |s, cx| {
+            let issues = s.repo_state_mut(id).issues.as_mut()?;
+            if issues.selected != number {
                 issues.selected = number;
                 cx.notify();
             }
+            let number = number?;
+            (issues.selected_conversation().is_none() && issues.find(number).is_some())
+                .then_some(number)
         });
+        if let Some(number) = load {
+            Self::load_issue_conversation(id, number, cx);
+        }
+    }
+
+    /// The account's client for the issues' repository.
+    fn issues_client(id: u64, cx: &dyn Host) -> Option<(GitHubRepository, IssuesApi)> {
+        let gh = Self::issues_target(id, cx)?;
+        let (endpoint, token, _) = Self::api_for_repository(id, &gh, cx)?;
+        let s = Self::state(cx).read(cx);
+        Some((
+            gh,
+            IssuesApi {
+                endpoint,
+                token,
+                sso_hint: s.flags.bool(crate::flags::ids::API_SAML_SSO_HINT),
+                error_details: s.flags.bool(crate::flags::ids::API_ERROR_DETAILS),
+            },
+        ))
+    }
+
+    /// The first page of issue `number`'s comments (selecting it; Retry).
+    pub fn load_issue_conversation(id: u64, number: u64, cx: &mut dyn Host) {
+        let api = Self::issues_client(id, cx);
+        let start = Self::state(cx).update(cx, |s, cx| {
+            let issues = s.repo_state_mut(id).issues.as_mut()?;
+            let expected = issues.find(number).map_or(0, |r| r.comments);
+            let conversation = issues.conversation.insert(IssueConversation {
+                number,
+                ..IssueConversation::default()
+            });
+            match &api {
+                // nothing to read: the samples, or no account
+                _ if expected == 0 => conversation.loaded = true,
+                None => conversation.loaded = true,
+                Some(_) => conversation.loading = true,
+            }
+            cx.notify();
+            Some(conversation.loading)
+        });
+        let (Some(true), Some((gh, api))) = (start, api) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || {
+                api.client()
+                    .issue_comments_page(&gh.owner, &gh.name, number, None)
+            },
+            move |result, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let Some(c) = s
+                        .repo_state_mut(id)
+                        .issues
+                        .as_mut()
+                        .and_then(|i| i.conversation.as_mut())
+                        .filter(|c| c.number == number)
+                    else {
+                        return;
+                    };
+                    c.loading = false;
+                    match result {
+                        Ok((comments, next)) => {
+                            c.loaded = true;
+                            c.error = None;
+                            c.comments = comments.into_iter().map(IssueComment::from).collect();
+                            c.next_page = next;
+                        }
+                        Err(err) => {
+                            warn!(id, number, %err, "issue comments");
+                            c.error = Some(err.to_string());
+                        }
+                    }
+                    cx.notify();
+                });
+            },
+        );
+    }
+
+    /// "Load more": the next page of the selected issue's comments.
+    pub fn load_more_issue_comments(id: u64, cx: &mut dyn Host) {
+        let api = Self::issues_client(id, cx);
+        let page = Self::state(cx).update(cx, |s, cx| {
+            let issues = s.repo_state_mut(id).issues.as_mut()?;
+            let number = issues.selected?;
+            let c = issues
+                .conversation
+                .as_mut()
+                .filter(|c| c.number == number)?;
+            if c.loading_more || c.loading {
+                return None;
+            }
+            let page = c.next_page.clone()?;
+            c.loading_more = true;
+            cx.notify();
+            Some((number, page))
+        });
+        let (Some((number, page)), Some((gh, api))) = (page, api) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || {
+                api.client()
+                    .issue_comments_page(&gh.owner, &gh.name, number, Some(&page))
+            },
+            move |result, cx| {
+                let failed = Self::state(cx).update(cx, |s, cx| {
+                    let c = s
+                        .repo_state_mut(id)
+                        .issues
+                        .as_mut()
+                        .and_then(|i| i.conversation.as_mut())
+                        .filter(|c| c.number == number)?;
+                    c.loading_more = false;
+                    cx.notify();
+                    match result {
+                        Ok((comments, next)) => {
+                            for comment in comments {
+                                if !c.comments.iter().any(|x| x.id == comment.id) {
+                                    c.comments.push(comment.into());
+                                }
+                            }
+                            c.next_page = next;
+                            None
+                        }
+                        Err(err) => Some(err.to_string()),
+                    }
+                });
+                if let Some(err) = failed {
+                    Self::show_error("Could not load more comments", err, cx);
+                }
+            },
+        );
+    }
+
+    /// Comment on issue `number`, then (`change`) close or reopen it:
+    /// "Comment", "Close with comment", "Reopen with comment".
+    pub fn comment_on_issue(
+        id: u64,
+        number: u64,
+        body: String,
+        change: Option<IssueStateChange>,
+        cx: &mut dyn Host,
+    ) {
+        let body = body.trim().to_string();
+        if body.is_empty() {
+            if let Some(change) = change {
+                Self::set_issue_state(id, number, change, cx);
+            }
+            return;
+        }
+        Self::issue_write(
+            id,
+            number,
+            "Could not comment",
+            move |client, gh| {
+                let comment = client.create_issue_comment(&gh.owner, &gh.name, number, &body)?;
+                let issue = match change {
+                    Some(change) => {
+                        client.update_issue(&gh.owner, &gh.name, number, &change.update())?
+                    }
+                    None => client.issue(&gh.owner, &gh.name, number)?,
+                };
+                Ok(IssueWritten {
+                    issue: Some(issue),
+                    comment: Some(comment),
+                    locked: None,
+                })
+            },
+            cx,
+        );
+    }
+
+    /// Close as completed / not planned, or reopen.
+    pub fn set_issue_state(id: u64, number: u64, change: IssueStateChange, cx: &mut dyn Host) {
+        Self::issue_write(
+            id,
+            number,
+            match change {
+                IssueStateChange::Reopen => "Could not reopen the issue",
+                _ => "Could not close the issue",
+            },
+            move |client, gh| {
+                Ok(IssueWritten {
+                    issue: Some(client.update_issue(
+                        &gh.owner,
+                        &gh.name,
+                        number,
+                        &change.update(),
+                    )?),
+                    comment: None,
+                    locked: None,
+                })
+            },
+            cx,
+        );
+    }
+
+    /// The issue's labels (names) become `labels`.
+    pub fn set_issue_labels(id: u64, number: u64, labels: Vec<String>, cx: &mut dyn Host) {
+        Self::issue_write(
+            id,
+            number,
+            "Could not change the labels",
+            move |client, gh| {
+                let update = IssueUpdate {
+                    labels: Some(labels),
+                    ..IssueUpdate::default()
+                };
+                Ok(IssueWritten {
+                    issue: Some(client.update_issue(&gh.owner, &gh.name, number, &update)?),
+                    comment: None,
+                    locked: None,
+                })
+            },
+            cx,
+        );
+    }
+
+    /// The issue's assignees (logins) become `assignees`.
+    pub fn set_issue_assignees(id: u64, number: u64, assignees: Vec<String>, cx: &mut dyn Host) {
+        Self::issue_write(
+            id,
+            number,
+            "Could not change the assignees",
+            move |client, gh| {
+                let update = IssueUpdate {
+                    assignees: Some(assignees),
+                    ..IssueUpdate::default()
+                };
+                Ok(IssueWritten {
+                    issue: Some(client.update_issue(&gh.owner, &gh.name, number, &update)?),
+                    comment: None,
+                    locked: None,
+                })
+            },
+            cx,
+        );
+    }
+
+    /// Lock or unlock the conversation.
+    pub fn set_issue_locked(id: u64, number: u64, locked: bool, cx: &mut dyn Host) {
+        Self::issue_write(
+            id,
+            number,
+            if locked {
+                "Could not lock the conversation"
+            } else {
+                "Could not unlock the conversation"
+            },
+            move |client, gh| {
+                client.set_issue_locked(&gh.owner, &gh.name, number, locked)?;
+                Ok(IssueWritten {
+                    issue: None,
+                    comment: None,
+                    locked: Some(locked),
+                })
+            },
+            cx,
+        );
+    }
+
+    /// A write on issue `number` through the account's client: the
+    /// conversation is busy meanwhile; GitHub's answer updates the row and
+    /// the conversation, and the lists reload.
+    fn issue_write(
+        id: u64,
+        number: u64,
+        error_title: &'static str,
+        job: impl FnOnce(&Client, &GitHubRepository) -> corvene_github::Result<IssueWritten>
+        + Send
+        + 'static,
+        cx: &mut dyn Host,
+    ) {
+        let Some((gh, api)) = Self::issues_client(id, cx) else {
+            let host = Self::issues_target(id, cx)
+                .map(|gh| endpoint_host(&gh))
+                .unwrap_or_else(|| "GitHub".to_string());
+            Self::show_error(error_title, format!("Sign in to {host} first."), cx);
+            return;
+        };
+        let started = Self::state(cx).update(cx, |s, cx| {
+            let Some(issues) = s.repo_state_mut(id).issues.as_mut() else {
+                return false;
+            };
+            if issues
+                .conversation
+                .as_ref()
+                .is_none_or(|c| c.number != number)
+            {
+                issues.conversation = Some(IssueConversation {
+                    number,
+                    loaded: true,
+                    ..IssueConversation::default()
+                });
+            }
+            let Some(c) = issues.conversation.as_mut() else {
+                return false;
+            };
+            if c.busy {
+                return false;
+            }
+            c.busy = true;
+            cx.notify();
+            true
+        });
+        if !started {
+            return;
+        }
+        let gh_for_row = gh.clone();
+        spawn_bg(
+            cx,
+            move || job(&api.client(), &gh),
+            move |result, cx| {
+                let error = Self::state(cx).update(cx, |s, cx| {
+                    let issues = s.repo_state_mut(id).issues.as_mut()?;
+                    if let Some(c) = issues.conversation.as_mut().filter(|c| c.number == number) {
+                        c.busy = false;
+                    }
+                    cx.notify();
+                    let written = match result {
+                        Ok(written) => written,
+                        Err(err) => return Some(err.to_string()),
+                    };
+                    if let Some(issue) = written.issue {
+                        issues.apply_issue(IssueRow::from_api(issue, &gh_for_row));
+                    }
+                    if let Some(locked) = written.locked {
+                        for row in issues.open.iter_mut().chain(issues.closed.iter_mut()) {
+                            if row.number == number {
+                                row.locked = locked;
+                            }
+                        }
+                    }
+                    if let Some(comment) = written.comment
+                        && let Some(c) = issues.conversation.as_mut().filter(|c| c.number == number)
+                    {
+                        c.posted += 1;
+                        // the rest of a long conversation is not read yet:
+                        // the new comment shows once "Load more" reaches it
+                        if c.next_page.is_none() && !c.comments.iter().any(|x| x.id == comment.id) {
+                            c.comments.push(comment.into());
+                        }
+                    }
+                    None
+                });
+                match error {
+                    Some(err) => Self::show_error(error_title, err, cx),
+                    None => {
+                        info!(id, number, "issue updated");
+                        Self::load_issues(id, cx);
+                    }
+                }
+            },
+        );
     }
 
     /// The repository's labels and assignable users for New Issue… (read
@@ -831,6 +1340,13 @@ pub fn install_samples(id: u64, cx: &mut dyn Host) {
                     Vec::new()
                 },
                 comments: number % 4,
+                author_avatar: None,
+                reactions: if number == 42 {
+                    vec![("👍".to_string(), 3), ("👀".to_string(), 1)]
+                } else {
+                    Vec::new()
+                },
+                locked: false,
             }
         };
     let open = vec![
@@ -957,6 +1473,9 @@ mod tests {
                 .collect(),
             assignees: assignees.iter().map(|a| a.to_string()).collect(),
             comments: 0,
+            author_avatar: None,
+            reactions: Vec::new(),
+            locked: false,
         }
     }
 
@@ -993,6 +1512,39 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["bug", "enhancement"]
         );
+    }
+
+    #[test]
+    fn written_rows_move_between_lists() {
+        let mut state = IssuesViewState {
+            open: vec![row(1, "One", true, &[], &[]), row(2, "Two", true, &[], &[])],
+            closed: vec![row(3, "Three", false, &[], &[])],
+            ..Default::default()
+        };
+        // closed: first of the closed list
+        state.apply_issue(row(2, "Two", false, &[], &[]));
+        assert_eq!(state.open.iter().map(|r| r.number).collect::<Vec<_>>(), [1]);
+        assert_eq!(
+            state.closed.iter().map(|r| r.number).collect::<Vec<_>>(),
+            [2, 3]
+        );
+        // relabelled in place
+        state.apply_issue(row(3, "Three", false, &["bug"], &[]));
+        assert_eq!(state.closed[1].labels.len(), 1);
+        assert_eq!(
+            IssueStateChange::CloseNotPlanned.update(),
+            IssueUpdate {
+                state: Some("closed".into()),
+                state_reason: Some("not_planned".into()),
+                ..IssueUpdate::default()
+            }
+        );
+        state.selected = Some(3);
+        state.conversation = Some(IssueConversation {
+            number: 2,
+            ..Default::default()
+        });
+        assert!(state.selected_conversation().is_none());
     }
 
     #[test]

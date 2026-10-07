@@ -157,6 +157,7 @@ pub fn comment() -> ApiIssueComment {
         html_url: "https://github.com/wasi-master/corvene-demo/pull/42#issuecomment-1".into(),
         user: octocat(),
         created_at: iso_ago(25 * 60),
+        reactions: None,
     }
 }
 

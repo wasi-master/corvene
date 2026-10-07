@@ -283,7 +283,7 @@ impl Workspace {
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
         let stash_view = cx.new(|cx| StashDiffViewer::new(state.clone(), cx));
         let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
-        let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), cx));
+        let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), window, cx));
         let review_view = cx.new(|cx| {
             crate::pull_request_review_view::PullRequestReviewView::new(state.clone(), cx)
         });
