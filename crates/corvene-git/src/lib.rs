@@ -218,8 +218,8 @@ pub use stash_ops::{
     store_stash, unmerged_paths,
 };
 pub use stats::{
-    Contributor, FileChurn, RepoStats, StatsScope, TOP_FILES, WeekBucket, repository_stats, stats_commit_count,
-    week_start,
+    Contributor, FileChurn, RepoStats, StatsScope, TOP_FILES, WeekBucket, repository_stats,
+    stats_commit_count, week_start,
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
