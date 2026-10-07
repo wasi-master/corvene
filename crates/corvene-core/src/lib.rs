@@ -49,6 +49,7 @@ pub mod ghd_import;
 pub mod git_config_import;
 pub mod git_store;
 pub mod github_actions;
+pub mod github_links;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
 pub mod history_filter;

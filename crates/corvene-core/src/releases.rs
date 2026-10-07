@@ -109,6 +109,9 @@ pub struct ReleasesViewState {
     pub signed_out: bool,
     /// History's selection when the list opened, restored on close.
     pub saved_selection: Vec<String>,
+    /// `355-github-links-in-app`: the release to select once the list has
+    /// loaded (by tag).
+    pub wanted_tag: Option<String>,
 }
 
 impl ReleasesViewState {
@@ -307,6 +310,11 @@ impl Dispatcher {
                             {
                                 releases.selected = None;
                             }
+                            if let Some(tag) = releases.wanted_tag.take()
+                                && let Some(row) = releases.rows.iter().find(|r| r.tag_name == tag)
+                            {
+                                releases.selected = Some(row.id);
+                            }
                             if releases.selected.is_none() {
                                 releases.selected = releases.rows.first().map(|r| r.id);
                             }
@@ -321,6 +329,22 @@ impl Dispatcher {
                 }
             },
         );
+    }
+
+    /// `355-github-links-in-app`: the list with release `tag` selected (once
+    /// loaded, when it is still loading).
+    pub fn show_release_tag(id: u64, tag: String, cx: &mut dyn Host) {
+        Self::show_releases(id, cx);
+        Self::state(cx).update(cx, |s, cx| {
+            let Some(releases) = s.repo_state_mut(id).releases.as_mut() else {
+                return;
+            };
+            match releases.rows.iter().find(|r| r.tag_name == tag) {
+                Some(row) if releases.loaded => releases.selected = Some(row.id),
+                _ => releases.wanted_tag = Some(tag),
+            }
+            cx.notify();
+        });
     }
 
     pub fn select_release(id: u64, release: Option<u64>, cx: &mut dyn Host) {

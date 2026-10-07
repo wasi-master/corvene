@@ -3089,6 +3089,23 @@ registry! {
         code: &["crates/corvene-core/src/pull_request_events.rs", "crates/corvene-github/src/pull_request_events.rs", "crates/corvene-core/src/notifications.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
     },
 
+    /// Links to a cloned repository's releases, comparisons, commits and
+    /// issues offer to open in the app.
+    GITHUB_LINKS_IN_APP = 355 "github-links-in-app" {
+        title: "Open GitHub links in the app",
+        summary: "A click on a link in release notes, an issue or a pull request description \
+                  that points at a release, a comparison, a commit or an issue of a repository \
+                  in the list asks whether to show it in Corvene (the release in Releases, the \
+                  comparison or the commit in History, the issue in Issues) or on GitHub.",
+        ghd_behaviour: "Every link opens in the browser.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/github_links.rs", "crates/corvene-ui/src/markdown.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

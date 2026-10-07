@@ -44,6 +44,7 @@ pub mod issue_view;
 pub mod issues_list;
 pub mod keyboard_nav;
 pub mod keymap;
+pub mod link_menu;
 pub mod markdown;
 #[cfg(not(target_os = "macos"))]
 pub mod menu_bar;

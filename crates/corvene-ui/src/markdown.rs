@@ -326,12 +326,14 @@ impl Renderer<'_> {
             .filter_map(|((r, title), number)| Some((r.clone(), title?, number)))
             .collect();
         let issues = self.issues.clone();
-        let text =
-            InteractiveText::new(self.element_id(), styled).on_click(ranges, move |ix, _, cx| {
+        let text = InteractiveText::new(self.element_id(), styled).on_click(
+            ranges,
+            move |ix, window, cx| {
                 if let Some(Some(url)) = urls.get(ix) {
-                    Dispatcher::open_url(url, cx);
+                    crate::link_menu::open_link(url.to_string(), window, cx);
                 }
-            });
+            },
+        );
         if tips.is_empty() {
             return text.into_any_element();
         }
