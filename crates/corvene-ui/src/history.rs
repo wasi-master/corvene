@@ -995,6 +995,26 @@ impl HistorySidebar {
                     .on_click(move |_, _, cx| Dispatcher::swap_compare_refs(id, cx))
                     .child(octicon(Octicon::GitCompare, t.text)),
             )
+            // the way back to the commit list (Escape does the same; the
+            // empty branch field shows no clear button to find)
+            .child(
+                div()
+                    .id("ref-compare-close")
+                    .icon_button_label("Back to History")
+                    .flex_none()
+                    .size(zpx(25.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(BORDER_RADIUS())
+                    .border_1()
+                    .border_color(t.box_border)
+                    .bg(t.tab_bar_background)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover_bg))
+                    .on_click(cx.listener(|this, _, window, cx| this.compare_clear(window, cx)))
+                    .child(octicon(Octicon::X, t.text)),
+            )
     }
 
     /// `1218-compare-refs`: the row that shows the combined diff, selected
