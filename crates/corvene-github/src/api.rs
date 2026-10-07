@@ -2003,6 +2003,21 @@ impl Client {
         )
     }
 
+    /// `GET /repos/{owner}/{name}/actions/jobs/{job_id}`: one job with its
+    /// steps (Corvene `347-actions-job-logs`, for a check run the run's job
+    /// list left out: an older attempt, or past its first page).
+    pub fn workflow_job(
+        &self,
+        owner: &str,
+        name: &str,
+        job_id: u64,
+    ) -> Result<Option<ApiWorkflowJob>> {
+        self.get_json_opt(
+            &format!("repos/{owner}/{name}/actions/jobs/{job_id}"),
+            "application/vnd.github+json",
+        )
+    }
+
     /// `fetchCheckSuite`
     pub fn check_suite(
         &self,

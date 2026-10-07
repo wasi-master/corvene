@@ -555,6 +555,10 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::ALL_CHECK_RUN_PAGES);
+        let job_fallback = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::ACTIONS_JOB_LOGS);
         spawn_bg(
             cx,
             move || {
@@ -566,7 +570,14 @@ impl Dispatcher {
                     return (None, auth_failed, false);
                 };
                 if sub.branch_name.is_some() {
-                    checks = with_actions_workflows(&client, owner, name, checks, &previous);
+                    checks = with_actions_workflows(
+                        &client,
+                        owner,
+                        name,
+                        checks,
+                        &previous,
+                        job_fallback,
+                    );
                 }
                 (CombinedRefCheck::from_checks(checks), auth_failed, true)
             },
@@ -736,12 +747,18 @@ impl Dispatcher {
 /// `getLatestPRWorkflowRunsLogsForCheckRun`: attach the Actions workflow run
 /// and job steps to each check run. The previous mapping is reused when
 /// the set of check runs did not change (`getAndMapActionWorkflowRunsToCheckRuns`).
+///
+/// Deviation (`347-actions-job-logs`, `job_fallback`): GHD reads only the
+/// first page of the run's latest attempt, so a job past it or from an
+/// earlier attempt showed "There are no steps to display"; Corvene then
+/// reads the one job.
 fn with_actions_workflows(
     client: &Client,
     owner: &str,
     name: &str,
     checks: Vec<RefCheck>,
     previous: &[RefCheck],
+    job_fallback: bool,
 ) -> Vec<RefCheck> {
     let same_set = !previous.is_empty()
         && previous.iter().any(|c| c.actions_workflow.is_some())
@@ -790,10 +807,15 @@ fn with_actions_workflows(
             let jobs = jobs_cache
                 .entry(run.id)
                 .or_insert_with(|| client.workflow_run_jobs(owner, name, run.id).ok().flatten());
-            if let Some(job) = jobs
+            let fallback;
+            let mut job = jobs
                 .as_ref()
-                .and_then(|j| j.jobs.iter().find(|j| j.id == check.id))
-            {
+                .and_then(|j| j.jobs.iter().find(|j| j.id == check.id));
+            if job.is_none() && job_fallback {
+                fallback = client.workflow_job(owner, name, check.id).ok().flatten();
+                job = fallback.as_ref();
+            }
+            if let Some(job) = job {
                 if job.html_url.is_some() {
                     check.html_url = job.html_url.clone();
                 }

@@ -50,7 +50,8 @@ pub(crate) type RerunJob = Rc<dyn Fn(&mut App)>;
 pub(crate) type OpenLog = Rc<dyn Fn(Option<String>, &mut App)>;
 
 /// `347-actions-job-logs`: the log opener of `check` for `repo`, when the
-/// flag is on and the check is an Actions job (its id is the job id).
+/// flag is on and the check is an Actions job (its id is the job id), with
+/// its steps read or at least its workflow run matched.
 pub(crate) fn open_log_for(
     repo: u64,
     github: &GitHubRepository,
@@ -61,7 +62,7 @@ pub(crate) fn open_log_for(
         .read(cx)
         .flags
         .bool(corvene_core::flags::ids::ACTIONS_JOB_LOGS);
-    if !on || check.job_steps.is_none() {
+    if !on || (check.job_steps.is_none() && check.actions_workflow.is_none()) {
         return None;
     }
     let (github, check) = (github.clone(), check.clone());
@@ -713,6 +714,8 @@ pub(crate) fn check_run_steps(
                 .into_any_element()
         }
         None => {
+            // GHD's panel has neither: both ride on the job log flag
+            let on_rerun_job = on_rerun_job.filter(|_| open_log.is_some());
             let CheckRunNoStepContent {
                 text,
                 button: (label, CheckRunNoStepAction::ViewCheckExternally),
@@ -743,7 +746,45 @@ pub(crate) fn check_run_steps(
                                 .on_click(move |_, _, cx| {
                                     corvene_core::Dispatcher::open_url(&view_url, cx)
                                 }),
-                        ),
+                        )
+                        // Corvene `347-actions-job-logs`: an Actions job whose
+                        // steps could not be read still has a log, and can
+                        // still be re-run
+                        .when(open_log.is_some(), |d| {
+                            d.child(
+                                div()
+                                    .mt(SPACING_HALF())
+                                    .flex()
+                                    .flex_row()
+                                    .gap(SPACING_HALF())
+                                    .when_some(open_log, |d, open| {
+                                        d.child(
+                                            button("check-no-steps-log", "", cx)
+                                                .flex_1()
+                                                .gap(SPACING_HALF())
+                                                .child(octicon(
+                                                    Octicon::Terminal,
+                                                    t.secondary_button_text,
+                                                ))
+                                                .child("View job log")
+                                                .on_click(move |_, _, cx| open(None, cx)),
+                                        )
+                                    })
+                                    .when_some(on_rerun_job, |d, rerun| {
+                                        d.child(
+                                            button("check-no-steps-rerun", "", cx)
+                                                .flex_1()
+                                                .gap(SPACING_HALF())
+                                                .child(octicon(
+                                                    Octicon::SyncClockwise,
+                                                    t.secondary_button_text,
+                                                ))
+                                                .child("Re-run job")
+                                                .on_click(move |_, _, cx| rerun(cx)),
+                                        )
+                                    }),
+                            )
+                        }),
                 )
                 .when(image_alt.is_some(), |d| {
                     d.child(
