@@ -65,6 +65,7 @@ pub mod lfs_locks;
 pub mod line_selection;
 pub mod list_selection;
 pub mod markdown;
+pub mod markdown_images;
 pub mod mco;
 pub mod menu_bar_status;
 pub mod menu_state;

@@ -209,6 +209,7 @@ impl Dispatcher {
             proxy,
             enterprise_oauth_apps,
             avatars: std::collections::HashMap::new(),
+            markdown_images: std::collections::HashMap::new(),
             api_repositories: std::collections::HashMap::new(),
             api_repositories_loading: std::collections::HashSet::new(),
             pull_requests: std::collections::HashMap::new(),

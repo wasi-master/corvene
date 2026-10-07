@@ -77,7 +77,7 @@ impl ReleaseView {
         } else {
             crate::markdown::markdown(
                 format!("release-body-{release}"),
-                &corvene_core::markdown::parse(&row.body),
+                &crate::markdown::parsed(&row.body),
                 Some(&row.html_url),
                 cx,
             )

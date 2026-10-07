@@ -1615,6 +1615,7 @@ dependencies = [
  "corvene-test-support",
  "dunce",
  "gpui-kit",
+ "imagesize 0.14.0",
  "notify",
  "pulldown-cmark",
  "regex",

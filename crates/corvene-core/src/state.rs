@@ -1926,6 +1926,8 @@ pub struct AppState {
     pub enterprise_oauth_apps: HashMap<String, String>,
     /// Avatar cache (`crate::avatars`).
     pub avatars: crate::avatars::Avatars,
+    /// Images in Markdown by URL (`crate::markdown_images`).
+    pub markdown_images: crate::markdown_images::MarkdownImages,
     /// Clone dialog: `GET /user/repos` per account (`ApiRepositoriesStore`),
     /// keyed by `Account::key` (`endpoint|login`).
     pub api_repositories: HashMap<String, Vec<corvene_models::GitHubRepository>>,

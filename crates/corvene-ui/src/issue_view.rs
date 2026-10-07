@@ -71,7 +71,7 @@ impl IssueView {
         } else {
             crate::markdown::markdown(
                 format!("issue-body-{number}"),
-                &corvene_core::markdown::parse(&row.body),
+                &crate::markdown::parsed(&row.body),
                 Some(&row.html_url),
                 cx,
             )

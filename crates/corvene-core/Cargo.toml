@@ -27,6 +27,7 @@ dunce = "1"
 regex.workspace = true
 similar.workspace = true
 pulldown-cmark.workspace = true
+imagesize = "0.14"
 async-channel = "2"
 yaml-rust = "0.4"
 

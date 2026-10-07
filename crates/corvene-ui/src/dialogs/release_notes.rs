@@ -124,7 +124,7 @@ impl Render for ReleaseNotesDialog {
         let pretext = r.pretext.first().map(|p| {
             crate::markdown::markdown(
                 "release-notes-pretext",
-                &corvene_core::markdown::parse(&p.message),
+                &crate::markdown::parsed(&p.message),
                 None,
                 cx,
             )
