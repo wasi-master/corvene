@@ -389,7 +389,7 @@ fn default_file_list_width() -> f32 {
 }
 
 fn default_file_icon_theme() -> String {
-    crate::file_icons::BUILTIN.to_string()
+    crate::file_icons::NONE.to_string()
 }
 
 fn default_tab_size() -> u32 {
