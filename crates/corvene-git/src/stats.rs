@@ -279,6 +279,41 @@ impl StatsBuilder {
     }
 }
 
+/// How many commits [`repository_stats`] will read for the same scope and
+/// `since` (`rev-list --count`, fast next to `log --numstat`): the total its
+/// progress counts towards. 0 for an unborn branch or unknown revision.
+pub fn stats_commit_count(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    scope: &StatsScope,
+    since: Option<i64>,
+    cancel: &CancelToken,
+) -> Result<u64> {
+    let mut args: Vec<String> = vec!["rev-list".into(), "--count".into(), "--no-merges".into()];
+    if let Some(since) = since {
+        args.push(format!("--since=@{since}"));
+    }
+    match scope {
+        StatsScope::Head => args.push("HEAD".into()),
+        StatsScope::AllBranches => {
+            args.push("--branches".into());
+            args.push("--remotes".into());
+        }
+        StatsScope::Ref(name) => args.push(name.clone()),
+    }
+    args.push("--".into());
+    let out = GitCommand::new(git)
+        .args(args)
+        .current_dir(workdir)
+        .cancel_token(cancel.clone())
+        .allow_exit_code(128)
+        .run()?;
+    if !out.status.success() {
+        return Ok(0);
+    }
+    Ok(out.stdout_string()?.trim().parse().unwrap_or(0))
+}
+
 /// Reads the statistics of `scope` for the commits made since `since`
 /// (seconds since the epoch; `None`: all of them). `progress` hears the
 /// number of commits read so far, every few hundred commits. `cancel`

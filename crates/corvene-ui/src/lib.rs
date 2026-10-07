@@ -58,6 +58,7 @@ pub mod no_repositories;
 pub mod path_label;
 pub mod path_text;
 pub mod popover;
+pub mod progress_bar;
 pub mod pull_request_list;
 pub mod pull_request_overview;
 pub mod pull_request_review_list;

@@ -101,6 +101,8 @@ pub struct InsightsState {
     pub loading: bool,
     /// Commits read so far while loading.
     pub progress: u64,
+    /// How many commits the load reads, once counted.
+    pub progress_total: Option<u64>,
     pub stats: Option<Arc<RepoStats>>,
     /// What [`Self::stats`] was read for.
     pub key: Option<InsightsKey>,
@@ -125,6 +127,7 @@ impl InsightsState {
             range,
             loading: false,
             progress: 0,
+            progress_total: None,
             stats: None,
             key: None,
             error: None,
@@ -173,6 +176,7 @@ fn scope_tips(workdir: &std::path::Path, scope: &StatsScope) -> Result<String, S
 static NEXT_LOAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 enum InsightsMessage {
+    Total(u64),
     Progress(u64),
     Done(Result<RepoStats, String>, Duration),
 }
@@ -240,6 +244,7 @@ impl Dispatcher {
             insights.load = load;
             insights.loading = true;
             insights.progress = 0;
+            insights.progress_total = None;
             insights.error = None;
             insights.stopped = false;
             cx.notify();
@@ -307,6 +312,11 @@ impl Dispatcher {
         let (tx, rx) = async_channel::unbounded::<InsightsMessage>();
         let task = cx.background_executor().spawn(async move {
             let started = Instant::now();
+            if let Ok(total) =
+                corvene_git::stats_commit_count(git.clone(), &workdir, &scope, since, &cancel)
+            {
+                let _ = tx.send_blocking(InsightsMessage::Total(total));
+            }
             let result = corvene_git::repository_stats(
                 git,
                 &workdir,
@@ -326,12 +336,16 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(first) = rx.recv().await {
                 // progress that queued up while the main thread was busy
-                // collapses into the newest
+                // collapses into the newest (the total is applied on the way)
                 let mut last = first;
                 while let Ok(more) = rx.try_recv() {
+                    if let InsightsMessage::Total(total) = last {
+                        Self::set_insights_total(id, load, total, cx);
+                    }
                     last = more;
                 }
                 match last {
+                    InsightsMessage::Total(total) => Self::set_insights_total(id, load, total, cx),
                     InsightsMessage::Progress(read) => cx.update(|cx| {
                         Self::state(cx).update(cx, |s, cx| {
                             if let Some(i) = s.repo_state_mut(id).insights.as_mut()
@@ -361,6 +375,19 @@ impl Dispatcher {
             task.await;
         })
         .detach();
+    }
+
+    fn set_insights_total(id: u64, load: u64, total: u64, cx: &mut AsyncCtx) {
+        cx.update(|cx| {
+            Self::state(cx).update(cx, |s, cx| {
+                if let Some(i) = s.repo_state_mut(id).insights.as_mut()
+                    && i.load == load
+                {
+                    i.progress_total = Some(total);
+                    cx.notify();
+                }
+            })
+        })
     }
 
     fn finish_insights(

@@ -112,9 +112,13 @@ impl BlameView {
             (Some(rev), None) => format!("at {rev}"),
         };
         let progress = blame.loading.then(|| {
-            match (blame.result.attributed() * 100).checked_div(blame.result.lines.len()) {
-                Some(percent) => format!("Blaming… {percent}%"),
-                None => "Blaming…".to_string(),
+            let (attributed, total) = (blame.result.attributed(), blame.result.lines.len());
+            match (attributed * 100).checked_div(total) {
+                Some(percent) => (
+                    format!("Blaming… {percent}%"),
+                    Some(attributed as f32 / total as f32),
+                ),
+                None => ("Blaming…".to_string(), None),
             }
         });
         let options = self
@@ -178,12 +182,24 @@ impl BlameView {
                     .child(revision),
             )
             .child(div().flex_1())
-            .children(progress.map(|p| {
+            .children(progress.map(|(text, fraction)| {
                 div()
                     .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
                     .text_size(FONT_SIZE_SM())
                     .text_color(t.text_secondary)
-                    .child(p)
+                    .children(fraction.map(|f| {
+                        crate::progress_bar::progress_bar(
+                            format!("blame-{id}"),
+                            f,
+                            t.link,
+                            zpx(80.),
+                        )
+                    }))
+                    .child(text)
             }))
             .children(options.map(|options| {
                 button(div().id("blame-options"))

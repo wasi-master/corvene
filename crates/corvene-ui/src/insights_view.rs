@@ -188,14 +188,19 @@ impl InsightsView {
     /// numbers being out of date.
     fn status(&self, id: u64, insights: &InsightsState, cx: &Context<Self>) -> Option<AnyElement> {
         let t = cx.ghd();
+        let total = insights.progress_total.filter(|_| insights.loading);
         let text: String = if insights.loading {
-            if insights.progress == 0 {
-                "Reading the history…".into()
-            } else {
-                format!(
+            match total {
+                Some(total) if total > 0 => format!(
+                    "Reading the history… {} of {}",
+                    crate::format::format_count(insights.progress.min(total)),
+                    plural(total, "commit", "commits")
+                ),
+                _ if insights.progress == 0 => "Reading the history…".into(),
+                _ => format!(
                     "Reading the history… {} so far",
                     plural(insights.progress, "commit", "commits")
-                )
+                ),
             }
         } else if let Some(error) = &insights.error {
             format!("Could not read the history: {error}")
@@ -225,7 +230,16 @@ impl InsightsView {
                 .when(insights.loading, |d| {
                     d.child(crate::icons::loading("insights-loading", t.text_secondary))
                 })
-                .child(div().flex_1().min_w_0().truncate().child(text))
+                .child(div().min_w_0().truncate().child(text))
+                .children(total.filter(|&n| n > 0).map(|total| {
+                    crate::progress_bar::progress_bar(
+                        format!("insights-{id}"),
+                        insights.progress as f32 / total as f32,
+                        t.link,
+                        zpx(120.),
+                    )
+                }))
+                .child(div().flex_1())
                 .when(refresh, |d| {
                     let link = t.link;
                     d.child(
