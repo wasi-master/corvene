@@ -47,6 +47,14 @@ request, a mention of the account and one of its team, a merge the account did
 itself (no notification) and an approval in the fixture repository. `pr_events.refuse = True` answers 403
 on `/notifications`, so Corvene falls back to the search.
 
+Issue detail (`345-issues`): #42's description is GitHub-flavoured
+Markdown with a table, task list, alert, `<details>`, inline HTML and an
+image the stub serves itself (`/assets/screenshot.png`; `{STUB_BASE}` in a
+body is the stub's address). The issues carry reactions; #42 has two
+comments and #41 thirty-five (pages of `per_page`, a `Link` to the next).
+Commenting, closing / reopening (`state_reason`), setting labels and
+assignees and locking change the stub's issues, so a reload shows them.
+
 Repository rules (`1225-branch-rules-link`): creating a `release/*` branch
 is restricted by a rule nobody can bypass (ruleset 41); a `hotfix/*` name
 must end in a number by a ruleset the user always bypasses (42).
@@ -83,6 +91,51 @@ LABELS = [
 ASSIGNEES = [_user("octocat"), _user("mona"), _user("hubot")]
 
 
+def _reactions(**counts: int) -> dict:
+    keys = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"]
+    named = {"+1": counts.get("plus1", 0), "-1": counts.get("minus1", 0)}
+    out = {k: named.get(k, counts.get(k, 0)) for k in keys}
+    out["total_count"] = sum(out.values())
+    return out
+
+
+ISSUE_42_BODY = """Corvene crashes right after launch when the repository list is empty.
+
+### Steps
+
+1. Remove every repository
+2. Quit and open the app again
+3. Watch it ~~start~~ crash
+
+- [x] Reproduced on macOS 15
+- [ ] Reproduced on Linux
+
+| Version | OS | Result |
+|:--|:-:|--:|
+| 0.1.0 | macOS 15.1 | **crash** |
+| 0.0.9 | macOS 14.6 | works |
+| 0.0.8 | Ubuntu 24.04 | works |
+
+> [!NOTE]
+> Only on a fresh install, see `~/Library/Application Support/Corvene`.
+
+<details>
+<summary>Crash log</summary>
+
+```
+thread 'main' panicked at crates/corvene/src/main.rs:42:5:
+index out of bounds: the len is 0 but the index is 0
+```
+
+</details>
+
+<p align="center">
+  <img src="{STUB_BASE}/assets/screenshot.png" alt="The crash dialog" width="320">
+</p>
+
+Press <kbd>Cmd</kbd>+<kbd>Q</kbd> to quit.<br>See #41 and the [docs](https://docs.github.com).<!-- triage: p1 -->"""
+
+
 def _issue(number: int, title: str, state: str, created: str, labels: list[str], assignees: list[str],
            comments: int = 0, body: str | None = None) -> dict:
     by_name = {l["name"]: l for l in LABELS}
@@ -94,12 +147,66 @@ def _issue(number: int, title: str, state: str, created: str, labels: list[str],
         "created_at": created, "updated_at": created, "closed_at": created if state == "closed" else None,
         "user": _user("octocat"), "labels": [by_name[l] for l in labels], "assignees": [_user(a) for a in assignees],
         "comments": comments,
+        "reactions": _reactions(plus1=3, eyes=1) if number == 42 else _reactions(),
+        "locked": False, "active_lock_reason": None,
     }
 
 
+def _comment(cid: int, number: int, login: str, created: str, body: str, **reactions: int) -> dict:
+    return {"id": cid, "node_id": f"IC_stub{cid}", "body": body, "user": _user(login),
+            "html_url": f"http://127.0.0.1/{OWNER}/{NAME}/issues/{number}#issuecomment-{cid}",
+            "created_at": created, "updated_at": created, "author_association": "MEMBER",
+            "reactions": _reactions(**reactions)}
+
+
+def _comments() -> dict[int, list[dict]]:
+    """Each issue's comments, oldest first."""
+    return {
+        42: [
+            _comment(4201, 42, "mona", "2024-03-02T09:00:00Z",
+                     "Same here on **0.1.0**. The log ends with:\n\n```\nindex out of bounds\n```", plus1=2),
+            _comment(4202, 42, "hubot", "2024-03-03T12:30:00Z",
+                     "> Same here on 0.1.0\n\nFixed on `main`, see the [release notes](https://docs.github.com).",
+                     heart=1, rocket=2),
+        ],
+        41: [_comment(4100 + n, 41, "mona" if n % 2 else "hubot", f"2024-02-{21 + n // 12:02}T{n % 12 + 8:02}:00:00Z",
+                      f"Comment number {n + 1}.") for n in range(35)],
+        37: [_comment(3700 + n, 37, "octocat", "2024-01-06T10:00:00Z", f"Fixed in v0.0.{n + 7}.")
+             for n in range(3)],
+    }
+
+
+def _png(width: int, height: int) -> bytes:
+    """A window-ish picture: a title bar and a red alert on a grey page."""
+    import struct
+    import zlib
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            if y < 28:
+                px = (60, 64, 72)
+            elif abs(x - width // 2) < 90 and abs(y - height // 2 - 10) < 50:
+                px = (207, 34, 46) if abs(y - height // 2 + 30) < 10 else (246, 248, 250)
+            else:
+                px = (36 + x * 40 // width, 41 + y * 40 // height, 54)
+            row.extend(px)
+        rows.append(bytes(row))
+    raw = zlib.compress(b"".join(rows))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", raw) + chunk(b"IEND", b"")
+
+
+SCREENSHOT_PNG = _png(640, 360)
+
+
 OPEN_ISSUES = [
-    _issue(42, "Crash on launch with an empty repository list", "open", "2024-03-01T10:00:00Z", ["bug"], ["octocat"], 2),
-    _issue(41, "Dark mode for the tutorial panel", "open", "2024-02-20T10:00:00Z", ["enhancement", "good first issue"], [], 1),
+    _issue(42, "Crash on launch with an empty repository list", "open", "2024-03-01T10:00:00Z", ["bug"], ["octocat"], 2,
+           ISSUE_42_BODY),
+    _issue(41, "Dark mode for the tutorial panel", "open", "2024-02-20T10:00:00Z", ["enhancement", "good first issue"], [], 35),
     _issue(38, "Document the release process", "open", "2024-02-02T10:00:00Z", ["documentation"], ["mona"], 0),
 ]
 CLOSED_ISSUES = [
@@ -484,7 +591,7 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, status: int, body, headers: dict | None = None) -> None:
-        data = json.dumps(body).encode()
+        data = json.dumps(body).encode().replace(b"{STUB_BASE}", f"http://127.0.0.1:{self.server.port}".encode())
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -560,8 +667,28 @@ class _Handler(BaseHTTPRequestHandler):
                                                     "pull": True}})
         if path == f"{repo}/issues":
             state = params.get("state", "open")
-            issues = {"open": OPEN_ISSUES, "closed": CLOSED_ISSUES, "all": OPEN_ISSUES + CLOSED_ISSUES}[state]
-            return self._send(200, issues + self.server.created_issues if state != "closed" else issues)
+            issues = [i for i in self.server.created_issues + self.server.issues if state in ("all", i["state"])]
+            return self._send(200, issues)
+        m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)", path)
+        if m and (issue := self.server.issue(int(m[1]))):
+            return self._send(200, issue)
+        m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)/comments", path)
+        if m and self.server.issue(int(m[1])):
+            comments = self.server.comments.get(int(m[1]), [])
+            per_page = int(params.get("per_page", "30"))
+            page = int(params.get("page", "1"))
+            headers = {}
+            if page * per_page < len(comments):
+                headers["Link"] = (f'<http://127.0.0.1:{self.server.port}{path}?per_page={per_page}&page={page + 1}>; '
+                                   'rel="next"')
+            return self._send(200, comments[(page - 1) * per_page:page * per_page], headers)
+        if path == "/assets/screenshot.png":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(SCREENSHOT_PNG)))
+            self.end_headers()
+            self.wfile.write(SCREENSHOT_PNG)
+            return None
         if path == f"{repo}/labels":
             return self._send(200, LABELS)
         # repository rules (`1225-branch-rules-link`): creating `release/*`
@@ -693,6 +820,14 @@ class _Handler(BaseHTTPRequestHandler):
                            body.get("assignees", []), 0, body.get("body", ""))
             self.server.created_issues.insert(0, issue)
             return self._send(201, issue)
+        m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)/comments", path)
+        if m and (issue := self.server.issue(int(m[1]))):
+            comments = self.server.comments.setdefault(issue["number"], [])
+            cid = 9000 + len(self.server.posts)
+            comment = _comment(cid, issue["number"], self._login(), "2024-05-02T10:00:00Z", body.get("body", ""))
+            comments.append(comment)
+            issue["comments"] = len(comments)
+            return self._send(201, comment)
         if path == f"{repo}/releases/generate-notes":
             if os.environ.get("GITHUB_STUB_NO_NOTES") == "1":
                 return self._send(404, {"message": "Not Found"})
@@ -760,6 +895,60 @@ def _delete(self):  # noqa: N802
 
 
 _Handler.do_DELETE = _delete
+
+
+def _patch(self):  # noqa: N802
+    """`345-issues`: state, labels and assignees of an issue."""
+    path = self.path.partition("?")[0]
+    repo = f"/api/v3/repos/{OWNER}/{NAME}"
+    body = self._body()
+    self.server.posts.append((f"PATCH {path}", body))
+    self.server.requests.append((self._login(), "PATCH", path))
+    m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)", path)
+    issue = self.server.issue(int(m[1])) if m else None
+    if issue is None:
+        return self._send(404, {"message": f"stub: no PATCH {path}"})
+    if "state" in body:
+        issue["state"] = body["state"]
+        issue["closed_at"] = "2024-05-02T10:00:00Z" if body["state"] == "closed" else None
+        issue["state_reason"] = body.get("state_reason") or ("completed" if body["state"] == "closed" else "reopened")
+    if "labels" in body:
+        by_name = {l["name"]: l for l in LABELS}
+        issue["labels"] = [by_name[n] for n in body["labels"] if n in by_name]
+    if "assignees" in body:
+        issue["assignees"] = [_user(a) for a in body["assignees"]]
+    issue["updated_at"] = "2024-05-02T10:00:00Z"
+    return self._send(200, issue)
+
+
+def _lock(self, locked: bool):
+    path = self.path.partition("?")[0]
+    repo = f"/api/v3/repos/{OWNER}/{NAME}"
+    self.server.posts.append((f"{'PUT' if locked else 'DELETE'} {path}", {}))
+    m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)/lock", path)
+    issue = self.server.issue(int(m[1])) if m else None
+    if issue is None:
+        return False
+    issue["locked"] = locked
+    issue["active_lock_reason"] = None
+    self._send_empty(204)
+    return True
+
+
+def _put(self):  # noqa: N802
+    self._body()
+    if not _lock(self, True):
+        self._send(404, {"message": f"stub: no PUT {self.path}"})
+
+
+def _delete_or_unlock(self):  # noqa: N802
+    if not _lock(self, False):
+        _delete(self)
+
+
+_Handler.do_PATCH = _patch
+_Handler.do_PUT = _put
+_Handler.do_DELETE = _delete_or_unlock
 
 
 def _unquote(text: str) -> str:
@@ -933,6 +1122,9 @@ class Stub(HTTPServer):
         # `1223-checkout-from-fork`: where alice's and bob's forks are
         self.forks_dir = forks_dir
         self.created_issues: list[dict] = []
+        # `345-issues`: the fixture issues and their comments, as writes leave them
+        self.issues: list[dict] = json.loads(json.dumps(OPEN_ISSUES + CLOSED_ISSUES))
+        self.comments: dict[int, list[dict]] = _comments()
         self.created_releases: list[dict] = []
         self.posts: list[tuple[str, dict]] = []
         # `527-multiple-accounts`: (login, method, path) of every request,
@@ -950,6 +1142,9 @@ class Stub(HTTPServer):
         self.scopes: list[str] = os.environ.get(
             "GITHUB_STUB_SCOPES", "repo workflow read:user user:email").split()
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+
+    def issue(self, number: int) -> dict | None:
+        return next((i for i in self.created_issues + self.issues if i["number"] == number), None)
 
     def run(self, rid: int) -> dict | None:
         return next((r for r in self.runs if r["id"] == rid), None)

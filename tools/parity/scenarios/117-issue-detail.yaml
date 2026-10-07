@@ -1,0 +1,87 @@
+# Corvene's issue detail (flag 345-issues, off in the GitHub Desktop preset
+# the harness runs with; GHD has no issues view, so the snaps are recorded,
+# not compared). The stub GitHub API (`github_stub.py`) gives #42 a
+# description in GitHub-flavoured Markdown (table, task list, alert,
+# `<details>`, centred image, inline HTML) and two comments.
+name: issue-detail
+description: The selected issue's Markdown description, comments and composer (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 345-issues=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowIssues"}
+    wait: 2000
+  # #42, the first row
+  - ghd: {skip: true}
+    corvene: {click: [103, 257]}
+    wait: 2500
+  - snap: {name: description, corvene_only: true, note: "GHD has no issue view (deviations.md, 345-issues)"}
+  # the `<details>` summary opens the crash log
+  - ghd: {skip: true}
+    corvene: {click: [312, 673]}
+    wait: 600
+  - snap: {name: details-open, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 400}}
+    wait: 800
+  - snap: {name: description-scrolled, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 4000}}
+    wait: 800
+  - snap: {name: comments, corvene_only: true}
+  # a comment, previewed, then "Close with comment" as completed
+  - ghd: {skip: true}
+    corvene: {click: [616, 726]}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {type: "Thanks, **closing** this."}
+    wait: 400
+  - snap: {name: comment-typed, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [360, 669]}
+    wait: 600
+  - snap: {name: comment-preview, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [295, 669]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {click: [884, 793]}
+    wait: 600
+  - corvene_menu: issue-close
+  - corvene_menu_pick: Close as Completed
+    wait: 2500
+  - snap: {name: closed-with-comment, corvene_only: true}
+  # the labels picker adds `documentation`
+  - ghd: {skip: true}
+    corvene: {click: [291, 158]}
+    wait: 600
+  - corvene_menu: issue-labels
+  - corvene_menu_pick: documentation
+    wait: 2000
+  # "…" › Lock Conversation
+  - ghd: {skip: true}
+    corvene: {click: [1346, 105]}
+    wait: 600
+  - corvene_menu: issue-more
+  - corvene_menu_pick: Lock Conversation
+    wait: 2000
+  - snap: {name: labelled-and-locked, corvene_only: true}
+  # #41 has 35 comments: the first 30, then "Load more comments"
+  - ghd: {skip: true}
+    corvene: {click: [103, 257]}
+    wait: 2500
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 6000}}
+    wait: 800
+  - snap: {name: load-more, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [640, 595]}
+    wait: 2000
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 6000}}
+    wait: 800
+  - snap: {name: loaded-all, corvene_only: true}
