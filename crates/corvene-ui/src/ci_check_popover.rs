@@ -842,23 +842,19 @@ fn donut(checks: &[RefCheck]) -> AnyElement {
             for (color, n) in &segments {
                 let sweep = n / total * std::f32::consts::TAU;
                 let steps = ((sweep / 0.15).ceil() as usize).max(2);
-                let mut path = Path::new(point(
-                    center.x + radius * start.cos(),
-                    center.y + radius * start.sin(),
-                ));
-                for i in 1..=steps {
-                    let a = start + sweep * i as f32 / steps as f32;
-                    path.line_to(point(
-                        center.x + radius * a.cos(),
-                        center.y + radius * a.sin(),
-                    ));
-                }
-                for i in (0..=steps).rev() {
-                    let a = start + sweep * i as f32 / steps as f32;
-                    path.line_to(point(
-                        center.x + inner * a.cos(),
-                        center.y + inner * a.sin(),
-                    ));
+                // two triangles per step: GPUI fills a path as a fan from its
+                // start point and adds overlapping triangles up, so one ring
+                // polygon filled the hole and smeared the small segments
+                let at = |r: Pixels, a: f32| point(center.x + r * a.cos(), center.y + r * a.sin());
+                let mut path = Path::new(at(radius, start));
+                let fill = (point(0., 1.), point(0., 1.), point(0., 1.));
+                for i in 0..steps {
+                    let a0 = start + sweep * i as f32 / steps as f32;
+                    let a1 = start + sweep * (i + 1) as f32 / steps as f32;
+                    let (o0, o1, i0, i1) =
+                        (at(radius, a0), at(radius, a1), at(inner, a0), at(inner, a1));
+                    path.push_triangle((o0, o1, i1), fill);
+                    path.push_triangle((o0, i1, i0), fill);
                 }
                 window.paint_path(path, *color);
                 start += sweep;
