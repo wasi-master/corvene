@@ -707,7 +707,9 @@ impl Renderer<'_> {
                 .flex_none()
                 .max_w_full()
                 .cursor_pointer()
-                .on_click(move |_, _, cx| Dispatcher::open_url(&link, cx))
+                .on_click(move |_, window, cx| {
+                    crate::link_menu::open_link(link.to_string(), window, cx)
+                })
                 .child(element)
                 .into_any_element(),
             None => element,
