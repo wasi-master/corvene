@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon/Corvene-1024.png" width="128" alt="Corvene app icon"></p>
+<p align="center"><img src="assets/icon/Corvene-1024.png" width="128" alt="Corvene app icon"><br><a target="_blank" href="https://wasi-master.github.io/corvene/">Corvene Website</a></p>
 
 # Corvene
 
