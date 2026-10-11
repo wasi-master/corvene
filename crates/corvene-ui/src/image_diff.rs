@@ -210,8 +210,16 @@ impl Side {
     /// measured here and rendered later at the size it shows at; the footer
     /// shows the drawing's own size.
     fn from_svg(blob: &ImageBlob) -> Self {
-        // fonts do not change the size: the quick parse skips them
-        let parsed = resvg::usvg::Tree::from_data(&blob.bytes, &resvg::usvg::Options::default());
+        // fonts do not change the size: the quick parse skips them (no
+        // font lookups, so no "No match for font-family" warnings)
+        let options = resvg::usvg::Options {
+            font_resolver: resvg::usvg::FontResolver {
+                select_font: Box::new(|_, _| None),
+                select_fallback: Box::new(|_, _, _| None),
+            },
+            ..Default::default()
+        };
+        let parsed = resvg::usvg::Tree::from_data(&blob.bytes, &options);
         let (size, natural, error) = match parsed {
             Ok(tree) => {
                 let size = tree.size();
