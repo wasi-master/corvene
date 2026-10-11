@@ -1885,6 +1885,24 @@ pub struct ImageBlob {
     pub bytes: Vec<u8>,
     /// `image/png`, `image/jpg`, …
     pub media_type: String,
+    /// Corvene `1326-more-image-formats`: set when `bytes` is a PNG made
+    /// from a file GPUI cannot draw (HEIC, PSD, camera RAW, …), possibly
+    /// smaller than the file's own size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<ImageOriginal>,
+}
+
+/// Corvene `1326-more-image-formats`: the file an [`ImageBlob`]'s PNG was
+/// decoded from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageOriginal {
+    /// The file's media type ([`more_image_media_type`]).
+    pub media_type: String,
+    /// The file's size in bytes.
+    pub bytes: usize,
+    /// The image's own size in pixels.
+    pub width: u32,
+    pub height: u32,
 }
 
 /// GHD `ISubmoduleDiff`.
@@ -1926,6 +1944,54 @@ pub fn image_media_type(path: &str) -> Option<&'static str> {
         "tga" => "image/x-tga",
         _ => return None,
     })
+}
+
+/// Corvene `1326-more-image-formats`: the media type of an image file GHD
+/// shows as "This binary file has changed." that Corvene decodes to a PNG
+/// for the image diff (`corvene_platform::image_decode`; whether a format
+/// decodes depends on the platform). `.svgz` is a gzipped SVG drawing.
+pub fn more_image_media_type(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "jpe" | "jfif" => "image/jpg",
+        "apng" => "image/png",
+        "tif" | "tiff" => "image/tiff",
+        "pbm" | "pgm" | "ppm" | "pnm" | "pam" => "image/x-portable-anymap",
+        "qoi" => "image/qoi",
+        "hdr" => "image/vnd.radiance",
+        "exr" => "image/x-exr",
+        "dds" => "image/vnd-ms.dds",
+        "ff" => "image/x-farbfeld",
+        "psd" | "psb" => "image/vnd.adobe.photoshop",
+        "icns" => "image/x-icns",
+        "heic" | "hif" => "image/heic",
+        "heif" => "image/heif",
+        "jxl" => "image/jxl",
+        "jp2" | "j2k" | "j2c" | "jpf" | "jpx" | "jpm" => "image/jp2",
+        "dng" | "cr2" | "cr3" | "crw" | "nef" | "nrw" | "arw" | "srf" | "sr2" | "orf" | "rw2"
+        | "raf" | "pef" | "srw" | "x3f" | "erf" | "3fr" | "kdc" | "dcr" | "mrw" | "rwl" | "iiq"
+        | "mos" => "image/x-raw",
+        "svgz" => "image/svg+xml",
+        _ => return None,
+    })
+}
+
+/// Corvene `1326-more-image-formats`: whether GPUI draws images of
+/// `media_type` itself; others are decoded to a PNG first.
+pub fn gpui_draws_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "image/png"
+            | "image/jpg"
+            | "image/jpeg"
+            | "image/gif"
+            | "image/x-icon"
+            | "image/webp"
+            | "image/bmp"
+            | "image/svg+xml"
+            | "application/pdf"
+            | "image/x-tga"
+    )
 }
 
 /// GHD `LineEndingsChange`: git's "CRLF will be replaced by LF" warning.

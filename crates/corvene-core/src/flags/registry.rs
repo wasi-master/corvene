@@ -5863,8 +5863,9 @@ registry! {
         title: "SVG files as images",
         summary: "The diff header of an .svg file has a Text / Image switch: Image shows the \
                   old and new drawing with the image diff modes (2-up, Swipe, Onion Skin, \
-                  Difference), Text the usual line diff. It stays per file until switched \
-                  back; line selection keeps working on the text.",
+                  Difference), drawn sharp at the size it shows at, with its text in the \
+                  system fonts; Text the usual line diff. The choice is kept for every SVG \
+                  file (Image at first); line selection keeps working on the text.",
         ghd_behaviour: "SVG files only show their text diff.",
         nature: Nature::Feature,
         kind: Kind::Bool,
@@ -8691,6 +8692,40 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(5009), Upstream::issue(15875)],
         code: &["crates/corvene-core/src/pdf.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/diff.rs"],
+    },
+
+    /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
+    MORE_IMAGE_FORMATS = 1326 "more-image-formats" {
+        title: "More image formats in the image diff",
+        summary: "Changed TIFF, PSD, ICNS, QOI, Netpbm, OpenEXR, Radiance HDR, DDS, farbfeld \
+                  and gzipped SVG (.svgz) files show in the image diff (2-up, Swipe, Onion Skin, \
+                  Difference) on every platform; HEIC/HEIF, AVIF, JPEG XL, JPEG 2000 and \
+                  camera RAW files too where the system decodes them (macOS ImageIO, Windows \
+                  WIC codecs). A file nothing decodes stays binary.",
+        ghd_behaviour: "Only PNG, JPEG, GIF, ICO, WebP, BMP and AVIF files show as images; \
+                        others show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-platform/src/image_decode.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-models/src/lib.rs", "crates/corvene-ui/src/image_diff.rs"],
+    },
+
+    /// Zoom and pan in the image diff.
+    IMAGE_DIFF_ZOOM = 1327 "image-diff-zoom" {
+        title: "Zoom in image diffs",
+        summary: "The image diff has zoom buttons (out, fit, actual pixels, in); pinching, \
+                  ⌘-scrolling or double-clicking zooms at the pointer and dragging or \
+                  scrolling pans. Both sides of 2-up and the overlay modes zoom and pan \
+                  together, and SVG drawings are redrawn sharp at every zoom level.",
+        ghd_behaviour: "Images are always fitted to the diff area.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/image_diff.rs"],
     },
 
 }

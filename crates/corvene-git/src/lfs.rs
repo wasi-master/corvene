@@ -290,6 +290,9 @@ pub fn resolve_lfs_images(
                 let mut blob = blob?;
                 if let Some(pointer) = lfs_pointer(&blob.bytes) {
                     blob.bytes = lfs_object(git.clone(), workdir, &pointer)?;
+                    // `1326-more-image-formats`; a side that does not decode
+                    // shows as one that cannot be drawn
+                    crate::diff::decode_image_blob(&mut blob);
                 }
                 Some(blob)
             };

@@ -597,12 +597,42 @@ def _pdf(repo: Path) -> None:
     p.write_bytes(_pdf_bytes(_PDF_PAGES_EDITED))
 
 
+# `repo-images` (`1326-more-image-formats`, `794-svg-image-diff`,
+# `1327-image-diff-zoom`): a HEIC photo, a TIFF scan and an SVG logo with
+# text, each edited in the working copy. The HEIC and TIFF files are made
+# from PNGs with macOS `sips`.
+_LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">'
+    '<rect x="4" y="4" width="232" height="112" rx="16" fill="{fill}"/>'
+    '<text x="120" y="74" font-family="Helvetica" font-size="40" text-anchor="middle" '
+    'fill="#ffffff">{label}</text></svg>\n'
+)
+
+
+def _sips(png: bytes, fmt: str, out: Path) -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.png"
+        src.write_bytes(png)
+        subprocess.run(["sips", "-s", "format", fmt, str(src), "--out", str(out)],
+                       check=True, capture_output=True)
+
+
+def _images(repo: Path, edited: bool) -> None:
+    art = repo / "art"
+    art.mkdir(exist_ok=True)
+    _sips(_png(320, 200, _marks_picture(edited)), "heic", art / "photo.heic")
+    _sips(_png(300, 200, _marks_picture(not edited)), "tiff", art / "scan.tiff")
+    (art / "logo.svg").write_text(_LOGO_SVG.format(
+        fill="#2da44e" if edited else "#0969da", label="Corvene 2" if edited else "Corvene"))
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
-          diff_marks: bool = False, pdf: bool = False) -> Path:
+          diff_marks: bool = False, pdf: bool = False, *, images: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -752,6 +782,12 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if pdf:
         _pdf(repo)
+        return repo
+    if images:
+        _images(repo, False)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "Add the artwork", date="2026-09-28T10:00:00+00:00")
+        _images(repo, True)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel

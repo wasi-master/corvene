@@ -180,6 +180,10 @@ pub struct Settings {
     /// (off: the pages). The diff header's Pages/Text switch flips it.
     #[serde(default)]
     pub pdf_text_diff: bool,
+    /// Corvene `794-svg-image-diff`: SVG diffs show the text (off: the
+    /// drawings). The diff header's Text/Image switch flips it.
+    #[serde(default)]
+    pub svg_text_diff: bool,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -531,6 +535,7 @@ impl Default for Settings {
             diff_mark_stylistic_changes: true,
             csv_table_diff: true,
             pdf_text_diff: false,
+            svg_text_diff: false,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

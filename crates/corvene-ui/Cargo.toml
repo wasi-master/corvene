@@ -36,3 +36,4 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 corvene-test-support.workspace = true
+flate2 = "1"

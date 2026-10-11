@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use corvene_models::{
     Diff, DiffHunk, DiffLine, DiffLineKind, DiffWarnings, FileStatusKind, GitStatusEntry,
-    ImageBlob, LineEndingsChange, SubmoduleDiff, SubmoduleStatus, WorkingDirectoryFileChange,
-    image_media_type,
+    ImageBlob, ImageOriginal, LineEndingsChange, SubmoduleDiff, SubmoduleStatus,
+    WorkingDirectoryFileChange, gpui_draws_media_type, image_media_type, more_image_media_type,
 };
 
 use crate::detect::GitBinary;
@@ -483,9 +483,63 @@ pub fn image_diff(
 }
 
 /// [`image_media_type`], plus [`PDF_MEDIA_TYPE`] for a PDF file while
-/// `1322-pdf-diff` is on: the binary files shown by the image diff.
+/// `1322-pdf-diff` is on and [`more_image_media_type`] while an image
+/// decoder is set (`1326-more-image-formats`): the binary files shown by
+/// the image diff.
 pub fn binary_media_type(path: &str) -> Option<&'static str> {
-    image_media_type(path).or_else(|| (pdf_diffs() && is_pdf(path)).then_some(PDF_MEDIA_TYPE))
+    image_media_type(path)
+        .or_else(|| image_decoder().and(more_image_media_type(path)))
+        .or_else(|| (pdf_diffs() && is_pdf(path)).then_some(PDF_MEDIA_TYPE))
+}
+
+/// Corvene `1326-more-image-formats`: an image file decoded for display.
+pub struct DecodedImage {
+    /// At most a few thousand pixels on its longer side.
+    pub png: Vec<u8>,
+    /// The image's own size in pixels.
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Corvene `1326-more-image-formats`: decodes a file of the given media
+/// type (`corvene_platform::image_decode`, set by the dispatcher).
+pub type ImageDecoder = fn(&[u8], &str) -> Option<DecodedImage>;
+
+static IMAGE_DECODER: std::sync::RwLock<Option<ImageDecoder>> = std::sync::RwLock::new(None);
+
+/// Show the images GPUI cannot draw by decoding them with `decoder`, or
+/// as binary files with `None` (flag `1326-more-image-formats`).
+pub fn set_image_decoder(decoder: Option<ImageDecoder>) {
+    if let Ok(mut slot) = IMAGE_DECODER.write() {
+        *slot = decoder;
+    }
+}
+
+fn image_decoder() -> Option<ImageDecoder> {
+    IMAGE_DECODER.read().ok().and_then(|slot| *slot)
+}
+
+/// Corvene `1326-more-image-formats`: replaces `blob`'s bytes with a PNG
+/// GPUI draws when its media type is one GPUI cannot draw; false when it
+/// needed decoding and could not be.
+pub(crate) fn decode_image_blob(blob: &mut ImageBlob) -> bool {
+    if blob.original.is_some() || gpui_draws_media_type(&blob.media_type) {
+        return true;
+    }
+    let Some(decoder) = image_decoder() else {
+        return true;
+    };
+    let Some(decoded) = decoder(&blob.bytes, &blob.media_type) else {
+        return false;
+    };
+    let bytes = std::mem::replace(&mut blob.bytes, decoded.png);
+    blob.original = Some(ImageOriginal {
+        media_type: std::mem::replace(&mut blob.media_type, "image/png".to_string()),
+        bytes: bytes.len(),
+        width: decoded.width,
+        height: decoded.height,
+    });
+    true
 }
 
 /// Corvene `1322-pdf-diff`: a PDF file's media type in an image diff. GHD
@@ -543,17 +597,37 @@ pub fn image_diff_as(
     let blob = |bytes: Vec<u8>| ImageBlob {
         bytes,
         media_type: media_type.to_string(),
+        original: None,
     };
-    let current = (kind != FileStatusKind::Deleted)
+    let mut current = (kind != FileStatusKind::Deleted)
         .then(current)
         .flatten()
         .map(blob);
-    let previous = (!kind.is_new_or_untracked())
+    let mut previous = (!kind.is_new_or_untracked())
         .then(previous)
         .flatten()
         .map(blob);
     if current.is_none() && previous.is_none() {
         return Diff::Binary;
+    }
+    // `1326-more-image-formats`: both sides decoded at once; an LFS pointer
+    // is decoded once it is swapped for its object (`lfs::resolve_lfs_images`)
+    if !gpui_draws_media_type(media_type) && image_decoder().is_some() {
+        let decode = |side: &mut Option<ImageBlob>| match side {
+            Some(blob) if crate::lfs::lfs_pointer(&blob.bytes).is_none() => {
+                Some(decode_image_blob(blob))
+            }
+            _ => None,
+        };
+        let (a, b) = std::thread::scope(|scope| {
+            let a = scope.spawn(|| decode(&mut previous));
+            let b = decode(&mut current);
+            (a.join().ok().flatten(), b)
+        });
+        // nothing this platform decodes: GHD's binary file
+        if a != Some(true) && b != Some(true) && (a.is_some() || b.is_some()) {
+            return Diff::Binary;
+        }
     }
     Diff::Image { previous, current }
 }

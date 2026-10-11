@@ -164,6 +164,10 @@ impl Dispatcher {
         corvene_git::utf16::set_decode_utf16(flags.bool(crate::flags::ids::UTF16_DIFFS));
         // `1322-pdf-diff`
         corvene_git::set_pdf_diffs(flags.bool(crate::flags::ids::PDF_DIFF));
+        // `1326-more-image-formats`
+        crate::image_decode::set_more_image_formats(
+            flags.bool(crate::flags::ids::MORE_IMAGE_FORMATS),
+        );
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -2245,36 +2249,35 @@ impl Dispatcher {
     /// `749-binary-diff-as-text`: "Show diff anyway" on a binary file
     /// reloads its diff with `git diff --text`.
     /// `794-svg-image-diff`: whether `path`'s diff shows as images.
-    pub fn svg_shown_as_image(s: &AppState, rs: &RepositoryState, path: &str) -> bool {
+    pub fn svg_shown_as_image(s: &AppState, path: &str) -> bool {
         corvene_git::is_svg(path)
-            && rs.svg_as_image.contains(path)
+            && !s.settings.svg_text_diff
             && s.flags.bool(crate::flags::ids::SVG_IMAGE_DIFF)
     }
 
-    /// `794-svg-image-diff`: show `path` (an SVG file) as images, or as text
-    /// again, in Changes and History.
-    pub fn set_svg_as_image(id: u64, path: String, as_image: bool, cx: &mut dyn Host) {
-        let (working, commit) = Self::state(cx).update(cx, |s, cx| {
-            let rs = s.repo_state_mut(id);
-            let changed = if as_image {
-                rs.svg_as_image.insert(path.clone())
-            } else {
-                rs.svg_as_image.remove(&path)
+    /// `794-svg-image-diff`: show SVG files as images, or as text, in
+    /// Changes and History (the diff header's Text/Image switch).
+    pub fn set_svg_image_diff(as_image: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.svg_text_diff = !as_image);
+        let repos = Self::state(cx).read(cx).visible_repositories();
+        for id in repos {
+            let (working, commit) = {
+                let s = Self::state(cx).read(cx);
+                let Some(rs) = s.repo_states.get(&id) else {
+                    continue;
+                };
+                let svg = |path: &Option<String>| path.as_deref().is_some_and(corvene_git::is_svg);
+                (svg(&rs.selected_file), svg(&rs.commit_selected_file))
             };
-            cx.notify();
-            (
-                changed && rs.selected_file.as_deref() == Some(path.as_str()),
-                changed && rs.commit_selected_file.as_deref() == Some(path.as_str()),
-            )
-        });
-        if working {
-            Self::load_diff(id, cx);
+            if working {
+                Self::load_diff(id, cx);
+            }
+            if commit {
+                Self::load_commit_diff(id, cx);
+            }
+            // `1311-stacked-diff`: the stacks load their files again
+            Self::clear_stacked_diffs(id, cx);
         }
-        if commit {
-            Self::load_commit_diff(id, cx);
-        }
-        // `1311-stacked-diff`: the file's entry in a stack
-        Self::reload_stacked_diff(id, &path, cx);
     }
 
     pub fn show_binary_diff_as_text(id: u64, cx: &mut dyn Host) {
@@ -3407,9 +3410,7 @@ impl Dispatcher {
         // `794-svg-image-diff`: the SVG before and after, as images
         let svg_image = {
             let s = Self::state(cx).read(cx);
-            s.repo_states
-                .get(&id)
-                .is_some_and(|rs| Self::svg_shown_as_image(s, rs, &file.path))
+            Self::svg_shown_as_image(s, &file.path)
         };
         if svg_image {
             let key = (ordered.clone(), file.path.clone());
@@ -8304,7 +8305,7 @@ impl WorkingDiffOptions {
             symlinks_as_links: s.flags.bool(crate::flags::ids::SYMLINK_CONTENTS),
             as_text: rs.diff_as_text.as_deref() == Some(path)
                 && s.flags.bool(crate::flags::ids::BINARY_DIFF_AS_TEXT),
-            svg_as_image: Dispatcher::svg_shown_as_image(s, rs, path),
+            svg_as_image: Dispatcher::svg_shown_as_image(s, path),
             lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
             lfs_text: s.flags.bool(crate::flags::ids::LFS_TEXT_DIFF),
         }

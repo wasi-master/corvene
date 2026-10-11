@@ -191,6 +191,7 @@ impl PdfDiff {
                     side.as_ref().map(|(image, _)| ImageBlob {
                         bytes: image.png.clone(),
                         media_type: "image/png".to_string(),
+                        original: None,
                     })
                 };
                 let (old, new) = (blob(&previous), blob(&current));

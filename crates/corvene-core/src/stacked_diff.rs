@@ -247,7 +247,7 @@ impl Dispatcher {
                 file,
                 s.settings.hide_whitespace_in_history_diff,
                 Self::remerge_applies(s, rs),
-                Self::svg_shown_as_image(s, rs, &path),
+                Self::svg_shown_as_image(s, &path),
                 CommitDiffOptions::of(s),
             )
         };

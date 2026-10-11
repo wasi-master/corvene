@@ -307,20 +307,18 @@ fn blame_button(
     )
 }
 
-/// `794-svg-image-diff`: the Text / Image switch of an SVG file's header.
+/// `794-svg-image-diff`: the Text / Image switch of an SVG file's header
+/// (one setting for every SVG file).
 fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if !corvene_git::is_svg(path) || !s.flags.bool(corvene_core::flags::ids::SVG_IMAGE_DIFF) {
         return None;
     }
-    let repo = s.selected?;
-    let as_image = s.repo_states.get(&repo)?.svg_as_image.contains(path);
-    let path = path.to_string();
     Some(view_switch(
         ["svg-view-switch", "svg-view-text", "svg-view-image"],
         ["Text", "Image"],
-        as_image,
-        move |image, cx| Dispatcher::set_svg_as_image(repo, path.clone(), image, cx),
+        !s.settings.svg_text_diff,
+        |image, cx| Dispatcher::set_svg_image_diff(image, cx),
         cx,
     ))
 }

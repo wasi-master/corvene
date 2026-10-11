@@ -24,6 +24,7 @@ pub mod editors;
 pub mod file_hash;
 pub mod file_url;
 pub mod ghd_import;
+pub mod image_decode;
 pub mod keychain;
 pub mod locale;
 pub mod notifications;

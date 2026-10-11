@@ -56,6 +56,7 @@ pub mod history_filter;
 pub mod hooks;
 pub mod host;
 pub mod hosts;
+pub mod image_decode;
 pub mod insights;
 pub mod integrations;
 pub mod issues;

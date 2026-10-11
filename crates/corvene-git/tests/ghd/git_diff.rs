@@ -170,6 +170,7 @@ fn get_blob_image(repo: &TestRepo, path: &str, commitish: &str) -> ImageBlob {
     ImageBlob {
         bytes,
         media_type: image_media_type(path).unwrap_or_default().to_string(),
+        original: None,
     }
 }
 

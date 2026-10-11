@@ -1302,8 +1302,6 @@ pub struct RepositoryState {
     /// `749-binary-diff-as-text`: the path whose diff was asked for with
     /// `--text` ("Show diff anyway" on a binary file).
     pub diff_as_text: Option<String>,
-    /// `794-svg-image-diff`: the SVG files shown as images instead of text.
-    pub svg_as_image: std::collections::HashSet<String>,
     /// Bumped whenever `diff` is replaced, so views can cache derived rows.
     pub diff_generation: u64,
     /// The new side of the selected file as lines, for hunk expansion

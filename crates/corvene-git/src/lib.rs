@@ -103,12 +103,12 @@ pub use detect::{
     prefetch_git, still_usable,
 };
 pub use diff::{
-    COMMIT_LINES_MAX_FILES, CommitLines, PDF_MAX_BYTES, PDF_MEDIA_TYPE, SVG_MEDIA_TYPE,
-    binary_media_type, blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff,
-    image_diff_as, is_pdf, is_svg, lines_made_by_commit, open_difftool, parse_line_endings_warning,
-    parse_raw_diff, parse_raw_diff_with_warnings, parse_unified, read_partial_file, set_pdf_diffs,
-    submodule_diff, whitespace_only_paths, working_directory_diff, working_directory_patch,
-    working_file_lines,
+    COMMIT_LINES_MAX_FILES, CommitLines, DecodedImage, ImageDecoder, PDF_MAX_BYTES, PDF_MEDIA_TYPE,
+    SVG_MEDIA_TYPE, binary_media_type, blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars,
+    image_diff, image_diff_as, is_pdf, is_svg, lines_made_by_commit, open_difftool,
+    parse_line_endings_warning, parse_raw_diff, parse_raw_diff_with_warnings, parse_unified,
+    read_partial_file, set_image_decoder, set_pdf_diffs, submodule_diff, whitespace_only_paths,
+    working_directory_diff, working_directory_patch, working_file_lines,
 };
 pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use git_errors::{

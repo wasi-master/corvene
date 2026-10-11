@@ -16,6 +16,21 @@ sha1_smol = "1"
 thiserror.workspace = true
 tracing.workspace = true
 ureq.workspace = true
+# the image diff's other formats (`image_decode`, flag 1326): the PNG it
+# draws, every pure-Rust codec of image's, Photoshop and ICNS
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "tiff",
+    "pnm",
+    "qoi",
+    "hdr",
+    "exr",
+    "dds",
+    "ff",
+    "tga",
+] }
+psd = "=0.3.5"
+icns = "=0.5.0"
 
 # freedesktop.org Trash spec (the crate corvene-git already uses); Android
 # has no Trash
@@ -39,13 +54,16 @@ windows = { version = "0.62", features = [
     "Win32_Globalization",
     "Win32_Networking_WinHttp",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_IO",
     "Win32_System_Pipes",
     "Win32_System_Recovery",
     "Win32_System_Threading",
+    "Win32_System_Variant",
     "Win32_UI_Accessibility",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",

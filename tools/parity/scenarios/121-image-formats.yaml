@@ -1,0 +1,23 @@
+# More image formats, sharp SVG drawings and zoom (1326-more-image-formats,
+# 794-svg-image-diff, 1327-image-diff-zoom): Corvene shows an edited SVG
+# with text as drawings, a HEIC photo and a TIFF scan as images and zooms
+# to actual pixels; GitHub Desktop shows the SVG's text and "This binary
+# file has changed." for the others (deviations.md › Image diffs).
+name: image-formats
+description: An edited SVG, HEIC and TIFF in the image diff, then zoomed to actual pixels (Corvene only)
+setup: repo-images
+corvene_flags: 1326-more-image-formats=on, 794-svg-image-diff=on, 1327-image-diff-zoom=on
+steps:
+  - click: [125, 185]
+    wait: 2000
+  - snap: {name: svg, corvene_only: true, note: "794-svg-image-diff: drawings with their text, Image by default"}
+  - click: [125, 214]
+    wait: 2500
+  - snap: {name: heic, corvene_only: true, note: "1326-more-image-formats: HEIC through ImageIO"}
+  - click: [125, 243]
+    wait: 2000
+  - snap: {name: tiff, corvene_only: true, note: "1326-more-image-formats: TIFF"}
+  - ghd: {skip: true}
+    corvene: {click: [1335, 127]}
+    wait: 1500
+  - snap: {name: tiff-actual-pixels, corvene_only: true, note: "1327-image-diff-zoom: the 1:1 button"}
