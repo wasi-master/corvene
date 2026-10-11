@@ -1,0 +1,22 @@
+[package]
+name = "corvene-fonts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Font files read for diffs: sfnt/WOFF/WOFF2/collections, font sources, glyph rendering"
+
+[dependencies]
+thiserror.workspace = true
+# OpenType reading, outlines, color glyphs (same version as cosmic-text's,
+# so read-fonts 0.37 is shared with harfrust)
+skrifa = { version = "=0.40.0", features = ["traversal"] }
+# shaping for the specimen and the feature playground
+harfrust = "=0.5.2"
+# glyph rasters (the version resvg and GPUI use)
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd", "png-format"] }
+# WOFF 1.0 tables (zlib)
+flate2 = "1"
+# WOFF 2.0 stream
+brotli-decompressor = "5.0.3"
+# UFO .glif / .designspace / .plist
+quick-xml = "0.41"

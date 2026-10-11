@@ -18,6 +18,7 @@ gpui-pre-apple = "=0.3.7"
 # Internal crates
 corvene-core = { path = "crates/corvene-core" }
 corvene-extensions = { path = "crates/corvene-extensions" }
+corvene-fonts = { path = "crates/corvene-fonts" }
 corvene-git = { path = "crates/corvene-git" }
 corvene-github = { path = "crates/corvene-github" }
 corvene-grammars = { path = "crates/corvene-grammars" }

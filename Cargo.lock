@@ -1757,6 +1757,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvene-fonts"
+version = "0.1.0"
+dependencies = [
+ "brotli-decompressor",
+ "flate2",
+ "harfrust",
+ "quick-xml",
+ "skrifa 0.40.0",
+ "thiserror 2.0.21",
+ "tiny-skia",
+]
+
+[[package]]
 name = "corvene-git"
 version = "0.1.0"
 dependencies = [
