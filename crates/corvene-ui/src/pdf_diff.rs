@@ -385,7 +385,7 @@ impl Render for PdfDiff {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::next_changed;
 
     #[test]
     fn next_change_wraps_and_skips_the_shown_page() {
