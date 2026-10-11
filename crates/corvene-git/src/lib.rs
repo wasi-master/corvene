@@ -14,6 +14,7 @@ pub mod credential;
 pub mod description;
 pub mod detect;
 pub mod diff;
+pub mod document_file;
 pub mod error;
 pub mod font_file;
 pub mod git_errors;

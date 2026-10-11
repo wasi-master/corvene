@@ -62,6 +62,10 @@ pub fn read_archives() -> bool {
 
 /// The archive format a path's extension names.
 pub fn archive_format(path: &str) -> Option<ArchiveFormat> {
+    // `1324-document-diff`: an EPUB file is shown as a book
+    if crate::document_file::is_binary_document(path) {
+        return None;
+    }
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     let (stem, ext) = name.rsplit_once('.')?;
     if stem.is_empty() {

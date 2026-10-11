@@ -115,6 +115,16 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|s| s.bytes.len() + s.siblings.values().map(Vec::len).sum::<usize>())
             .sum(),
+        // `1324-document-diff`: the text and pictures of both sides
+        corvene_models::Diff::Document {
+            previous, current, ..
+        } => [previous, current]
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                d.images.iter().map(|i| i.bytes.len()).sum::<usize>() + d.block_count() * 160
+            })
+            .sum(),
         _ => 0,
     };
     diff_bytes + lines(new) + lines(old)

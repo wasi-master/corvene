@@ -167,20 +167,7 @@ const TEXT_DIFF_BUDGET: std::time::Duration = std::time::Duration::from_millis(5
 /// is the same.
 pub fn text_diff(old: Option<&str>, new: Option<&str>) -> corvene_models::Diff {
     use corvene_models::Diff;
-    let (old, new) = (old.unwrap_or_default(), new.unwrap_or_default());
-    if old == new {
-        return Diff::Empty;
-    }
-    let diff = similar::TextDiff::configure()
-        .algorithm(similar::Algorithm::Myers)
-        .timeout(TEXT_DIFF_BUDGET)
-        .diff_lines(old, new);
-    let patch = diff
-        .unified_diff()
-        .context_radius(3)
-        .header("old", "new")
-        .to_string();
-    match corvene_git::parse_unified(&patch) {
+    match line_diff(old, new) {
         Diff::Text {
             hunks,
             mut warnings,
@@ -197,6 +184,26 @@ pub fn text_diff(old: Option<&str>, new: Option<&str>) -> corvene_models::Diff {
         }
         other => other,
     }
+}
+
+/// A line diff of two extracted texts (`None`: the side does not exist);
+/// `Empty` when the text is the same. Shared with `1324-document-diff`.
+pub fn line_diff(old: Option<&str>, new: Option<&str>) -> corvene_models::Diff {
+    use corvene_models::Diff;
+    let (old, new) = (old.unwrap_or_default(), new.unwrap_or_default());
+    if old == new {
+        return Diff::Empty;
+    }
+    let diff = similar::TextDiff::configure()
+        .algorithm(similar::Algorithm::Myers)
+        .timeout(TEXT_DIFF_BUDGET)
+        .diff_lines(old, new);
+    let patch = diff
+        .unified_diff()
+        .context_radius(3)
+        .header("old", "new")
+        .to_string();
+    corvene_git::parse_unified(&patch)
 }
 
 /// Whether each page pair differs (by index; a page only one side has is

@@ -176,6 +176,9 @@ impl Dispatcher {
         corvene_git::archive::set_read_archives(flags.bool(crate::flags::ids::ARCHIVE_DIFF));
         // `1329-font-diff`
         corvene_git::font_file::set_read_font_files(flags.bool(crate::flags::ids::FONT_DIFF));
+        corvene_git::document_file::set_read_document_files(
+            flags.bool(crate::flags::ids::DOCUMENT_DIFF),
+        );
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7247,6 +7250,12 @@ impl Dispatcher {
     /// Corvene `1322-pdf-diff`: the diff header's Pages/Text switch.
     pub fn set_pdf_text_diff(on: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.pdf_text_diff = on);
+    }
+
+    /// Corvene `1324-document-diff`: the diff header's Rendered / Text /
+    /// Pages switch.
+    pub fn set_document_diff_view(view: crate::persistence::DocumentDiffView, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.document_diff_view = view);
     }
 
     /// Modified-image diff tab (`_changeImageDiffType`).

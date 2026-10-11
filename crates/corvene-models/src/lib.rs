@@ -2225,6 +2225,226 @@ pub struct FontSourceBlob {
     pub siblings: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
+/// Corvene `1324-document-diff`: what kind of document a [`DocBlob`] was
+/// read from, which names its sections ("Slide 3", "Chapter 2").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DocKind {
+    /// Word, OpenDocument Text, RTF: one section.
+    Text,
+    /// PowerPoint, OpenDocument Presentation: a section per slide.
+    Presentation,
+    /// EPUB: a section per chapter.
+    Book,
+}
+
+/// Corvene `1324-document-diff`: the character formatting of a [`DocRun`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RunStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    pub superscript: bool,
+    pub subscript: bool,
+    /// Monospaced (EPUB `code`).
+    pub code: bool,
+}
+
+/// Corvene `1324-document-diff`: a stretch of text with one formatting.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocRun {
+    pub text: String,
+    pub style: RunStyle,
+    /// The target of a hyperlink.
+    pub link: Option<String>,
+}
+
+impl DocRun {
+    pub fn plain(text: impl Into<String>) -> Self {
+        DocRun {
+            text: text.into(),
+            ..DocRun::default()
+        }
+    }
+}
+
+/// Corvene `1324-document-diff`: the bullet or number of a list paragraph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ListMark {
+    /// 0 for the outermost list.
+    pub level: u8,
+    pub ordered: bool,
+    /// The item's number in an ordered list (1-based).
+    pub number: u32,
+}
+
+/// Corvene `1324-document-diff`: one block of a document, as a text editor
+/// would lay it out.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DocBlock {
+    /// `level` 1–6 (a slide title is 1).
+    Heading { level: u8, runs: Vec<DocRun> },
+    Paragraph {
+        runs: Vec<DocRun>,
+        list: Option<ListMark>,
+        /// A block quote (EPUB `blockquote`, a "Quote" paragraph style).
+        quote: bool,
+    },
+    /// Rows of cells; a cell's paragraphs are joined by `\n`.
+    Table { rows: Vec<Vec<Vec<DocRun>>> },
+    /// An index into [`DocBlob::images`]; `None` for a picture whose bytes
+    /// are missing or not an image the diff can draw.
+    Image { index: Option<usize>, alt: String },
+    /// Preformatted text (EPUB `pre`).
+    Code(String),
+    /// A page or section break.
+    Break,
+}
+
+impl DocBlock {
+    /// The text of `runs`, without formatting.
+    pub fn runs_text(runs: &[DocRun]) -> String {
+        runs.iter().map(|r| r.text.as_str()).collect()
+    }
+
+    /// The block as the lines of the extracted text a Text diff compares:
+    /// `# Heading`, `- item`, `1. item`, `| a | b |`, `[Image: alt]`.
+    pub fn text_lines(&self, out: &mut Vec<String>) {
+        match self {
+            DocBlock::Heading { level, runs } => {
+                let hashes = "#".repeat(usize::from((*level).clamp(1, 6)));
+                out.push(format!("{hashes} {}", one_line(&Self::runs_text(runs))));
+            }
+            DocBlock::Paragraph { runs, list, quote } => {
+                let mut prefix = String::new();
+                if *quote {
+                    prefix.push_str("> ");
+                }
+                if let Some(mark) = list {
+                    prefix.push_str(&"  ".repeat(usize::from(mark.level)));
+                    if mark.ordered {
+                        prefix.push_str(&format!("{}. ", mark.number));
+                    } else {
+                        prefix.push_str("- ");
+                    }
+                }
+                let indent = " ".repeat(prefix.chars().count());
+                for (i, line) in Self::runs_text(runs).split('\n').enumerate() {
+                    let lead = if i == 0 { &prefix } else { &indent };
+                    out.push(format!("{lead}{line}").trim_end().to_string());
+                }
+            }
+            DocBlock::Table { rows } => {
+                for row in rows {
+                    let cells: Vec<String> = row
+                        .iter()
+                        .map(|cell| one_line(&Self::runs_text(cell)).replace('|', "\\|"))
+                        .collect();
+                    out.push(format!("| {} |", cells.join(" | ")));
+                }
+            }
+            DocBlock::Image { alt, .. } if alt.is_empty() => out.push("[Image]".to_string()),
+            DocBlock::Image { alt, .. } => out.push(format!("[Image: {}]", one_line(alt))),
+            DocBlock::Code(text) => {
+                out.push("```".to_string());
+                out.extend(text.lines().map(str::to_string));
+                out.push("```".to_string());
+            }
+            DocBlock::Break => out.push("---".to_string()),
+        }
+    }
+}
+
+fn one_line(text: &str) -> String {
+    text.split('\n').collect::<Vec<_>>().join(" ")
+}
+
+/// Corvene `1324-document-diff`: a slide, a chapter, or the whole body of a
+/// text document.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocSection {
+    /// The slide's title or the chapter's first heading; may be empty.
+    pub name: String,
+    /// A hidden slide.
+    pub hidden: bool,
+    pub blocks: Vec<DocBlock>,
+    /// A slide's speaker notes.
+    pub notes: Vec<DocBlock>,
+}
+
+/// Corvene `1324-document-diff`: one side of a document diff, read from a
+/// Word, PowerPoint, OpenDocument, EPUB or RTF file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocBlob {
+    pub kind: DocKind,
+    pub sections: Vec<DocSection>,
+    /// The pictures [`DocBlock::Image`] points at.
+    pub images: Vec<ImageBlob>,
+    /// Reading stopped at the block limit.
+    pub truncated: bool,
+    /// The file's bytes, for a page view drawn by another program.
+    #[serde(skip)]
+    pub file: std::sync::Arc<Vec<u8>>,
+}
+
+impl DocBlob {
+    /// "Slide 3", "Chapter 2"; `None` for a text document's one section.
+    pub fn section_label(&self, index: usize) -> Option<String> {
+        match self.kind {
+            DocKind::Text => None,
+            DocKind::Presentation => Some(format!("Slide {}", index + 1)),
+            DocKind::Book => Some(format!("Chapter {}", index + 1)),
+        }
+    }
+
+    /// The extracted text a Text diff compares: Markdown-like lines, a
+    /// `======== Slide 3: Title ========` line before each slide or chapter
+    /// and its notes under `Notes:`.
+    pub fn to_text(&self) -> String {
+        let mut lines = Vec::new();
+        for (i, section) in self.sections.iter().enumerate() {
+            if let Some(label) = self.section_label(i) {
+                if !lines.is_empty() {
+                    lines.push(String::new());
+                }
+                let hidden = if section.hidden { " (hidden)" } else { "" };
+                let name = if section.name.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", one_line(&section.name))
+                };
+                lines.push(format!("======== {label}{name}{hidden} ========"));
+            }
+            for (j, block) in section.blocks.iter().enumerate() {
+                if j > 0 {
+                    lines.push(String::new());
+                }
+                block.text_lines(&mut lines);
+            }
+            if !section.notes.is_empty() {
+                lines.push(String::new());
+                lines.push("Notes:".to_string());
+                let mut note = Vec::new();
+                for block in &section.notes {
+                    block.text_lines(&mut note);
+                }
+                lines.extend(note.into_iter().map(|l| format!("> {l}").trim_end().to_string()));
+            }
+        }
+        let mut text = lines.join("\n");
+        text.push('\n');
+        text
+    }
+
+    /// Blocks and notes in all sections (diff cache sizing).
+    pub fn block_count(&self) -> usize {
+        self.sections
+            .iter()
+            .map(|s| s.blocks.len() + s.notes.len())
+            .sum()
+    }
+}
+
 /// GHD `ISubmoduleDiff`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmoduleDiff {
@@ -2389,6 +2609,11 @@ pub struct DiffWarnings {
     /// the pages of a PDF file, so its lines cannot be selected.
     #[serde(default)]
     pub pdf_text: bool,
+    /// Corvene `1324-document-diff`: the diff compares the text extracted
+    /// from a Word, PowerPoint, OpenDocument or EPUB file, so its lines
+    /// cannot be selected.
+    #[serde(default)]
+    pub document_text: bool,
 }
 
 /// Corvene `1306-utf16-diffs`: how a UTF-16 text file is stored.
@@ -2457,6 +2682,16 @@ pub enum Diff {
     /// `Unrenderable`: beyond what git would even hand over.
     TooLarge,
     Submodule(SubmoduleDiff),
+    /// Corvene `1324-document-diff`: a Word, PowerPoint, OpenDocument, EPUB
+    /// or RTF file read into blocks. `previous` is missing for new files,
+    /// `current` for deleted ones. `source` is git's own diff of a file git
+    /// reads as text (RTF, flat OpenDocument), for the Text view.
+    Document {
+        previous: Option<DocBlob>,
+        current: Option<DocBlob>,
+        #[serde(default)]
+        source: Option<Box<Diff>>,
+    },
 }
 
 impl Diff {
@@ -2465,14 +2700,23 @@ impl Diff {
             Diff::Text { hunks, .. } | Diff::LargeText { hunks, .. } => {
                 hunks.iter().map(|h| h.lines.len() + 1).sum()
             }
+            Diff::Document {
+                source: Some(source),
+                ..
+            } => source.line_count(),
             _ => 0,
         }
     }
 
-    /// The hunks of a text diff (large ones included).
+    /// The hunks of a text diff (large ones included; an RTF document's
+    /// own diff, `1324-document-diff`).
     pub fn hunks(&self) -> Option<&[DiffHunk]> {
         match self {
             Diff::Text { hunks, .. } | Diff::LargeText { hunks, .. } => Some(hunks),
+            Diff::Document {
+                source: Some(source),
+                ..
+            } => source.hunks(),
             _ => None,
         }
     }
@@ -2481,6 +2725,10 @@ impl Diff {
     pub fn warnings(&self) -> Option<&DiffWarnings> {
         match self {
             Diff::Text { warnings, .. } | Diff::LargeText { warnings, .. } => Some(warnings),
+            Diff::Document {
+                source: Some(source),
+                ..
+            } => source.warnings(),
             _ => None,
         }
     }

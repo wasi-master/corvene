@@ -174,6 +174,7 @@ pub fn working_directory_diff(
                 && crate::table_file::table_format(&file.path).is_none()
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)
+                && !crate::document_file::is_binary_document(&file.path)
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
@@ -227,6 +228,21 @@ pub fn working_directory_diff(
                 || std::fs::read(workdir.join(&file.path)).ok(),
                 || blob_bytes(git.clone(), workdir, "HEAD", previous_path).ok(),
             )
+        }
+        // `1324-document-diff`: an RTF or flat OpenDocument file, read into
+        // blocks next to git's own diff
+        diff @ (Diff::Text { .. } | Diff::LargeText { .. })
+            if crate::document_file::is_text_document(&file.path) =>
+        {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            crate::document_file::document_diff(
+                &file.path,
+                file.status.kind,
+                || std::fs::read(workdir.join(&file.path)).ok(),
+                || blob_bytes(git.clone(), workdir, "HEAD", previous_path).ok(),
+                Some(diff.clone()),
+            )
+            .unwrap_or(diff)
         }
         other => other,
     })
@@ -513,7 +529,8 @@ pub fn working_directory_patch(
 /// GHD `getImageDiff`: a binary change of a known image type becomes an
 /// image diff; anything else stays `Binary` (a spreadsheet or database
 /// becomes a table diff, Corvene `1321-table-file-diff`; a font a font
-/// diff, Corvene `1329-font-diff`).
+/// diff, Corvene `1329-font-diff`; a Word, PowerPoint, OpenDocument or
+/// EPUB file a document diff, Corvene `1324-document-diff`).
 pub fn image_diff(
     path: &str,
     kind: FileStatusKind,
@@ -523,6 +540,10 @@ pub fn image_diff(
     let Some(media_type) = binary_media_type(path) else {
         if corvene_models::is_font_file(path) {
             return crate::font_file::font_diff(path, kind, current, previous)
+                .unwrap_or(Diff::Binary);
+        }
+        if crate::document_file::document_format(path).is_some() {
+            return crate::document_file::document_diff(path, kind, current, previous, None)
                 .unwrap_or(Diff::Binary);
         }
         return crate::table_file::table_diff(path, kind, current, previous)
@@ -1072,6 +1093,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         lfs_contents: false,
         utf16: None,
         pdf_text: false,
+        document_text: false,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

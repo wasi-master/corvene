@@ -35,6 +35,8 @@ pub mod crash_reports;
 pub mod csv_diff;
 pub mod delete_branches;
 pub mod diff_cache;
+pub mod document_diff;
+pub mod document_pages;
 pub mod diff_line_class;
 pub mod dispatcher;
 pub mod drafts;
@@ -154,6 +156,7 @@ pub use persistence::{
     DEFAULT_TIME_FORMAT, NotificationClickAction, PullRequestEventNotifications, Settings,
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
+pub use persistence::DocumentDiffView;
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{

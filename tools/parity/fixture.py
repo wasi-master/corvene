@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 NAME = "parity-fixture"
@@ -828,12 +829,148 @@ def _images(repo: Path, edited: bool) -> None:
         fill="#2da44e" if edited else "#0969da", label="Corvene 2" if edited else "Corvene"))
 
 
+# `repo-documents` (`1324-document-diff`): a Word file, a slide deck and an
+# RTF file committed on top, then edited: the Word file gets an edited
+# paragraph, a removed list item and a new table row; the deck an edited
+# bullet on slide 2 and a new slide 3; the RTF file a new bold sentence
+_W_NS = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')
+_P_NS = ('xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+         'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')
+_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+
+def _zip_bytes(files: dict[str, str | bytes]) -> bytes:
+    """A zip package with fixed timestamps (the same bytes every run)."""
+    import io
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 10, 1, 12, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+    return out.getvalue()
+
+
+def _docx(paragraphs: list[tuple[str, str]], table: list[list[str]]) -> bytes:
+    """A .docx of `(style, text)` paragraphs (`Heading1`, `Bullet`, `` for
+    body text; `**word**` is bold) and a table at the end."""
+    def runs(text: str) -> str:
+        out = []
+        for i, part in enumerate(text.split("**")):
+            if part:
+                rpr = "<w:rPr><w:b/></w:rPr>" if i % 2 else ""
+                out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{part}</w:t></w:r>')
+        return "".join(out)
+    body = []
+    for style, text in paragraphs:
+        if style == "Bullet":
+            ppr = '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>'
+        elif style:
+            ppr = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>'
+        else:
+            ppr = ""
+        body.append(f"<w:p>{ppr}{runs(text)}</w:p>")
+    rows = "".join(
+        "<w:tr>" + "".join(f"<w:tc><w:p>{runs(c)}</w:p></w:tc>" for c in row) + "</w:tr>"
+        for row in table)
+    body.append(f"<w:tbl>{rows}</w:tbl>")
+    return _zip_bytes({
+        "[Content_Types].xml": "<Types/>",
+        "_rels/.rels": f'<Relationships xmlns="{_REL_NS}"><Relationship Id="rId1" '
+                       f'Type="{_REL}/officeDocument" Target="word/document.xml"/></Relationships>',
+        "word/document.xml": f'<w:document {_W_NS}><w:body>{"".join(body)}</w:body></w:document>',
+        "word/_rels/document.xml.rels": f'<Relationships xmlns="{_REL_NS}"><Relationship Id="rId1" '
+                                        f'Type="{_REL}/styles" Target="styles.xml"/></Relationships>',
+        "word/styles.xml": f'<w:styles {_W_NS}><w:style w:type="paragraph" w:styleId="Heading1">'
+                           '<w:name w:val="heading 1"/></w:style><w:style w:type="paragraph" '
+                           'w:styleId="Heading2"><w:name w:val="heading 2"/></w:style></w:styles>',
+        "word/numbering.xml": f'<w:numbering {_W_NS}><w:abstractNum w:abstractNumId="0"><w:lvl '
+                              'w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>'
+                              '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>',
+    })
+
+
+def _pptx(slides: list[tuple[str, list[str]]]) -> bytes:
+    """A .pptx of `(title, bullets)` slides."""
+    files: dict[str, str | bytes] = {
+        "[Content_Types].xml": "<Types/>",
+        "_rels/.rels": f'<Relationships xmlns="{_REL_NS}"><Relationship Id="rId1" '
+                       f'Type="{_REL}/officeDocument" Target="ppt/presentation.xml"/></Relationships>',
+    }
+    ids = "".join(f'<p:sldId id="{256 + i}" r:id="rId{i + 10}"/>' for i in range(len(slides)))
+    files["ppt/presentation.xml"] = f"<p:presentation {_P_NS}><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>"
+    files["ppt/_rels/presentation.xml.rels"] = f'<Relationships xmlns="{_REL_NS}">' + "".join(
+        f'<Relationship Id="rId{i + 10}" Type="{_REL}/slide" Target="slides/slide{i + 1}.xml"/>'
+        for i in range(len(slides))) + "</Relationships>"
+
+    def shape(ph: str, paras: list[str]) -> str:
+        ps = "".join(f"<a:p><a:r><a:t>{t}</a:t></a:r></a:p>" for t in paras)
+        return (f'<p:sp><p:nvSpPr><p:cNvPr id="2" name="{ph}"/><p:cNvSpPr/><p:nvPr><p:ph type="{ph}"/>'
+                f"</p:nvPr></p:nvSpPr><p:txBody>{ps}</p:txBody></p:sp>")
+    for i, (title, bullets) in enumerate(slides):
+        files[f"ppt/slides/slide{i + 1}.xml"] = (
+            f"<p:sld {_P_NS}><p:cSld><p:spTree>{shape('title', [title])}{shape('body', bullets)}"
+            "</p:spTree></p:cSld></p:sld>")
+    return _zip_bytes(files)
+
+
+_DOCX = [
+    ("Heading1", "Project proposal"),
+    ("", "We plan to ship the **new importer** before the end of the quarter."),
+    ("Heading2", "Goals"),
+    ("Bullet", "Read every spreadsheet format"),
+    ("Bullet", "Keep memory under 200 MB"),
+    ("Bullet", "Support right-to-left text"),
+    ("Heading2", "Budget"),
+]
+_DOCX_EDITED = [
+    _DOCX[0],
+    ("", "We plan to ship the **new importer** in the first week of next quarter."),
+    _DOCX[2], _DOCX[3], _DOCX[5],
+    _DOCX[6],
+    ("", "Numbers are in thousands of euros."),
+]
+_DOCX_TABLE = [["Item", "Cost"], ["Design", "12"], ["Engineering", "40"]]
+_DOCX_TABLE_EDITED = [["Item", "Cost"], ["Design", "12"], ["Engineering", "46"], ["Testing", "8"]]
+_PPTX = [
+    ("Quarterly review", ["Prepared by the parity team"]),
+    ("Highlights", ["Revenue grew by 4 percent", "Two new hires", "Office moved"]),
+]
+_PPTX_EDITED = [
+    _PPTX[0],
+    ("Highlights", ["Revenue grew by 9 percent", "Two new hires", "Office moved"]),
+    ("Next steps", ["Hire two engineers", "Ship the importer"]),
+]
+_RTF = r"{\rtf1\ansi{\fonttbl{\f0 Helvetica;}}\f0\fs24 {\pard\outlinelevel0\b Meeting notes\par}" \
+       r"\pard Everyone agreed on the plan.\par }"
+_RTF_EDITED = r"{\rtf1\ansi{\fonttbl{\f0 Helvetica;}}\f0\fs24 {\pard\outlinelevel0\b Meeting notes\par}" \
+              r"\pard Everyone agreed on the plan. {\b The launch moves to May.}\par }"
+
+
+def _documents(repo: Path) -> None:
+    docs = repo / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "proposal.docx").write_bytes(_docx(_DOCX, _DOCX_TABLE))
+    (docs / "review.pptx").write_bytes(_pptx(_PPTX))
+    (docs / "notes.rtf").write_text(_RTF)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the proposal, review deck and notes",
+         date="2026-09-28T09:00:00+00:00")
+    (docs / "proposal.docx").write_bytes(_docx(_DOCX_EDITED, _DOCX_TABLE_EDITED))
+    (docs / "review.pptx").write_bytes(_pptx(_PPTX_EDITED))
+    (docs / "notes.rtf").write_text(_RTF_EDITED)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
-          diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False) -> Path:
+          diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
+          documents: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -859,7 +996,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     (`1222-push-target-guard`). With `codeowners`, a commit adds
     `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`). With `diff_marks`, see `_diff_marks`
     and no other working changes (flags 1316-1320). With `pdf`, see `_pdf`
-    and no other working changes (`1322-pdf-diff`)."""
+    and no other working changes (`1322-pdf-diff`). With `documents`, see
+    `_documents` (`1324-document-diff`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -992,6 +1130,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if archives:
         _archives(repo)
+        return repo
+    if documents:
+        _documents(repo)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel

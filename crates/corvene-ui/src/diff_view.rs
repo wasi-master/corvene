@@ -141,6 +141,7 @@ use crate::font_diff::FontDiffView;
 use crate::font_diff::source::FontSourceView;
 use crate::icons::{Octicon, octicon};
 use crate::image_diff::ImageDiff;
+use crate::document_diff::DocumentDiff;
 use crate::pdf_diff::PdfDiff;
 use crate::scrollbar::{ScrollbarExt, gutter, scrollbar};
 use crate::theme::sizes::*;
@@ -261,6 +262,8 @@ pub fn diff_header(
         .children(pdf_switch(path, view, cx))
         // `1330-font-source-preview`
         .children(font_source_switch(path, cx))
+        // `1324-document-diff`
+        .children(document_switch(view, cx))
         // `798-blame`
         .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
@@ -404,6 +407,55 @@ fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl Into
     ))
 }
 
+/// `1324-document-diff`: the Rendered / Text (/ Pages) switch of a
+/// document file's header (one setting for every document), while its diff
+/// is a document diff.
+fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+    use corvene_core::DocumentDiffView as V;
+    let s = AppState::try_global(cx)?.read(cx);
+    view.read(cx).document_source.as_ref()?;
+    if !s.flags.bool(corvene_core::flags::ids::DOCUMENT_DIFF) {
+        return None;
+    }
+    let pages = document_pages_available(s);
+    let mut views = vec![(V::Rendered, "Rendered", "document-view-rendered")];
+    views.push((V::Text, "Text", "document-view-text"));
+    if pages {
+        views.push((V::Pages, "Pages", "document-view-pages"));
+    }
+    let current = effective_document_view(s);
+    let selected = views.iter().position(|(v, _, _)| *v == current).unwrap_or(0);
+    let ids: Vec<&'static str> = views.iter().map(|(_, _, id)| *id).collect();
+    let labels: Vec<&'static str> = views.iter().map(|(_, l, _)| *l).collect();
+    let values: Vec<V> = views.iter().map(|(v, _, _)| *v).collect();
+    Some(view_switch_n(
+        "document-view-switch",
+        &ids,
+        &labels,
+        selected,
+        move |ix, cx| Dispatcher::set_document_diff_view(values[ix], cx),
+        cx,
+    ))
+}
+
+/// `1325-document-pages`: the flag, the PDF page view it shows the pages
+/// with, and LibreOffice to draw them.
+fn document_pages_available(s: &AppState) -> bool {
+    s.flags.bool(corvene_core::flags::ids::DOCUMENT_PAGES)
+        && s.flags.bool(corvene_core::flags::ids::PDF_DIFF)
+        && corvene_core::document_pages::soffice().is_some()
+}
+
+/// `1324-document-diff`: the document view to show (Pages falls back to
+/// Rendered when it is not available).
+fn effective_document_view(s: &AppState) -> corvene_core::DocumentDiffView {
+    use corvene_core::DocumentDiffView as V;
+    match s.settings.document_diff_view {
+        V::Pages if !document_pages_available(s) => V::Rendered,
+        v => v,
+    }
+}
+
 /// A two-segment switch in the diff header (`[container, left, right]`
 /// ids); `on_pick(true)` picks the right segment.
 pub(crate) fn view_switch(
@@ -413,10 +465,30 @@ pub(crate) fn view_switch(
     on_pick: impl Fn(bool, &mut App) + 'static,
     cx: &App,
 ) -> Stateful<Div> {
+    view_switch_n(
+        ids[0],
+        &ids[1..],
+        &labels,
+        usize::from(right),
+        move |ix, cx| on_pick(ix == 1, cx),
+        cx,
+    )
+}
+
+/// A switch of `labels.len()` segments in the diff header; `on_pick` gets
+/// the picked segment's index.
+fn view_switch_n(
+    id: &'static str,
+    ids: &[&'static str],
+    labels: &[&'static str],
+    selected_ix: usize,
+    on_pick: impl Fn(usize, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
     let t = cx.ghd();
     let on_pick = Rc::new(on_pick);
-    let segment = |id: &'static str, label: &'static str, value: bool| {
-        let selected = value == right;
+    let segment = |id: &'static str, label: &'static str, value: usize| {
+        let selected = value == selected_ix;
         let (bg, hover) = (t.box_selected_active_background, t.box_hover_background);
         let on_pick = on_pick.clone();
         div()
@@ -438,7 +510,7 @@ pub(crate) fn view_switch(
             .child(label)
     };
     div()
-        .id(ids[0])
+        .id(id)
         .flex_none()
         .ml(SPACING())
         .h(zpx(19.))
@@ -449,8 +521,12 @@ pub(crate) fn view_switch(
         .border_1()
         .border_color(t.box_border)
         .text_size(FONT_SIZE_SM())
-        .child(segment(ids[1], labels[0], false))
-        .child(segment(ids[2], labels[1], true))
+        .children(
+            ids.iter()
+                .zip(labels)
+                .enumerate()
+                .map(|(ix, (id, label))| segment(id, label, ix)),
+        )
 }
 
 /// `DiffOptions`' gear (`.diff-options-component > button`); opens `view`'s
@@ -604,6 +680,18 @@ enum PdfText {
 /// diff, so its rows are built apart from the page diff's.
 const PDF_TEXT_GENERATION: u64 = 1 << 63;
 
+/// `1324-document-diff`: flipped into the diff generation of a document's
+/// text and page diffs.
+const DOCUMENT_TEXT_GENERATION: u64 = 1 << 62;
+const DOCUMENT_PAGES_GENERATION: u64 = 1 << 61;
+
+/// `1325-document-pages`: a document's pages as drawn by LibreOffice.
+enum DocumentPages {
+    Converting,
+    Ready(Arc<Diff>),
+    Failed(String),
+}
+
 /// `1322-pdf-diff`: a page diff of a PDF file.
 fn is_pdf_diff(diff: &Diff) -> bool {
     match diff {
@@ -632,6 +720,9 @@ struct Snapshot {
     confirm_discard: bool,
     /// `749-binary-diff-as-text`: a binary file shown with `--text`.
     as_text: bool,
+    /// `1324-document-diff`: the document diff `diff` was made from (the
+    /// Text and Pages views replace it).
+    document_source: Option<Arc<Diff>>,
 }
 
 /// A position in the diff's text: a list row (unified or split index) and a
@@ -779,6 +870,14 @@ pub struct DiffView {
     archive: Option<Entity<crate::archive_diff_view::ArchiveDiffView>>,
     /// `1329-font-diff` / `1330-font-source-preview`
     font: Option<FontPane>,
+    /// `1324-document-diff`: the document diff last shown (any view), its
+    /// rendered view, its text diff and (`1325-document-pages`) its pages.
+    document_source: Option<Arc<Diff>>,
+    document: Option<Entity<DocumentDiff>>,
+    document_text: Option<(Arc<Diff>, PdfText)>,
+    _document_text_task: Option<Task<()>>,
+    document_pages: Option<(Arc<Diff>, DocumentPages)>,
+    _document_pages_task: Option<Task<()>>,
     context_menu: Option<Entity<ContextMenu>>,
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
@@ -903,6 +1002,12 @@ impl DiffView {
             _pdf_observer: None,
             archive: None,
             font: None,
+            document_source: None,
+            document: None,
+            document_text: None,
+            _document_text_task: None,
+            document_pages: None,
+            _document_pages_task: None,
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
@@ -1118,6 +1223,12 @@ impl DiffView {
             Some(text) => (text, generation ^ PDF_TEXT_GENERATION, None, None),
             None => (diff, generation, contents, old_contents),
         };
+        // `1324-document-diff`: the Text or Pages view of a document
+        let document_source = matches!(*diff, Diff::Document { .. }).then(|| diff.clone());
+        let (diff, generation, contents, old_contents) = match self.document_view_of(&diff, cx) {
+            Some((view, flip)) => (view, generation ^ flip, None, None),
+            None => (diff, generation, contents, old_contents),
+        };
         // `1323-archive-diff`: rows are keyed by the entry's full name, so
         // the same path in another archive (or level) is another diff
         let key_path = match self.source {
@@ -1142,6 +1253,7 @@ impl DiffView {
             hide_whitespace,
             confirm_discard: s.settings.confirm_discard_changes,
             as_text,
+            document_source,
         })
     }
 
@@ -1224,6 +1336,7 @@ impl DiffView {
             hide_whitespace,
             confirm_discard: s.settings.confirm_discard_changes,
             as_text,
+            document_source: None,
         })
     }
 
@@ -1533,6 +1646,21 @@ impl DiffView {
                 _ => None,
             };
         }
+        // `1324-document-diff`: the rendered view, made again for a new diff
+        match &snap.document_source {
+            Some(source)
+                if matches!(*snap.diff, Diff::Document { .. })
+                    && !self
+                        .document
+                        .as_ref()
+                        .is_some_and(|d| Arc::ptr_eq(d.read(cx).diff(), source)) =>
+            {
+                let source = source.clone();
+                self.document = Some(cx.new(|cx| DocumentDiff::new(source, cx)));
+            }
+            Some(_) => {}
+            None => self.document = None,
+        }
         let same_file = self
             .rows_key
             .as_ref()
@@ -1822,7 +1950,9 @@ impl DiffView {
     /// header's switch; not inside a stack).
     fn wants_pdf_text(&self, diff: &Diff, cx: &App) -> bool {
         let s = self.state.read(cx);
-        self.stacked_path.is_none()
+        // `1325-document-pages`: a document's pages stay pages
+        self.document_source.is_none()
+            && self.stacked_path.is_none()
             && is_pdf_diff(diff)
             && s.settings.pdf_text_diff
             && s.flags.bool(corvene_core::flags::ids::PDF_DIFF)
@@ -1895,7 +2025,7 @@ impl DiffView {
     /// in Git LFS (the index holds its pointer).
     fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
         let warnings = diff.warnings();
-        warnings.is_some_and(|w| w.lfs_contents || w.pdf_text)
+        warnings.is_some_and(|w| w.lfs_contents || w.pdf_text || w.document_text)
             || (warnings.is_some_and(|w| w.type_change.is_some())
                 && self
                     .state
@@ -3672,6 +3802,8 @@ impl DiffView {
         // first: a stacked file whose diff has not arrived costs nothing more
         let snap = self.snapshot(cx)?;
         self.request_pdf_text(&snap.diff, cx);
+        self.document_source = snap.document_source.clone();
+        self.request_document_view(&snap, cx);
         // View › Zoom changed the row heights the list has cached
         let zoom = crate::theme::sizes::zoom_factor();
         // … and so does `751-diff-font-size`
@@ -3816,7 +3948,164 @@ impl DiffView {
                 (None, Some(view)) => view.into_any_element(),
                 (None, None) => self.panel("This archive has changed.", cx),
             },
+            // `1324-document-diff`
+            Diff::Document { .. } => self.document_panel(cx),
         })
+    }
+
+    /// `1324-document-diff`: the rendered document, or where its Text or
+    /// Pages view stands while it is not ready.
+    fn document_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        use corvene_core::DocumentDiffView as V;
+        if self.stacked_path.is_some() {
+            return self.panel(
+                "This document changed. Select the file alone to see the document.",
+                cx,
+            );
+        }
+        match effective_document_view(self.state.read(cx)) {
+            V::Rendered => match self.document.clone() {
+                Some(doc) => doc.into_any_element(),
+                None => self.panel("This binary file has changed.", cx),
+            },
+            V::Text => match self.document_text.as_ref().map(|(_, t)| t) {
+                Some(PdfText::Unreadable) => {
+                    self.panel("The text of this document could not be read.", cx)
+                }
+                _ => self.panel("Reading the text of the document…", cx),
+            },
+            V::Pages => match self.document_pages.as_ref().map(|(_, p)| p) {
+                Some(DocumentPages::Failed(reason)) => {
+                    let reason = reason.clone();
+                    self.panel(reason, cx)
+                }
+                _ => self.panel("Drawing the pages with LibreOffice…", cx),
+            },
+        }
+    }
+
+    /// `1324-document-diff`: the Text or Pages view of the document diff
+    /// `diff` (with the generation bit it is keyed by), once ready.
+    fn document_view_of(&self, diff: &Arc<Diff>, cx: &App) -> Option<(Arc<Diff>, u64)> {
+        use corvene_core::DocumentDiffView as V;
+        if self.stacked_path.is_some() || !matches!(**diff, Diff::Document { .. }) {
+            return None;
+        }
+        match effective_document_view(self.state.read(cx)) {
+            V::Rendered => None,
+            V::Text => match self.document_text.as_ref()? {
+                (source, PdfText::Ready(text)) if Arc::ptr_eq(source, diff) => {
+                    Some((text.clone(), DOCUMENT_TEXT_GENERATION))
+                }
+                _ => None,
+            },
+            V::Pages => match self.document_pages.as_ref()? {
+                (source, DocumentPages::Ready(pages)) if Arc::ptr_eq(source, diff) => {
+                    Some((pages.clone(), DOCUMENT_PAGES_GENERATION))
+                }
+                _ => None,
+            },
+        }
+    }
+
+    /// `1324-document-diff`: reads the text, or (`1325-document-pages`)
+    /// draws the pages, of the shown document diff in the background.
+    fn request_document_view(&mut self, snap: &Snapshot, cx: &mut Context<Self>) {
+        use corvene_core::DocumentDiffView as V;
+        let Some(source) = snap.document_source.clone() else {
+            return;
+        };
+        if self.stacked_path.is_some() {
+            return;
+        }
+        let view = effective_document_view(self.state.read(cx));
+        let fresh = |s: Option<&Arc<Diff>>| s.is_some_and(|s| Arc::ptr_eq(s, &source));
+        match view {
+            V::Rendered => {}
+            V::Text if !fresh(self.document_text.as_ref().map(|(s, _)| s)) => {
+                // RTF: git's own diff of the markup
+                if let Diff::Document {
+                    source: Some(text),
+                    ..
+                } = &*source
+                {
+                    let text = Arc::new((**text).clone());
+                    self.document_text = Some((source, PdfText::Ready(text)));
+                    cx.notify();
+                    return;
+                }
+                self.document_text = Some((source.clone(), PdfText::Reading));
+                let job = source.clone();
+                let read = cx.background_executor().spawn(async move {
+                    let Diff::Document {
+                        previous, current, ..
+                    } = &*job
+                    else {
+                        return None;
+                    };
+                    Some(corvene_core::document_diff::text_diff(
+                        previous.as_ref(),
+                        current.as_ref(),
+                    ))
+                });
+                self._document_text_task = Some(cx.spawn(async move |this, cx| {
+                    let text = read.await;
+                    this.update(cx, |this, cx| {
+                        if this
+                            .document_text
+                            .as_ref()
+                            .is_some_and(|(s, _)| Arc::ptr_eq(s, &source))
+                        {
+                            this.document_text = Some((
+                                source,
+                                text.map_or(PdfText::Unreadable, |d| PdfText::Ready(Arc::new(d))),
+                            ));
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }));
+            }
+            V::Pages if !fresh(self.document_pages.as_ref().map(|(s, _)| s)) => {
+                self.document_pages = Some((source.clone(), DocumentPages::Converting));
+                let (job, path, kind) = (source.clone(), snap.path.clone(), snap.kind);
+                let draw = cx.background_executor().spawn(async move {
+                    let Diff::Document {
+                        previous, current, ..
+                    } = &*job
+                    else {
+                        return Err("This is not a document.".to_string());
+                    };
+                    corvene_core::document_pages::pages_diff(
+                        &path,
+                        kind,
+                        previous.as_ref(),
+                        current.as_ref(),
+                    )
+                });
+                self._document_pages_task = Some(cx.spawn(async move |this, cx| {
+                    let pages = draw.await;
+                    this.update(cx, |this, cx| {
+                        if this
+                            .document_pages
+                            .as_ref()
+                            .is_some_and(|(s, _)| Arc::ptr_eq(s, &source))
+                        {
+                            this.document_pages = Some((
+                                source,
+                                match pages {
+                                    Ok(d) => DocumentPages::Ready(Arc::new(d)),
+                                    Err(e) => DocumentPages::Failed(e),
+                                },
+                            ));
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }));
+            }
+            _ => {}
+        }
     }
 
     /// `1323-archive-diff`: show an archive diff in the archive view (made
@@ -4223,6 +4512,16 @@ impl DiffView {
                 paragraph(vec![
                     "This is the text on the pages of the PDF file. Its lines cannot be \
                      selected one by one."
+                        .into(),
+                ])
+                .into_any_element(),
+            );
+        }
+        // `1324-document-diff`
+        if warnings.document_text {
+            items.push(
+                paragraph(vec![
+                    "This is the text of the document. Its lines cannot be selected one by one."
                         .into(),
                 ])
                 .into_any_element(),

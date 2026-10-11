@@ -203,6 +203,10 @@ pub struct Settings {
     /// (off: the glyphs). The diff header's Text / Glyphs switch flips it.
     #[serde(default)]
     pub font_source_text_diff: bool,
+    /// Corvene `1324-document-diff`: how Word, PowerPoint, OpenDocument,
+    /// EPUB and RTF diffs are shown (the diff header's switch).
+    #[serde(default)]
+    pub document_diff_view: DocumentDiffView,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -499,6 +503,19 @@ pub enum NotificationClickAction {
     OpenOnGitHub,
 }
 
+/// Corvene `1324-document-diff`: the diff header's Rendered / Text / Pages
+/// switch of a document file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentDiffView {
+    /// The blocks laid out as in a text editor.
+    #[default]
+    Rendered,
+    /// A line diff of the extracted text (git's diff of an RTF file).
+    Text,
+    /// `1325-document-pages`: the pages LibreOffice draws.
+    Pages,
+}
+
 /// Corvene (`1314-code-owners`): a file row's owners as text or an icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CodeOwnersDisplay {
@@ -581,6 +598,7 @@ impl Default for Settings {
             archive_stacked: false,
             archive_tree_width: 250.0,
             font_source_text_diff: false,
+            document_diff_view: DocumentDiffView::Rendered,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

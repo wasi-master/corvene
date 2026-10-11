@@ -30,6 +30,8 @@ hayro.workspace = true
 kurbo.workspace = true
 pulldown-cmark.workspace = true
 imagesize = "0.14"
+# `1325-document-pages`: LibreOffice converts in a folder of its own
+tempfile = "3"
 async-channel = "2"
 yaml-rust = "0.4"
 

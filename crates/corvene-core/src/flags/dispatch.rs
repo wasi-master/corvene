@@ -224,6 +224,7 @@ impl Dispatcher {
                 ids::ARCHIVE_DIFF,
                 ids::FONT_DIFF,
                 ids::FONT_SOURCE_PREVIEW,
+                ids::DOCUMENT_DIFF,
             ]
             .map(|id| flags.bool(id))
         };
@@ -235,6 +236,7 @@ impl Dispatcher {
             crate::image_decode::set_more_image_formats(now.bool(ids::MORE_IMAGE_FORMATS));
             corvene_git::archive::set_read_archives(now.bool(ids::ARCHIVE_DIFF));
             corvene_git::font_file::set_read_font_files(now.bool(ids::FONT_DIFF));
+            corvene_git::document_file::set_read_document_files(now.bool(ids::DOCUMENT_DIFF));
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);

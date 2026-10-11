@@ -122,6 +122,12 @@ fn kind_of(diff: Option<&Arc<Diff>>, loading: bool) -> DiffKindVm {
         Some(Diff::Empty) => DiffKindVm::Empty,
         Some(Diff::TooLarge) => DiffKindVm::TooLarge,
         Some(Diff::Submodule(_)) => DiffKindVm::Submodule,
+        // `1324-document-diff`: the Android app has no document view yet;
+        // an RTF file shows git's own diff
+        Some(Diff::Document {
+            source: Some(_), ..
+        }) => DiffKindVm::Text,
+        Some(Diff::Document { .. }) => DiffKindVm::Binary,
     }
 }
 

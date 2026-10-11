@@ -18,6 +18,9 @@ chardetng = "1"
 similar.workspace = true
 # flag 1306-utf16-diffs: the decoded sides `git diff --no-index` compares
 tempfile = "3"
+# flag 1324-document-diff: Word, PowerPoint, OpenDocument and EPUB packages
+# (read with the archive diff's zip below)
+roxmltree = "0.21"
 # flag 1113-lfs-locks: `git lfs locks --json`
 serde.workspace = true
 serde_json.workspace = true

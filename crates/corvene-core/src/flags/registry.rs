@@ -8820,6 +8820,46 @@ registry! {
         code: &["crates/corvene-fonts/src/sources/mod.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/source.rs"],
     },
 
+    /// Word, PowerPoint, OpenDocument, EPUB and RTF files diffed as
+    /// documents.
+    DOCUMENT_DIFF = 1324 "document-diff" {
+        title: "Document diffs for Word, PowerPoint, OpenDocument, EPUB and RTF",
+        summary: "A changed .docx, .pptx, .odt, .odp, .epub or .rtf file (and their template \
+                  and macro variants) is shown as a document: headings, bold and italic text, \
+                  lists, tables and pictures laid out as in a text editor, with added blocks \
+                  green, removed ones red and edited ones marked word by word. Presentations \
+                  get a tab per slide with its speaker notes, books a tab per chapter. The \
+                  header's Rendered / Text switch shows the extracted text as a line diff \
+                  instead (git's own diff of the markup for RTF). Tracked insertions are \
+                  shown and tracked deletions left out; headers, footers and comments are \
+                  not read.",
+        ghd_behaviour: "Word, PowerPoint, OpenDocument and EPUB files show \"This binary file \
+                        has changed.\"; RTF files show their markup.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/document_file/mod.rs", "crates/corvene-core/src/document_diff.rs", "crates/corvene-ui/src/document_diff.rs"],
+    },
+
+    /// A Pages view of document diffs, drawn by LibreOffice.
+    DOCUMENT_PAGES = 1325 "document-pages" {
+        title: "Pages view of document diffs (LibreOffice)",
+        summary: "With LibreOffice installed, the switch of a Word, PowerPoint, OpenDocument, \
+                  EPUB or RTF diff gets a Pages view: LibreOffice turns each version into a \
+                  PDF in the background and the pages are compared like a PDF file's (side \
+                  by side, swipe, onion skin, difference; changed pages marked). Needs \
+                  1324-document-diff and 1322-pdf-diff.",
+        ghd_behaviour: "These files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/document_pages.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

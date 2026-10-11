@@ -130,6 +130,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Empty => "Empty",
         Diff::TooLarge => "Unrenderable",
         Diff::Submodule(_) => "Submodule",
+        Diff::Document { .. } => "Document",
     }
 }
 

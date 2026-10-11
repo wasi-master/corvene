@@ -1786,6 +1786,7 @@ dependencies = [
  "gix",
  "libc",
  "lzma-rust2",
+ "roxmltree 0.21.1",
  "rusqlite",
  "ruzstd",
  "serde",

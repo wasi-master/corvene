@@ -337,12 +337,20 @@ fn apply_hunks_to_index(
             }
             hunks
         }
+        // `1324-document-diff`: lines of an RTF file's own diff
+        Diff::Document {
+            source: Some(source),
+            ..
+        } => {
+            return apply_hunks_to_index(git, workdir, file, source, options);
+        }
         Diff::Binary
         | Diff::Image { .. }
         | Diff::Table { .. }
         | Diff::Archive(_)
         | Diff::Font { .. }
         | Diff::FontSource { .. }
+        | Diff::Document { .. }
         | Diff::Submodule(_) => {
             return Err(GitError::Gix(format!(
                 "Can't create partial commit in binary file: {}",

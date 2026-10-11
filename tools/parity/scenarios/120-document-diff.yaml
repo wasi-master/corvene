@@ -1,0 +1,30 @@
+# Word, PowerPoint and RTF diffs drawn as documents (1324-document-diff, off
+# in the GitHub Desktop preset; deviations.md › Diff viewer). GHD says the
+# Word file and the deck changed and shows the RTF file's markup. The RTF
+# file gets a bold sentence; the Word file an edited paragraph (old and new
+# with the changed words marked), a removed bullet, an added paragraph and
+# a table row; the deck an edited bullet on slide 2 and a new slide 3. The
+# Rendered / Text switch then shows the Word file's extracted text.
+name: document-diff
+description: Word, PowerPoint and RTF files diffed as documents, then as text (Corvene only)
+setup: repo-documents
+corvene_flags: 1324-document-diff=on
+steps:
+  - click: [125, 185]
+    wait: 1200
+  - snap: {name: rtf, corvene_only: true, note: "GHD shows the RTF markup (1324-document-diff)"}
+  - click: [125, 214]
+    wait: 1200
+  - snap: {name: docx, corvene_only: true, note: "GHD shows the binary panel (1324-document-diff)"}
+  - click: [125, 243]
+    wait: 1200
+  - snap: {name: pptx, corvene_only: true, note: "the first changed slide opens (1324-document-diff)"}
+  - click: [125, 214]
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {click: [1270, 97]}
+    wait: 1500
+  - snap: {name: docx-text, corvene_only: true, note: "the Rendered / Text switch (1324-document-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [1225, 97]}
+    wait: 800

@@ -1132,6 +1132,7 @@ fn finish_committed_diff(
                 && crate::table_file::table_format(&file.path).is_none()
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)
+                && !crate::document_file::is_binary_document(&file.path)
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
@@ -1172,6 +1173,19 @@ fn finish_committed_diff(
                 || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
                 || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
             )
+        }
+        // `1324-document-diff`: an RTF or flat OpenDocument file
+        diff @ (Diff::Text { .. } | Diff::LargeText { .. })
+            if crate::document_file::is_text_document(&file.path) =>
+        {
+            crate::document_file::document_diff(
+                &file.path,
+                file.status.kind,
+                || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
+                || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
+                Some(diff.clone()),
+            )
+            .unwrap_or(diff)
         }
         other => other,
     }
