@@ -404,9 +404,9 @@ mod tests {
 
     #[test]
     fn oversized_images_are_refused() {
-        assert!(size_ok(30_000, 6_000));
+        assert!(size_ok(30_000, 3_000));
         assert!(!size_ok(30_001, 1));
-        assert!(!size_ok(20_000, 20_000));
+        assert!(!size_ok(20_000, 6_000));
         assert!(!size_ok(0, 10));
     }
 
