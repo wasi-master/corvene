@@ -1129,6 +1129,7 @@ fn finish_committed_diff(
         Diff::Binary
             if utf16
                 && crate::diff::binary_media_type(&file.path).is_none()
+                && crate::table_file::table_format(&file.path).is_none()
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;

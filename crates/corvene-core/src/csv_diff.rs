@@ -10,6 +10,8 @@
 
 use std::collections::HashSet;
 
+use corvene_models::{TableBlob, TableSheet};
+
 /// Files with more records than this (both sides together) get the text
 /// diff.
 pub const MAX_ROWS: usize = 20_000;
@@ -194,7 +196,7 @@ impl TableRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableDiff {
     pub columns: Vec<TableColumn>,
-    /// The header row's line on each side (1 when present).
+    /// The header row's line on each side (1 when present in a CSV file).
     pub header_lines: (Option<u32>, Option<u32>),
     pub rows: Vec<TableRow>,
 }
@@ -221,6 +223,83 @@ pub fn table_diff(
         Some(text) => parse(text, delimiter)?,
         None => Vec::new(),
     };
+    records_diff(old, new)
+}
+
+/// `1321-table-file-diff`: a spreadsheet sheet's or database table's rows
+/// as records numbered from `first_line`.
+pub fn sheet_records(first_line: u32, rows: &[Vec<String>]) -> Vec<Record> {
+    rows.iter()
+        .enumerate()
+        .map(|(ix, cells)| Record {
+            line: first_line.saturating_add(ix as u32),
+            cells: cells.clone(),
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheetStatus {
+    Same,
+    Added,
+    Deleted,
+    Modified,
+}
+
+/// `1321-table-file-diff`: one sheet or table of a table file's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetEntry {
+    pub name: String,
+    pub status: SheetStatus,
+}
+
+fn find_sheet<'a>(blob: Option<&'a TableBlob>, name: &str) -> Option<&'a TableSheet> {
+    blob?.sheets.iter().find(|s| s.name == name)
+}
+
+/// The sheets of both versions: the new version's in order, then the
+/// removed ones.
+pub fn sheet_list(previous: Option<&TableBlob>, current: Option<&TableBlob>) -> Vec<SheetEntry> {
+    let mut out: Vec<SheetEntry> = Vec::new();
+    for sheet in current.iter().flat_map(|b| &b.sheets) {
+        let status = match find_sheet(previous, &sheet.name) {
+            None => SheetStatus::Added,
+            Some(old) if old.rows != sheet.rows => SheetStatus::Modified,
+            Some(_) => SheetStatus::Same,
+        };
+        out.push(SheetEntry {
+            name: sheet.name.clone(),
+            status,
+        });
+    }
+    for sheet in previous.iter().flat_map(|b| &b.sheets) {
+        if find_sheet(current, &sheet.name).is_none() {
+            out.push(SheetEntry {
+                name: sheet.name.clone(),
+                status: SheetStatus::Deleted,
+            });
+        }
+    }
+    out
+}
+
+/// The table diff of one sheet, and whether either side was cut off.
+pub fn sheet_diff(
+    previous: Option<&TableBlob>,
+    current: Option<&TableBlob>,
+    name: &str,
+) -> Result<(TableDiff, bool), TableError> {
+    let records = |sheet: Option<&TableSheet>| {
+        sheet.map_or_else(Vec::new, |s| sheet_records(s.first_line, &s.rows))
+    };
+    let (old, new) = (find_sheet(previous, name), find_sheet(current, name));
+    let truncated = old.is_some_and(|s| s.truncated) || new.is_some_and(|s| s.truncated);
+    Ok((records_diff(records(old), records(new))?, truncated))
+}
+
+/// The table diff of two versions' records (the first being the header;
+/// empty for a side that does not exist).
+pub fn records_diff(old: Vec<Record>, new: Vec<Record>) -> Result<TableDiff, TableError> {
     if old.len() + new.len() > MAX_ROWS {
         return Err(TableError::TooLarge);
     }
@@ -341,7 +420,11 @@ pub fn table_diff(
     }
     Ok(TableDiff {
         columns,
-        header_lines: (old_header.map(|h| h.line), new_header.map(|h| h.line)),
+        // a database table's header is line 0: no number
+        header_lines: (
+            old_header.map(|h| h.line).filter(|&l| l > 0),
+            new_header.map(|h| h.line).filter(|&l| l > 0),
+        ),
         rows,
     })
 }
@@ -520,6 +603,50 @@ mod tests {
         let diff = table_diff(Some(old), Some(new), b',').unwrap();
         assert_eq!(kinds(&diff), "mm");
         assert_eq!(diff.rows[1].changed, vec![true, false]);
+    }
+
+    #[test]
+    fn sheets_of_two_versions() {
+        let sheet = |name: &str, rows: &[&[&str]]| TableSheet {
+            name: name.into(),
+            first_line: 1,
+            rows: rows
+                .iter()
+                .map(|r| r.iter().map(|c| c.to_string()).collect())
+                .collect(),
+            truncated: false,
+        };
+        let old = TableBlob {
+            sheets: vec![
+                sheet("Kept", &[&["a"], &["1"]]),
+                sheet("Edited", &[&["a"], &["1"]]),
+                sheet("Gone", &[&["a"]]),
+            ],
+        };
+        let new = TableBlob {
+            sheets: vec![
+                sheet("Edited", &[&["a"], &["2"]]),
+                sheet("Kept", &[&["a"], &["1"]]),
+                sheet("New", &[&["a"]]),
+            ],
+        };
+        let list = sheet_list(Some(&old), Some(&new));
+        let got: Vec<_> = list.iter().map(|e| (e.name.as_str(), e.status)).collect();
+        assert_eq!(
+            got,
+            [
+                ("Edited", SheetStatus::Modified),
+                ("Kept", SheetStatus::Same),
+                ("New", SheetStatus::Added),
+                ("Gone", SheetStatus::Deleted),
+            ]
+        );
+        let (diff, truncated) = sheet_diff(Some(&old), Some(&new), "Edited").unwrap();
+        assert!(!truncated);
+        assert_eq!(kinds(&diff), "m");
+        assert_eq!(diff.rows[0].new_line, Some(2));
+        let (diff, _) = sheet_diff(Some(&old), Some(&new), "Gone").unwrap();
+        assert_eq!(diff.columns[0].name, "a");
     }
 
     #[test]

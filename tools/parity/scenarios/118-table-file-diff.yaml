@@ -1,0 +1,22 @@
+# A workbook's and a database's diffs as tables (1321-table-file-diff, off
+# in the GitHub Desktop preset; deviations.md › Diff viewer). GHD says the
+# binary file changed. The workbook's edited Stock sheet opens first (a
+# changed price, a removed and an added row) next to an added Orders sheet;
+# the database's customers table has an edited and an added row and its
+# legacy table was dropped.
+name: table-file-diff
+description: A spreadsheet and an SQLite database diffed as tables with sheet tabs
+setup: repo-diff-marks
+corvene_flags: 1321-table-file-diff=on
+steps:
+  - click: [125, 330]
+    wait: 800
+  - snap: {name: workbook, corvene_only: true, note: "GHD shows these files as binary (1321-table-file-diff)"}
+  - click: [125, 359]
+    wait: 800
+  - snap: {name: database, corvene_only: true, note: "GHD shows these files as binary (1321-table-file-diff)"}
+  - click: [125, 330]
+    wait: 800
+  - click: [411, 125]
+    wait: 600
+  - snap: {name: added-sheet, corvene_only: true, note: "the workbook's added Orders sheet (1321-table-file-diff)"}

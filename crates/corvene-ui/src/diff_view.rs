@@ -107,6 +107,7 @@
 //! and Esc are unchanged.
 
 use crate::csv_table_diff::CsvTable;
+use corvene_core::csv_diff::{SheetEntry, SheetStatus};
 use corvene_core::diff_line_class::{ClassLine, ClassOptions, LineMark, classify};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -511,13 +512,15 @@ struct MarksCache {
     marks: LineMarks,
 }
 
-/// `1318-csv-table-diff`: the diff key, both sides' contents (kept alive)
-/// and the text size and zoom the column widths were measured at.
+/// `1318-csv-table-diff`: the diff key, both sides' contents (kept alive),
+/// the text size and zoom the column widths were measured at, and for a
+/// `1321-table-file-diff` table file its diff and the sheet shown.
 type CsvKey = (
     (u64, String, u64),
     Option<Arc<Vec<String>>>,
     Option<Arc<Vec<String>>>,
     (u32, u32),
+    Option<(Arc<Diff>, String)>,
 );
 
 /// `1322-pdf-diff`: the text of a PDF file's two versions, as a diff.
@@ -652,6 +655,11 @@ pub struct DiffView {
     /// `1318-csv-table-diff`: the table of a CSV / TSV diff, keyed by the
     /// diff and both sides' contents (`Err`: why it is shown as text).
     csv: Option<(CsvKey, Result<Rc<CsvTable>, String>)>,
+    /// `1321-table-file-diff`: the sheet picked in a table file's diff (kept
+    /// while it exists, so stepping through files stays on one sheet) and
+    /// the current table diff's sheets.
+    csv_sheet: Option<String>,
+    csv_sheets: Option<(Arc<Diff>, Rc<Vec<SheetEntry>>)>,
     csv_list: ListState,
     csv_h_scroll: HScroll,
     /// Whether the list currently shows `split_rows`.
@@ -775,6 +783,8 @@ impl DiffView {
             unified_inner: Rc::new(Vec::new()),
             line_marks: None,
             csv: None,
+            csv_sheet: None,
+            csv_sheets: None,
             csv_list: ListState::new(0, ListAlignment::Top, zpx(200.)),
             csv_h_scroll: HScroll::default(),
             split_mode: false,
@@ -3573,6 +3583,10 @@ impl DiffView {
             },
             Diff::TooLarge => self.too_large_panel(snap, cx),
             Diff::Submodule(sub) => self.submodule_panel(sub, cx),
+            // `1321-table-file-diff`: drawn by `csv_table_view` (the stacked
+            // list has no room for sheet tabs)
+            Diff::Table { .. } if self.stacked_kind.is_none() => return None,
+            Diff::Table { .. } => self.panel("This table file has changed.", cx),
         })
     }
 
@@ -4115,17 +4129,31 @@ impl DiffView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Result<Rc<CsvTable>, String>> {
-        let delimiter = corvene_core::csv_diff::table_delimiter(&snap.path)?;
-        {
+        let file_tables = matches!(*snap.diff, Diff::Table { .. });
+        let delimiter = if file_tables {
+            b','
+        } else {
+            corvene_core::csv_diff::table_delimiter(&snap.path)?
+        };
+        if !file_tables {
             let s = self.state.read(cx);
             if !s.flags.bool(corvene_core::flags::ids::CSV_TABLE_DIFF) || !s.settings.csv_table_diff
             {
                 return None;
             }
         }
-        if !matches!(*snap.diff, Diff::Text { .. } | Diff::LargeText { .. }) || snap.as_text {
+        if !file_tables
+            && (!matches!(*snap.diff, Diff::Text { .. } | Diff::LargeText { .. }) || snap.as_text)
+        {
             return None;
         }
+        let sheet = file_tables.then(|| (snap.diff.clone(), self.table_sheet(&snap.diff)));
+        let same_sheet =
+            |a: &Option<(Arc<Diff>, String)>, b: &Option<(Arc<Diff>, String)>| match (a, b) {
+                (Some((a, x)), Some((b, y))) => Arc::ptr_eq(a, b) && x == y,
+                (None, None) => true,
+                _ => false,
+            };
         let same = |a: &Option<Arc<Vec<String>>>, b: &Option<Arc<Vec<String>>>| match (a, b) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
@@ -4133,39 +4161,63 @@ impl DiffView {
         };
         let measure = (self.text_size.to_f64() as f32).to_bits();
         let zoom = f32::from(zpx(1.)).to_bits();
-        if let Some(((key, contents, old_contents, at), table)) = &self.csv
+        if let Some(((key, contents, old_contents, at, at_sheet), table)) = &self.csv
             && *key == snap.key
             && same(contents, &snap.contents)
             && same(old_contents, &snap.old_contents)
             && *at == (measure, zoom)
+            && same_sheet(at_sheet, &sheet)
         {
             return Some(table.clone());
         }
-        // a side whose contents were not loaded (a pull request preview or
-        // a ref comparison has no old contents) gets the text diff
-        let new = if snap.kind == FileStatusKind::Deleted {
-            None
-        } else {
-            Some(snap.contents.as_ref()?.join("\n"))
+        let table = match (&*snap.diff, &sheet) {
+            (Diff::Table { .. }, Some((_, name))) if name.is_empty() => {
+                Err("This file has no sheets or tables.".to_string())
+            }
+            (Diff::Table { previous, current }, Some((_, name))) => {
+                corvene_core::csv_diff::sheet_diff(previous.as_ref(), current.as_ref(), name)
+                    .map_err(|e| match e {
+                        corvene_core::csv_diff::TableError::Empty => {
+                            "This sheet is empty.".to_string()
+                        }
+                        e => format!("This sheet cannot be shown as a table ({e})."),
+                    })
+            }
+            _ => {
+                // a side whose contents were not loaded (a pull request
+                // preview or a ref comparison has no old contents) gets the
+                // text diff
+                let new = if snap.kind == FileStatusKind::Deleted {
+                    None
+                } else {
+                    Some(snap.contents.as_ref()?.join("\n"))
+                };
+                let old = if snap.kind.is_new_or_untracked() {
+                    None
+                } else {
+                    Some(snap.old_contents.as_ref()?.join("\n"))
+                };
+                corvene_core::csv_diff::table_diff(old.as_deref(), new.as_deref(), delimiter)
+                    .map(|diff| (diff, false))
+                    .map_err(|e| {
+                        format!("Showing the text diff: the table could not be read ({e}).")
+                    })
+            }
         };
-        let old = if snap.kind.is_new_or_untracked() {
-            None
-        } else {
-            Some(snap.old_contents.as_ref()?.join("\n"))
-        };
-        let table = corvene_core::csv_diff::table_diff(old.as_deref(), new.as_deref(), delimiter)
-            .map_err(|e| format!("Showing the text diff: the table could not be read ({e})."));
-        let table = table.map(|diff| {
+        let table = table.map(|(diff, truncated)| {
             let text = window.text_system();
             let font = text.resolve_font(&gpui_kit::font(mono_font()));
             let column = text
                 .em_advance(font, self.text_size)
                 .unwrap_or(self.text_size * 0.6);
-            let table = Rc::new(CsvTable::new(Rc::new(diff), column));
-            let same_file = self
-                .csv
-                .as_ref()
-                .is_some_and(|((k, ..), _)| k.0 == snap.key.0 && k.1 == snap.key.1);
+            let mut table = CsvTable::new(Rc::new(diff), column);
+            table.truncated = truncated;
+            let table = Rc::new(table);
+            let same_file = self.csv.as_ref().is_some_and(|((k, .., at_sheet), _)| {
+                k.0 == snap.key.0
+                    && k.1 == snap.key.1
+                    && at_sheet.as_ref().map(|(_, n)| n) == sheet.as_ref().map(|(_, n)| n)
+            });
             if !same_file {
                 self.csv_h_scroll.reset();
             }
@@ -4180,10 +4232,71 @@ impl DiffView {
                 snap.contents.clone(),
                 snap.old_contents.clone(),
                 (measure, zoom),
+                sheet,
             ),
             table.clone(),
         ));
         Some(table)
+    }
+
+    /// `1321-table-file-diff`: the sheets of a table file's diff, worked
+    /// out once per diff.
+    fn table_sheets(&mut self, diff: &Arc<Diff>) -> Rc<Vec<SheetEntry>> {
+        if let Some((at, sheets)) = &self.csv_sheets
+            && Arc::ptr_eq(at, diff)
+        {
+            return sheets.clone();
+        }
+        let sheets = Rc::new(match &**diff {
+            Diff::Table { previous, current } => {
+                corvene_core::csv_diff::sheet_list(previous.as_ref(), current.as_ref())
+            }
+            _ => Vec::new(),
+        });
+        self.csv_sheets = Some((diff.clone(), sheets.clone()));
+        sheets
+    }
+
+    /// `1321-table-file-diff`: the sheet to show, the picked one while the
+    /// file has it, else the first one the change touched.
+    fn table_sheet(&mut self, diff: &Arc<Diff>) -> String {
+        let sheets = self.table_sheets(diff);
+        if let Some(name) = &self.csv_sheet
+            && sheets.iter().any(|s| &s.name == name)
+        {
+            return name.clone();
+        }
+        sheets
+            .iter()
+            .find(|s| s.status != SheetStatus::Same)
+            .or(sheets.first())
+            .map(|s| s.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// `1321-table-file-diff`: the sheet tabs of a table file's diff.
+    fn sheet_tabs(&mut self, snap: &Snapshot, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !matches!(*snap.diff, Diff::Table { .. }) {
+            return None;
+        }
+        let sheets = self.table_sheets(&snap.diff);
+        let selected = self.table_sheet(&snap.diff);
+        let view = cx.entity().downgrade();
+        Some(
+            crate::csv_table_diff::sheet_tabs(
+                &sheets,
+                &selected,
+                move |name, cx| {
+                    let name = name.to_string();
+                    let _ = view.update(cx, |this, cx| {
+                        this.csv_sheet = Some(name);
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+            .into_any_element(),
+        )
     }
 
     /// `1318-csv-table-diff`: the table with its pinned header, or the
@@ -4195,8 +4308,20 @@ impl DiffView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let tabs = self.sheet_tabs(snap, cx);
         let table = match table {
             Ok(table) => table,
+            Err(reason) if tabs.is_some() => {
+                let body = self.panel(&reason, cx);
+                return div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .children(tabs)
+                    .child(body)
+                    .into_any_element();
+            }
             Err(reason) => {
                 let body = self.text_diff(snap, window, cx);
                 let t = cx.ghd();
@@ -4223,6 +4348,24 @@ impl DiffView {
         h.begin_frame(table.width(), px(0.), self.csv_list.viewport_bounds());
         let t = cx.ghd();
         let header = crate::csv_table_diff::header_row(&table, &h, cx);
+        let cut_off = table.truncated.then(|| {
+            div()
+                .flex_none()
+                .px(SPACING())
+                .py(SPACING_HALF())
+                .border_b_1()
+                .border_color(t.diff_border)
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(format!(
+                    "Only the first {} rows of each version are shown.",
+                    crate::format::format_number_with(
+                        corvene_git::table_file::MAX_ROWS as f64,
+                        ",",
+                        "."
+                    )
+                ))
+        });
         let rows_table = table.clone();
         let rows_h = h.clone();
         div()
@@ -4237,6 +4380,8 @@ impl DiffView {
             .text_color(t.diff_text)
             .flex()
             .flex_col()
+            .children(tabs)
+            .children(cut_off)
             .child(header)
             .child(
                 list(

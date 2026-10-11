@@ -183,7 +183,7 @@ pub fn commit_detail(s: &AppState, repo: u64) -> Option<CommitDetailVm> {
         None => DiffKindVm::Loading,
         Some(Diff::Text { .. }) => DiffKindVm::Text,
         Some(Diff::LargeText { .. }) => DiffKindVm::LargeText,
-        Some(Diff::Binary) => DiffKindVm::Binary,
+        Some(Diff::Binary | Diff::Table { .. }) => DiffKindVm::Binary,
         Some(Diff::Image { .. }) => DiffKindVm::Image,
         Some(Diff::Empty) => DiffKindVm::Empty,
         Some(Diff::TooLarge) => DiffKindVm::TooLarge,

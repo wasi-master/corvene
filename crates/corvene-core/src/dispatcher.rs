@@ -162,6 +162,10 @@ impl Dispatcher {
         );
         // `1306-utf16-diffs`
         corvene_git::utf16::set_decode_utf16(flags.bool(crate::flags::ids::UTF16_DIFFS));
+        // `1321-table-file-diff`
+        corvene_git::table_file::set_read_table_files(
+            flags.bool(crate::flags::ids::TABLE_FILE_DIFF),
+        );
         // `1322-pdf-diff`
         corvene_git::set_pdf_diffs(flags.bool(crate::flags::ids::PDF_DIFF));
         // `1326-more-image-formats`

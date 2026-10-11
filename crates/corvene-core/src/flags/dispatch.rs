@@ -218,6 +218,7 @@ impl Dispatcher {
                 ids::LFS_IMAGE_PREVIEWS,
                 ids::LFS_TEXT_DIFF,
                 ids::UTF16_DIFFS,
+                ids::TABLE_FILE_DIFF,
                 ids::PDF_DIFF,
                 ids::MORE_IMAGE_FORMATS,
             ]
@@ -226,6 +227,7 @@ impl Dispatcher {
         if reads_diffs(&now) != reads_diffs(previous) {
             corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
             corvene_git::utf16::set_decode_utf16(now.bool(ids::UTF16_DIFFS));
+            corvene_git::table_file::set_read_table_files(now.bool(ids::TABLE_FILE_DIFF));
             corvene_git::set_pdf_diffs(now.bool(ids::PDF_DIFF));
             crate::image_decode::set_more_image_formats(now.bool(ids::MORE_IMAGE_FORMATS));
             crate::diff_cache::clear_diffs();

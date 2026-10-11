@@ -12,7 +12,7 @@
 
 use std::rc::Rc;
 
-use corvene_core::csv_diff::{ColumnStatus, RowKind, TableDiff, TableRow};
+use corvene_core::csv_diff::{ColumnStatus, RowKind, SheetEntry, SheetStatus, TableDiff, TableRow};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -20,7 +20,7 @@ use crate::diff_view::DIFF_LINE_HEIGHT;
 use crate::diff_view_rows::{HScroll, line_number_width};
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme};
-use crate::widgets::GhdTooltip;
+use crate::widgets::{GhdTooltip, IconButtonA11y};
 
 /// Cell widths are measured in characters within these bounds.
 const MIN_CELL_CHARS: usize = 3;
@@ -34,6 +34,8 @@ pub struct CsvTable {
     pub widths: Vec<Pixels>,
     /// One line-number column (CSS px, see [`line_number_width`]).
     pub number_width: f32,
+    /// `1321-table-file-diff`: rows past the read limit were left out.
+    pub truncated: bool,
 }
 
 impl CsvTable {
@@ -69,6 +71,7 @@ impl CsvTable {
             diff,
             widths,
             number_width: line_number_width(max_line),
+            truncated: false,
         }
     }
 
@@ -315,4 +318,68 @@ pub fn table_row(table: &CsvTable, ix: usize, row: &TableRow, h: &HScroll, cx: &
         ))
         .child(scrolled(h, cells))
         .into_any_element()
+}
+
+/// Corvene `1321-table-file-diff`: the sheets (or database tables) of a
+/// spreadsheet or database diff as tabs above the table, each marked when
+/// the change added, removed or edited it.
+pub fn sheet_tabs(
+    sheets: &[SheetEntry],
+    selected: &str,
+    on_pick: impl Fn(&str, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
+    let t = cx.ghd();
+    let on_pick = Rc::new(on_pick);
+    let tabs = sheets.iter().enumerate().map(|(ix, sheet)| {
+        let is_selected = sheet.name == selected;
+        let (mark, tip) = match sheet.status {
+            SheetStatus::Same => (None, None),
+            SheetStatus::Added => (Some(t.color_new), Some("Added")),
+            SheetStatus::Deleted => (Some(t.color_deleted), Some("Removed")),
+            SheetStatus::Modified => (Some(t.color_modified), Some("Changed")),
+        };
+        let name = sheet.name.clone();
+        let on_pick = on_pick.clone();
+        let hover = t.box_hover_background;
+        div()
+            .id(("csv-sheet", ix))
+            .a11y_button(sheet.name.clone())
+            .flex_none()
+            .h_full()
+            .px(SPACING())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(SPACING_HALF())
+            .border_r_1()
+            .border_color(t.diff_border)
+            .when(sheet.status == SheetStatus::Deleted, |d| d.line_through())
+            .when(is_selected, |d| {
+                d.bg(t.box_selected_active_background)
+                    .text_color(t.box_selected_active_text)
+            })
+            .when(!is_selected, |d| {
+                d.cursor_pointer()
+                    .text_color(t.text)
+                    .hover(move |d| d.bg(hover))
+                    .on_click(move |_, _, cx| on_pick(&name, cx))
+            })
+            .children(mark.map(|color| div().flex_none().size(zpx(6.)).rounded_full().bg(color)))
+            .child(sheet.name.clone())
+            .when_some(tip, |d, tip| d.ghd_tooltip(tip))
+    });
+    div()
+        .id("csv-sheets")
+        .flex_none()
+        .w_full()
+        .h(zpx(24.))
+        .flex()
+        .flex_row()
+        .overflow_x_scroll()
+        .border_b_1()
+        .border_color(t.diff_border)
+        .bg(t.diff_gutter_background)
+        .text_size(FONT_SIZE_SM())
+        .children(tabs)
 }

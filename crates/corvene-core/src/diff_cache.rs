@@ -93,6 +93,14 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             previous.as_ref().map_or(0, |i| i.bytes.len())
                 + current.as_ref().map_or(0, |i| i.bytes.len())
         }
+        corvene_models::Diff::Table { previous, current } => [previous, current]
+            .into_iter()
+            .flatten()
+            .flat_map(|b| &b.sheets)
+            .flat_map(|s| &s.rows)
+            .flatten()
+            .map(|c| c.len() + 24)
+            .sum(),
         _ => 0,
     };
     diff_bytes + lines(new) + lines(old)

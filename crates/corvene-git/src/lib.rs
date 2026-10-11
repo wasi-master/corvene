@@ -54,6 +54,7 @@ pub mod stats;
 pub mod status;
 mod status_gix;
 pub mod submodule;
+pub mod table_file;
 pub mod terminal;
 pub mod text_encoding;
 pub mod trivial_change;

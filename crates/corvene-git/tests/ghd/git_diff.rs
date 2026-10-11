@@ -123,6 +123,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::LargeText { .. } => "LargeText",
         Diff::Binary => "Binary",
         Diff::Image { .. } => "Image",
+        Diff::Table { .. } => "Table",
         Diff::Empty => "Empty",
         Diff::TooLarge => "Unrenderable",
         Diff::Submodule(_) => "Submodule",

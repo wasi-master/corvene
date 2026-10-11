@@ -8677,6 +8677,24 @@ registry! {
         upstream: &[Upstream::issue(19804)],
         code: &["crates/corvene-ui/src/image_diff.rs"],
     },
+    /// Spreadsheet and database files diffed as tables.
+    TABLE_FILE_DIFF = 1321 "table-file-diff" {
+        title: "Spreadsheet and database diffs as tables",
+        summary: "A changed Excel or OpenDocument spreadsheet (.xlsx, .xlsm, .xlsb, .xls, \
+                  .ods), SQLite database (.sqlite, .db and similar) or dBASE table (.dbf) \
+                  opens in the CSV table view instead of \"Binary file not shown\". Each sheet \
+                  or database table is a tab above the table, marked when it was added, \
+                  removed or changed. Files over 64 MB stay binary, and a sheet is cut off \
+                  after 20,000 rows.",
+        ghd_behaviour: "These files are binary, so the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/table_file.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/csv_table_diff.rs"],
+    },
+
     /// PDF files diffed page by page.
     PDF_DIFF = 1322 "pdf-diff" {
         title: "PDF files as pages",

@@ -1905,6 +1905,25 @@ pub struct ImageOriginal {
     pub height: u32,
 }
 
+/// Corvene `1321-table-file-diff`: one side of a spreadsheet or database
+/// file read as tables (a workbook's sheets, a database's tables).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableBlob {
+    pub sheets: Vec<TableSheet>,
+}
+
+/// One sheet or table: its rows, the first being the header.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableSheet {
+    pub name: String,
+    /// The line number of the first row (a spreadsheet's row number, 0 for
+    /// a database table's header so its records count from 1).
+    pub first_line: u32,
+    pub rows: Vec<Vec<String>>,
+    /// Rows past the read limit were left out.
+    pub truncated: bool,
+}
+
 /// GHD `ISubmoduleDiff`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmoduleDiff {
@@ -2074,6 +2093,13 @@ pub enum Diff {
     Image {
         previous: Option<ImageBlob>,
         current: Option<ImageBlob>,
+    },
+    /// Corvene `1321-table-file-diff`: a binary spreadsheet or database
+    /// file read as tables; `previous` is missing for new files, `current`
+    /// for deleted ones.
+    Table {
+        previous: Option<TableBlob>,
+        current: Option<TableBlob>,
     },
     /// Nothing to show (e.g. empty file, mode-only change).
     Empty,

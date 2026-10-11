@@ -169,7 +169,11 @@ pub fn working_directory_diff(
     let diff = parse_raw_diff_with_warnings(&out.stdout, &out.stderr);
     Ok(match diff {
         // `1306-utf16-diffs`: a UTF-16 text file (images stay images)
-        Diff::Binary if binary_media_type(&file.path).is_none() && crate::utf16::decode_utf16() => {
+        Diff::Binary
+            if binary_media_type(&file.path).is_none()
+                && crate::table_file::table_format(&file.path).is_none()
+                && crate::utf16::decode_utf16() =>
+        {
             use crate::utf16::Side;
             let working = workdir.join(&file.path);
             let new = if file.status.kind == FileStatusKind::Deleted {
@@ -447,7 +451,8 @@ pub fn working_directory_patch(
 }
 
 /// GHD `getImageDiff`: a binary change of a known image type becomes an
-/// image diff; anything else stays `Binary`.
+/// image diff; anything else stays `Binary` (a spreadsheet or database
+/// becomes a table diff, Corvene `1321-table-file-diff`).
 pub fn image_diff(
     path: &str,
     kind: FileStatusKind,
@@ -455,7 +460,8 @@ pub fn image_diff(
     previous: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Diff {
     let Some(media_type) = binary_media_type(path) else {
-        return Diff::Binary;
+        return crate::table_file::table_diff(path, kind, current, previous)
+            .unwrap_or(Diff::Binary);
     };
     if media_type == PDF_MEDIA_TYPE {
         let small = |bytes: Vec<u8>| (bytes.len() <= PDF_MAX_BYTES).then_some(bytes);

@@ -521,6 +521,86 @@ def _marks_picture(square: bool):
     return pixel
 
 
+# `1321-table-file-diff`: a workbook and a database under `tables/` (after
+# the other files, so their rows keep their places). The edit changes a
+# price, removes a row and adds one, adds a sheet and drops a table.
+_BOOK_STOCK = [["Item", "Price", "Stock"], ["Pen", 1.5, 120], ["Ink", 4, 30], ["Pad", 2.25, 75]]
+_BOOK_STOCK_EDITED = [["Item", "Price", "Stock"], ["Pen", 1.75, 120], ["Pad", 2.25, 75],
+                      ["Clip", 0.1, 500]]
+_BOOK_NOTES = [["Note"], ["Prices in euros"]]
+_BOOK_ORDERS = [["Order", "Item", "Qty"], [1, "Pen", 10], [2, "Pad", 4]]
+
+
+def _xlsx(sheets: list[tuple[str, list[list]]]) -> bytes:
+    """A minimal .xlsx (inline strings, no styles) of `sheets`."""
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def cell_xml(row: int, col: int, value) -> str:
+        ref = f"{chr(65 + col)}{row}"
+        if isinstance(value, str):
+            return f'<c r="{ref}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+        return f'<c r="{ref}"><v>{value}</v></c>'
+
+    ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    files = {
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        + "".join(f'<Override PartName="/xl/worksheets/sheet{i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                  for i in range(len(sheets)))
+        + "</Types>",
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rId1" Type="{rel_ns}/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        "xl/workbook.xml": f'<?xml version="1.0" encoding="UTF-8"?><workbook {ns} xmlns:r="{rel_ns}"><sheets>'
+        + "".join(f'<sheet name="{escape(name)}" sheetId="{i + 1}" r:id="rId{i + 1}"/>' for i, (name, _) in enumerate(sheets))
+        + "</sheets></workbook>",
+        "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + "".join(f'<Relationship Id="rId{i + 1}" Type="{rel_ns}/worksheet" Target="worksheets/sheet{i + 1}.xml"/>'
+                  for i in range(len(sheets)))
+        + "</Relationships>",
+    }
+    for i, (_, rows) in enumerate(sheets):
+        body = "".join(f'<row r="{r + 1}">' + "".join(cell_xml(r + 1, c, v) for c, v in enumerate(row)) + "</row>"
+                       for r, row in enumerate(rows))
+        files[f"xl/worksheets/sheet{i + 1}.xml"] = f'<?xml version="1.0" encoding="UTF-8"?><worksheet {ns}><sheetData>{body}</sheetData></worksheet>'
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, text in files.items():
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 9, 27, 9, 0, 0)), text)
+    return out.getvalue()
+
+
+def _sqlite(path: Path, script: str) -> None:
+    import sqlite3
+    if path.exists():
+        path.unlink()
+    db = sqlite3.connect(path)
+    db.executescript(script)
+    db.commit()
+    db.close()
+
+
+_SHOP_SQL = """CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT, city TEXT);
+INSERT INTO customers VALUES (1, 'Ada', 'London'), (2, 'Linus', 'Helsinki'), (3, 'Grace', NULL);
+CREATE TABLE legacy(code TEXT); INSERT INTO legacy VALUES ('old');"""
+_SHOP_SQL_EDITED = """CREATE TABLE customers(id INTEGER PRIMARY KEY, name TEXT, city TEXT);
+INSERT INTO customers VALUES (1, 'Ada', 'Cambridge'), (2, 'Linus', 'Helsinki'), (3, 'Grace', NULL),
+  (4, 'Margaret', 'Boston');"""
+
+
+def _table_files(repo: Path, edited: bool) -> None:
+    (repo / "tables").mkdir(exist_ok=True)
+    sheets = [("Stock", _BOOK_STOCK_EDITED if edited else _BOOK_STOCK), ("Notes", _BOOK_NOTES)]
+    if edited:
+        sheets.append(("Orders", _BOOK_ORDERS))
+    (repo / "tables" / "inventory.xlsx").write_bytes(_xlsx(sheets))
+    _sqlite(repo / "tables" / "shop.sqlite", _SHOP_SQL_EDITED if edited else _SHOP_SQL)
+
+
 def _diff_marks(repo: Path) -> None:
     files = {
         "src/config.ts": _MARKS_CONFIG,
@@ -534,6 +614,7 @@ def _diff_marks(repo: Path) -> None:
         p.write_text(text)
     (repo / "assets").mkdir(exist_ok=True)
     (repo / "assets" / "picture.png").write_bytes(_png(300, 200, _marks_picture(False)))
+    _table_files(repo, False)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "Add the config, scores, script and patch", date="2026-09-27T09:00:00+00:00")
     (repo / "src" / "config.ts").write_text(_MARKS_CONFIG_EDITED)
@@ -542,6 +623,7 @@ def _diff_marks(repo: Path) -> None:
     (repo / "patches" / "0001-hello.patch").write_text(
         _MARKS_PATCH.replace("1111111..2222222", "3333333..4444444").replace("-10,2 +10,2", "-12,2 +12,2"))
     (repo / "assets" / "picture.png").write_bytes(_png(300, 200, _marks_picture(True)))
+    _table_files(repo, True)
 
 
 # `repo-pdf` (`1322-pdf-diff`): a three-page PDF committed on top, then
