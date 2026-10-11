@@ -162,6 +162,8 @@ impl Dispatcher {
         );
         // `1306-utf16-diffs`
         corvene_git::utf16::set_decode_utf16(flags.bool(crate::flags::ids::UTF16_DIFFS));
+        // `1322-pdf-diff`
+        corvene_git::set_pdf_diffs(flags.bool(crate::flags::ids::PDF_DIFF));
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7193,6 +7195,11 @@ impl Dispatcher {
     /// Corvene `1318-csv-table-diff`: the diff header's Table/Text switch.
     pub fn set_csv_table_diff(on: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.csv_table_diff = on);
+    }
+
+    /// Corvene `1322-pdf-diff`: the diff header's Pages/Text switch.
+    pub fn set_pdf_text_diff(on: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.pdf_text_diff = on);
     }
 
     /// Modified-image diff tab (`_changeImageDiffType`).

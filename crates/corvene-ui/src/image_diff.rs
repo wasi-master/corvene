@@ -21,6 +21,10 @@
 //! Deviation (`794-svg-image-diff`): an SVG file switched to Image is
 //! rendered with resvg (a small drawing enlarged, drawn sharp).
 //!
+//! Deviation (`1322-pdf-diff`): a PDF page pair (`crate::pdf_diff`) is
+//! shown with its pages' sizes in points under each side and no file size
+//! summary.
+//!
 //! Deviation (`761-pixelated-small-images`): images under 64 px are enlarged
 //! by a whole factor with nearest-neighbour sampling, so pixel art and icons
 //! show their pixels (GHD draws them at their natural size, tiny).
@@ -241,9 +245,19 @@ pub struct ImageDiff {
     /// `752-image-diff-border-outside`: the 1 px border is drawn around the
     /// fitted image instead of inside it (`box-sizing: content-box`).
     border_outside: bool,
+    /// `1322-pdf-diff`: the (previous, current) footers of a PDF page pair,
+    /// in place of the PNG's pixels and bytes; also hides the 2-up size
+    /// summary.
+    page_footers: Option<(SharedString, SharedString)>,
 }
 
 impl ImageDiff {
+    /// `1322-pdf-diff`: shows `previous` / `current` under the pages.
+    pub fn with_page_footers(mut self, previous: SharedString, current: SharedString) -> Self {
+        self.page_footers = Some((previous, current));
+        self
+    }
+
     pub fn new(
         previous: Option<&ImageBlob>,
         current: Option<&ImageBlob>,
@@ -295,6 +309,7 @@ impl ImageDiff {
                     .flags
                     .bool(corvene_core::flags::ids::IMAGE_DIFF_BORDER_OUTSIDE)
             }),
+            page_footers: None,
         }
     }
 
@@ -444,8 +459,15 @@ impl ImageDiff {
         }
     }
 
-    fn footer(side: &Side, cx: &App) -> AnyElement {
+    fn footer(side: &Side, page: Option<&SharedString>, cx: &App) -> AnyElement {
         let t = cx.ghd();
+        if let Some(page) = page {
+            return div()
+                .text_size(FONT_SIZE())
+                .text_color(t.text_secondary)
+                .child(page.clone())
+                .into_any_element();
+        }
         let (w, h) = side.natural.unwrap_or((0, 0));
         let strong = |s: &str| div().font_weight(FontWeight::SEMIBOLD).child(s.to_string());
         div()
@@ -477,7 +499,7 @@ impl ImageDiff {
             (container.height - zpx(90.)).max(zpx(0.)),
         );
         let max_fit = self.max_fit(image_box);
-        let column = |side: &Side, label: &str, color: Hsla| {
+        let column = |side: &Side, page: Option<&SharedString>, label: &str, color: Hsla| {
             div()
                 .flex()
                 .flex_col()
@@ -495,7 +517,7 @@ impl ImageDiff {
                         .child(label.to_string()),
                 )
                 .child(Self::image_element(side, image_box, color, extra, dark))
-                .child(Self::footer(side, cx))
+                .child(Self::footer(side, page, cx))
         };
         let diff_bytes = current.bytes as i64 - previous.bytes as i64;
         let percent = if previous.bytes == 0 {
@@ -533,24 +555,36 @@ impl ImageDiff {
                     .min_w_0()
                     .px(SPACING_DOUBLE())
                     .gap(SPACING())
-                    .child(column(previous, "Deleted", t.color_deleted))
-                    .child(column(current, "Added", t.color_new)),
+                    .child(column(
+                        previous,
+                        self.page_footers.as_ref().map(|f| &f.0),
+                        "Deleted",
+                        t.color_deleted,
+                    ))
+                    .child(column(
+                        current,
+                        self.page_footers.as_ref().map(|f| &f.1),
+                        "Added",
+                        t.color_new,
+                    )),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(zpx(4.))
-                    .text_color(t.text_secondary)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Diff:")
-                    .child(
-                        div()
-                            .when(diff_bytes > 0, |d| d.text_color(t.color_new))
-                            .when(diff_bytes < 0, |d| d.text_color(t.color_deleted))
-                            .child(summary),
-                    ),
-            )
+            .when(self.page_footers.is_none(), |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(zpx(4.))
+                        .text_color(t.text_secondary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Diff:")
+                        .child(
+                            div()
+                                .when(diff_bytes > 0, |d| d.text_color(t.color_new))
+                                .when(diff_bytes < 0, |d| d.text_color(t.color_deleted))
+                                .child(summary),
+                        ),
+                )
+            })
             .into_any_element()
     }
 

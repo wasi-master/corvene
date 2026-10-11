@@ -1,0 +1,19 @@
+# A changed PDF file (1322-pdf-diff): Corvene shows its pages with the image
+# diff modes and a Pages / Text switch; GitHub Desktop shows "This binary
+# file has changed." (deviations.md › Diff viewer).
+name: pdf-diff
+description: An edited PDF file shown page by page, then as text (Corvene only)
+setup: repo-pdf
+corvene_flags: 1322-pdf-diff=on
+steps:
+  - click: [125, 185]
+    wait: 2500
+  - snap: {name: first-page, corvene_only: true, note: "GHD shows the binary panel (1322-pdf-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [800, 120]}
+    wait: 2500
+  - snap: {name: changed-page, corvene_only: true, note: "Next Change jumps to page 2"}
+  - ghd: {skip: true}
+    corvene: {click: [1270, 97]}
+    wait: 1500
+  - snap: {name: text, corvene_only: true, note: "the Pages / Text switch (1322-pdf-diff)"}

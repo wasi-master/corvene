@@ -8676,6 +8676,22 @@ registry! {
         upstream: &[Upstream::issue(19804)],
         code: &["crates/corvene-ui/src/image_diff.rs"],
     },
+    /// PDF files diffed page by page.
+    PDF_DIFF = 1322 "pdf-diff" {
+        title: "PDF files as pages",
+        summary: "A changed .pdf file shows its old and new pages with the image diff modes \
+                  (2-up, Swipe, Onion Skin, Difference), one page at a time, with buttons for \
+                  the previous, next and next changed page. The diff header's Pages / Text \
+                  switch shows a line diff of the text on the pages instead (remembered for \
+                  every PDF file). Encrypted or broken files and files over 64 MB stay binary.",
+        ghd_behaviour: "PDF files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5009), Upstream::issue(15875)],
+        code: &["crates/corvene-core/src/pdf.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/diff.rs"],
+    },
 
 }
 

@@ -544,12 +544,65 @@ def _diff_marks(repo: Path) -> None:
     (repo / "assets" / "picture.png").write_bytes(_png(300, 200, _marks_picture(True)))
 
 
+# `repo-pdf` (`1322-pdf-diff`): a three-page PDF committed on top, then
+# edited so the working copy has a changed second page and a fourth page
+_PDF_PAGES = [
+    ["Quarterly report", "Prepared by the parity team"],
+    ["Revenue grew by 4 percent", "Costs stayed flat"],
+    ["Next steps", "Hire two engineers"],
+]
+_PDF_PAGES_EDITED = [
+    _PDF_PAGES[0],
+    ["Revenue grew by 9 percent", "Costs stayed flat", "Margins improved"],
+    _PDF_PAGES[2],
+    ["Appendix", "Raw figures are in the spreadsheet"],
+]
+
+
+def _pdf_bytes(pages: list[list[str]]) -> bytes:
+    """A PDF with one page per entry, each line in 24 pt Helvetica; the
+    binary comment after the header makes git call it binary, as it does
+    most PDF files (`corvene_core::pdf` tests use the same writer)."""
+    objects = [b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    pages_id = 1 + 2 * len(pages) + 1
+    kids = []
+    for lines in pages:
+        ops = "BT /F1 24 Tf 72 720 Td 30 TL\n" + "".join(f"({line}) Tj T*\n" for line in lines) + "ET"
+        objects.append(f"<< /Length {len(ops)} >>\nstream\n{ops}\nendstream".encode())
+        content = len(objects)
+        objects.append((f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 612 792] "
+                        f"/Resources << /Font << /F1 1 0 R >> >> /Contents {content} 0 R >>").encode())
+        kids.append(f"{len(objects)} 0 R")
+    objects.append(f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode())
+    objects.append(f"<< /Type /Catalog /Pages {pages_id} 0 R >>".encode())
+    out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n\0\n")
+    offsets = []
+    for i, obj in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    for offset in offsets:
+        out += f"{offset:010} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root {len(objects)} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def _pdf(repo: Path) -> None:
+    p = repo / "docs" / "report.pdf"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(_pdf_bytes(_PDF_PAGES))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the quarterly report", date="2026-09-28T09:00:00+00:00")
+    p.write_bytes(_pdf_bytes(_PDF_PAGES_EDITED))
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
-          diff_marks: bool = False) -> Path:
+          diff_marks: bool = False, pdf: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -574,7 +627,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `issue-134` is checked out off main, tracking `origin/main`
     (`1222-push-target-guard`). With `codeowners`, a commit adds
     `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`). With `diff_marks`, see `_diff_marks`
-    and no other working changes (flags 1316-1320)."""
+    and no other working changes (flags 1316-1320). With `pdf`, see `_pdf`
+    and no other working changes (`1322-pdf-diff`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -695,6 +749,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if diff_marks:
         _diff_marks(repo)
+        return repo
+    if pdf:
+        _pdf(repo)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel

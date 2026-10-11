@@ -169,7 +169,7 @@ pub fn working_directory_diff(
     let diff = parse_raw_diff_with_warnings(&out.stdout, &out.stderr);
     Ok(match diff {
         // `1306-utf16-diffs`: a UTF-16 text file (images stay images)
-        Diff::Binary if image_media_type(&file.path).is_none() && crate::utf16::decode_utf16() => {
+        Diff::Binary if binary_media_type(&file.path).is_none() && crate::utf16::decode_utf16() => {
             use crate::utf16::Side;
             let working = workdir.join(&file.path);
             let new = if file.status.kind == FileStatusKind::Deleted {
@@ -193,7 +193,7 @@ pub fn working_directory_diff(
             )
             .unwrap_or(Diff::Binary)
         }
-        Diff::Binary => {
+        diff if matches!(diff, Diff::Binary) || pdf_as_text(&file.path, &diff) => {
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
             image_diff(
                 &file.path,
@@ -454,10 +454,71 @@ pub fn image_diff(
     current: impl FnOnce() -> Option<Vec<u8>>,
     previous: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Diff {
-    let Some(media_type) = image_media_type(path) else {
+    let Some(media_type) = binary_media_type(path) else {
         return Diff::Binary;
     };
+    if media_type == PDF_MEDIA_TYPE {
+        let small = |bytes: Vec<u8>| (bytes.len() <= PDF_MAX_BYTES).then_some(bytes);
+        let diff = image_diff_as(
+            media_type,
+            kind,
+            || current().and_then(small),
+            || previous().and_then(small),
+        );
+        // one side too large: the whole file stays binary
+        let both = !kind.is_new_or_untracked() && kind != FileStatusKind::Deleted;
+        return match diff {
+            Diff::Image {
+                previous: None,
+                current: Some(_),
+            }
+            | Diff::Image {
+                previous: Some(_),
+                current: None,
+            } if both => Diff::Binary,
+            diff => diff,
+        };
+    }
     image_diff_as(media_type, kind, current, previous)
+}
+
+/// [`image_media_type`], plus [`PDF_MEDIA_TYPE`] for a PDF file while
+/// `1322-pdf-diff` is on: the binary files shown by the image diff.
+pub fn binary_media_type(path: &str) -> Option<&'static str> {
+    image_media_type(path).or_else(|| (pdf_diffs() && is_pdf(path)).then_some(PDF_MEDIA_TYPE))
+}
+
+/// Corvene `1322-pdf-diff`: a PDF file's media type in an image diff. GHD
+/// (`lib/git/diff.ts` `getDiffType`, `imageFileExtensions`) shows a PDF as
+/// "This binary file has changed." (`ui/diff/binary-file.tsx`).
+pub const PDF_MEDIA_TYPE: &str = "application/pdf";
+
+/// Corvene `1322-pdf-diff`: larger PDF files stay binary.
+pub const PDF_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// Set by the dispatcher from the flag.
+static PDF_DIFFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Turn PDF page diffs on or off (flag `1322-pdf-diff`).
+pub fn set_pdf_diffs(enabled: bool) {
+    PDF_DIFFS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn pdf_diffs() -> bool {
+    PDF_DIFFS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Corvene `1322-pdf-diff`: whether `path` is a PDF file.
+pub fn is_pdf(path: &str) -> bool {
+    path.rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+}
+
+/// Corvene `1322-pdf-diff`: a PDF file that git diffs as text (one saved
+/// without binary bytes) is shown as pages too.
+pub(crate) fn pdf_as_text(path: &str, diff: &Diff) -> bool {
+    pdf_diffs() && is_pdf(path) && matches!(diff, Diff::Text { .. } | Diff::LargeText { .. })
 }
 
 /// Corvene `794-svg-image-diff`: an SVG file's media type when it is shown
@@ -865,6 +926,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         lfs_not_downloaded: false,
         lfs_contents: false,
         utf16: None,
+        pdf_text: false,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

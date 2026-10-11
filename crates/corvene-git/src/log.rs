@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use corvene_models::{
     ChangesetData, Commit, CommitIdentity, CommittedFileChange, Diff, FileStatus, FileStatusKind,
-    GitStatusEntry, SignatureKind, image_media_type,
+    GitStatusEntry, SignatureKind,
 };
 
 use crate::detect::GitBinary;
@@ -1127,7 +1127,9 @@ fn finish_committed_diff(
     let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
     match crate::diff::parse_raw_diff(patch) {
         Diff::Binary
-            if utf16 && image_media_type(&file.path).is_none() && crate::utf16::decode_utf16() =>
+            if utf16
+                && crate::diff::binary_media_type(&file.path).is_none()
+                && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
             let new = if file.status.kind == FileStatusKind::Deleted {
@@ -1143,12 +1145,14 @@ fn finish_committed_diff(
             crate::utf16::text_diff(git.clone(), workdir, new, old, hide_whitespace, patch, None)
                 .unwrap_or(Diff::Binary)
         }
-        Diff::Binary => crate::diff::image_diff(
-            &file.path,
-            file.status.kind,
-            || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
-            || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
-        ),
+        diff if matches!(diff, Diff::Binary) || crate::diff::pdf_as_text(&file.path, &diff) => {
+            crate::diff::image_diff(
+                &file.path,
+                file.status.kind,
+                || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
+                || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
+            )
+        }
         other => other,
     }
 }

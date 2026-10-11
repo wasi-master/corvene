@@ -1964,6 +1964,10 @@ pub struct DiffWarnings {
     /// takes for binary; the diff compares its decoded text.
     #[serde(default)]
     pub utf16: Option<Utf16Diff>,
+    /// Corvene `1322-pdf-diff`: the diff compares the text extracted from
+    /// the pages of a PDF file, so its lines cannot be selected.
+    #[serde(default)]
+    pub pdf_text: bool,
 }
 
 /// Corvene `1306-utf16-diffs`: how a UTF-16 text file is stored.

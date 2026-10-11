@@ -50,6 +50,9 @@ thiserror = "2"
 regex = "1"
 # line and word diffs of diff lines (selection carry-over, intra-line changes)
 similar = "2"
+# `1322-pdf-diff`: PDF pages and text
+hayro = "=0.7.1"
+kurbo = "0.13"
 # Markdown for PR bodies / comments (GHD renders `marked` in a sandboxed webview)
 pulldown-cmark = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }

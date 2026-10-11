@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use corvene_models::{Diff, FileStatusKind, image_media_type};
+use corvene_models::{Diff, FileStatusKind};
 
 use crate::detect::GitBinary;
 
@@ -245,7 +245,7 @@ pub fn resolve_lfs_images(
     current: impl FnOnce() -> Option<Vec<u8>>,
     previous: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Diff {
-    let Some(media_type) = image_media_type(path) else {
+    let Some(media_type) = crate::diff::binary_media_type(path) else {
         return diff;
     };
     let resolve = |bytes: Vec<u8>| -> (bool, Option<Vec<u8>>) {

@@ -74,6 +74,7 @@ pub mod new_branch_flows;
 pub mod notifications;
 pub mod offset_from;
 pub mod packs;
+pub mod pdf;
 pub mod persistence;
 pub mod popup_manager;
 pub mod portable_paths;

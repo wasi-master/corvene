@@ -137,6 +137,7 @@ use crate::diff_view_rows::{
 };
 use crate::icons::{Octicon, octicon};
 use crate::image_diff::ImageDiff;
+use crate::pdf_diff::PdfDiff;
 use crate::scrollbar::{ScrollbarExt, gutter, scrollbar};
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme, mono_font};
@@ -241,6 +242,8 @@ pub fn diff_header(
         .children(svg_switch(path, cx))
         // `1318-csv-table-diff`
         .children(csv_switch(path, cx))
+        // `1322-pdf-diff`
+        .children(pdf_switch(path, view, cx))
         // `798-blame`
         .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
@@ -336,6 +339,30 @@ fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
         ["Text", "Table"],
         s.settings.csv_table_diff,
         |table, cx| Dispatcher::set_csv_table_diff(table, cx),
+        cx,
+    ))
+}
+
+/// `1322-pdf-diff`: the Pages / Text switch of a PDF file's header (one
+/// setting for every PDF file), when its diff shows pages.
+fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if !corvene_git::is_pdf(path) || !s.flags.bool(corvene_core::flags::ids::PDF_DIFF) {
+        return None;
+    }
+    let v = view.read(cx);
+    let pages = v
+        .pdf
+        .as_ref()
+        .is_some_and(|p| p.read(cx).failed().is_none());
+    if !pages && v.pdf_text.is_none() {
+        return None;
+    }
+    Some(view_switch(
+        ["pdf-view-switch", "pdf-view-pages", "pdf-view-text"],
+        ["Pages", "Text"],
+        s.settings.pdf_text_diff,
+        |text, cx| Dispatcher::set_pdf_text_diff(text, cx),
         cx,
     ))
 }
@@ -495,6 +522,29 @@ type CsvKey = (
     (u32, u32),
 );
 
+/// `1322-pdf-diff`: the text of a PDF file's two versions, as a diff.
+enum PdfText {
+    Reading,
+    Ready(Arc<Diff>),
+    /// A version did not open or had too much text.
+    Unreadable,
+}
+
+/// `1322-pdf-diff`: flipped into the diff generation of a PDF file's text
+/// diff, so its rows are built apart from the page diff's.
+const PDF_TEXT_GENERATION: u64 = 1 << 63;
+
+/// `1322-pdf-diff`: a page diff of a PDF file.
+fn is_pdf_diff(diff: &Diff) -> bool {
+    match diff {
+        Diff::Image { previous, current } => [previous, current]
+            .into_iter()
+            .flatten()
+            .any(|b| b.media_type == corvene_git::PDF_MEDIA_TYPE),
+        _ => false,
+    }
+}
+
 struct Snapshot {
     repo: u64,
     repo_path: std::path::PathBuf,
@@ -642,6 +692,14 @@ pub struct DiffView {
     /// `WhitespaceHintPopover` anchor.
     whitespace_hint: Option<Point<Pixels>>,
     image: Option<Entity<ImageDiff>>,
+    /// `1322-pdf-diff`: the page view of a PDF file's diff.
+    pdf: Option<Entity<PdfDiff>>,
+    /// `1322-pdf-diff`: the text diff of a PDF file for the header's Pages
+    /// / Text switch, with the page diff it was read from.
+    pdf_text: Option<(Arc<Diff>, PdfText)>,
+    _pdf_text_task: Option<Task<()>>,
+    /// `1322-pdf-diff`: renders again when `pdf` finds the file unreadable.
+    _pdf_observer: Option<Subscription>,
     context_menu: Option<Entity<ContextMenu>>,
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
@@ -741,6 +799,10 @@ impl DiffView {
             gear_bounds: Rc::new(Cell::new(Bounds::default())),
             whitespace_hint: None,
             image: None,
+            pdf: None,
+            pdf_text: None,
+            _pdf_text_task: None,
+            _pdf_observer: None,
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
@@ -936,6 +998,11 @@ impl DiffView {
         };
         let as_text = self.source == DiffSource::WorkingDirectory
             && rs.diff_as_text.as_deref() == Some(path.as_str());
+        // `1322-pdf-diff`: the Text side of a PDF file's Pages / Text switch
+        let (diff, generation, contents, old_contents) = match self.pdf_text_of(&diff, cx) {
+            Some(text) => (text, generation ^ PDF_TEXT_GENERATION, None, None),
+            None => (diff, generation, contents, old_contents),
+        };
         Some(Snapshot {
             repo: id,
             repo_path,
@@ -1281,13 +1348,30 @@ impl DiffView {
             self.hunks = Rc::new(hunks);
             self.expanded = true;
         }
-        self.image = match &*snap.diff {
+        self.image = None;
+        self.pdf = None;
+        self._pdf_observer = None;
+        if !is_pdf_diff(&snap.diff) && !snap.diff.warnings().is_some_and(|w| w.pdf_text) {
+            self.pdf_text = None;
+            self._pdf_text_task = None;
+        }
+        match &*snap.diff {
+            // `1322-pdf-diff`
+            Diff::Image { previous, current } if is_pdf_diff(&snap.diff) => {
+                let (previous, current, kind) = (previous.clone(), current.clone(), snap.kind);
+                let pdf = cx.new(|cx| PdfDiff::new(previous.as_ref(), current.as_ref(), kind, cx));
+                // a file that does not open shows the binary panel
+                self._pdf_observer = Some(cx.observe(&pdf, |_, _, cx| cx.notify()));
+                self.pdf = Some(pdf);
+            }
             Diff::Image { previous, current } => {
                 let (previous, current, kind) = (previous.clone(), current.clone(), snap.kind);
-                Some(cx.new(|cx| ImageDiff::new(previous.as_ref(), current.as_ref(), kind, cx)))
+                self.image = Some(
+                    cx.new(|cx| ImageDiff::new(previous.as_ref(), current.as_ref(), kind, cx)),
+                );
             }
-            _ => None,
-        };
+            _ => {}
+        }
         let same_file = self
             .rows_key
             .as_ref()
@@ -1573,12 +1657,84 @@ impl DiffView {
         }
     }
 
+    /// `1322-pdf-diff`: whether a PDF file's diff shows its text (the
+    /// header's switch; not inside a stack).
+    fn wants_pdf_text(&self, diff: &Diff, cx: &App) -> bool {
+        let s = self.state.read(cx);
+        self.stacked_path.is_none()
+            && is_pdf_diff(diff)
+            && s.settings.pdf_text_diff
+            && s.flags.bool(corvene_core::flags::ids::PDF_DIFF)
+    }
+
+    /// `1322-pdf-diff`: the text diff to show for the page diff `diff`,
+    /// once read.
+    fn pdf_text_of(&self, diff: &Arc<Diff>, cx: &App) -> Option<Arc<Diff>> {
+        if !self.wants_pdf_text(diff, cx) {
+            return None;
+        }
+        match self.pdf_text.as_ref()? {
+            (source, PdfText::Ready(text)) if Arc::ptr_eq(source, diff) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
+    /// `1322-pdf-diff`: reads the text of both versions of a PDF file in
+    /// the background when its diff should show it.
+    fn request_pdf_text(&mut self, diff: &Arc<Diff>, cx: &mut Context<Self>) {
+        if !self.wants_pdf_text(diff, cx)
+            || self
+                .pdf_text
+                .as_ref()
+                .is_some_and(|(source, _)| Arc::ptr_eq(source, diff))
+        {
+            return;
+        }
+        let Diff::Image { previous, current } = &**diff else {
+            return;
+        };
+        let (old, new) = (
+            previous.as_ref().map(|b| b.bytes.clone()),
+            current.as_ref().map(|b| b.bytes.clone()),
+        );
+        self.pdf_text = Some((diff.clone(), PdfText::Reading));
+        let read = cx.background_executor().spawn(async move {
+            let text = |bytes: Option<Vec<u8>>| -> Result<Option<String>, ()> {
+                let Some(bytes) = bytes else {
+                    return Ok(None);
+                };
+                let doc = corvene_core::pdf::PdfDocument::open(bytes).map_err(|_| ())?;
+                doc.text().map(Some).ok_or(())
+            };
+            let (old, new) = (text(old).ok()?, text(new).ok()?);
+            Some(corvene_core::pdf::text_diff(old.as_deref(), new.as_deref()))
+        });
+        let source = diff.clone();
+        self._pdf_text_task = Some(cx.spawn(async move |this, cx| {
+            let text = read.await;
+            this.update(cx, |this, cx| {
+                if this
+                    .pdf_text
+                    .as_ref()
+                    .is_some_and(|(s, _)| Arc::ptr_eq(s, &source))
+                {
+                    this.pdf_text = Some((
+                        source,
+                        text.map_or(PdfText::Unreadable, |d| PdfText::Ready(Arc::new(d))),
+                    ));
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+    }
+
     /// `757-typechange-diff`: a type change whose lines are not selectable
     /// or expandable; also `796-lfs-text-diff`'s contents of a file stored
     /// in Git LFS (the index holds its pointer).
     fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
         let warnings = diff.warnings();
-        warnings.is_some_and(|w| w.lfs_contents)
+        warnings.is_some_and(|w| w.lfs_contents || w.pdf_text)
             || (warnings.is_some_and(|w| w.type_change.is_some())
                 && self
                     .state
@@ -3308,6 +3464,7 @@ impl DiffView {
     fn prepare(&mut self, cx: &mut Context<Self>) -> Option<Snapshot> {
         // first: a stacked file whose diff has not arrived costs nothing more
         let snap = self.snapshot(cx)?;
+        self.request_pdf_text(&snap.diff, cx);
         // View › Zoom changed the row heights the list has cached
         let zoom = crate::theme::sizes::zoom_factor();
         // … and so does `751-diff-font-size`
@@ -3396,6 +3553,21 @@ impl DiffView {
                         .bool(corvene_core::flags::ids::TGA_IMAGE_DIFF) =>
             {
                 self.binary_panel(snap, cx)
+            }
+            // `1322-pdf-diff`
+            Diff::Image { .. } if is_pdf_diff(&snap.diff) => {
+                if self.wants_pdf_text(&snap.diff, cx) {
+                    return Some(match self.pdf_text.as_ref().map(|(_, t)| t) {
+                        Some(PdfText::Unreadable) => {
+                            self.panel("The text of this PDF file could not be read.", cx)
+                        }
+                        _ => self.panel("Reading the text of the PDF file…", cx),
+                    });
+                }
+                match self.pdf.clone() {
+                    Some(pdf) if pdf.read(cx).failed().is_none() => pdf.into_any_element(),
+                    _ => self.binary_panel(snap, cx),
+                }
             }
             Diff::Image { .. } => match self.image.clone() {
                 Some(image) => image.into_any_element(),
@@ -3775,6 +3947,17 @@ impl DiffView {
                 paragraph(vec![
                     "This file is stored in Git LFS: its contents are compared. Its lines \
                      cannot be selected one by one."
+                        .into(),
+                ])
+                .into_any_element(),
+            );
+        }
+        // `1322-pdf-diff`
+        if warnings.pdf_text {
+            items.push(
+                paragraph(vec![
+                    "This is the text on the pages of the PDF file. Its lines cannot be \
+                     selected one by one."
                         .into(),
                 ])
                 .into_any_element(),

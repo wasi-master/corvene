@@ -176,6 +176,10 @@ pub struct Settings {
     /// (off: as text). The diff header's Table/Text switch flips it.
     #[serde(default = "default_true")]
     pub csv_table_diff: bool,
+    /// Corvene `1322-pdf-diff`: PDF diffs show the text on their pages
+    /// (off: the pages). The diff header's Pages/Text switch flips it.
+    #[serde(default)]
+    pub pdf_text_diff: bool,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -526,6 +530,7 @@ impl Default for Settings {
             diff_mark_moved_lines: true,
             diff_mark_stylistic_changes: true,
             csv_table_diff: true,
+            pdf_text_diff: false,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,
