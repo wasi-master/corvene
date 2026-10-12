@@ -5,12 +5,17 @@
 //! stageable line by line like any text diff).
 //!
 //! GitHub Desktop shows both as text diffs (`app/src/ui/diff/index.tsx`).
+//!
+//! Corvene `1334-markdown-preview-diff`: a Markdown file's Source /
+//! Preview switch works the same way (Source is git's diff; Preview the
+//! LaTeX view over the Markdown blocks).
 
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use corvene_core::{
-    Diff, Dispatcher, LatexDiffView as LatexView, NotebookDiffView as NotebookView,
+    Diff, Dispatcher, LatexDiffView as LatexView, MarkdownDiffView as MarkdownView,
+    NotebookDiffView as NotebookView,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -49,12 +54,17 @@ pub(super) struct RichPane {
 
 /// A notebook or LaTeX diff.
 pub(super) fn is_rich(diff: &Diff) -> bool {
-    matches!(diff, Diff::Notebook { .. } | Diff::Latex { .. })
+    matches!(
+        diff,
+        Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. }
+    )
 }
 
 fn source_of(diff: &Diff) -> Option<&Diff> {
     match diff {
-        Diff::Notebook { source, .. } | Diff::Latex { source, .. } => Some(source),
+        Diff::Notebook { source, .. }
+        | Diff::Latex { source, .. }
+        | Diff::Markdown { source, .. } => Some(source),
         _ => None,
     }
 }
@@ -89,6 +99,17 @@ fn effective(diff: &Diff, s: &corvene_core::AppState) -> Effective {
                 Effective::Pages
             }
             LatexView::Pages => Effective::Rendered,
+        },
+        Diff::Markdown { .. }
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::MARKDOWN_PREVIEW_DIFF) =>
+        {
+            Effective::Text
+        }
+        Diff::Markdown { .. } => match s.settings.markdown_diff_view {
+            MarkdownView::Source => Effective::Text,
+            MarkdownView::Preview => Effective::Rendered,
         },
         _ => Effective::Rendered,
     }
@@ -160,6 +181,27 @@ pub(super) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl Into
                 &labels,
                 selected,
                 move |ix, cx| Dispatcher::set_latex_diff_view(values[ix], cx),
+                cx,
+            ))
+        }
+        Diff::Markdown { .. } => {
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::MARKDOWN_PREVIEW_DIFF)
+            {
+                return None;
+            }
+            let values = [MarkdownView::Source, MarkdownView::Preview];
+            let selected = values
+                .iter()
+                .position(|v| *v == s.settings.markdown_diff_view)
+                .unwrap_or(0);
+            Some(view_switch_n(
+                "markdown-view-switch",
+                &["markdown-view-source", "markdown-view-preview"],
+                &["Source", "Preview"],
+                selected,
+                move |ix, cx| Dispatcher::set_markdown_diff_view(values[ix], cx),
                 cx,
             ))
         }
@@ -317,6 +359,18 @@ impl DiffView {
                     .is_some_and(|v| Arc::ptr_eq(v.read(cx).diff(), &source));
                 if !keep {
                     self.rich.latex = Some(cx.new(|cx| LatexDiff::new(source, cx)));
+                }
+            }
+            Diff::Markdown { .. } => {
+                self.rich.notebook = None;
+                let keep = self
+                    .rich
+                    .latex
+                    .as_ref()
+                    .is_some_and(|v| Arc::ptr_eq(v.read(cx).diff(), &source));
+                if !keep {
+                    let path = snap.path.clone();
+                    self.rich.latex = Some(cx.new(|cx| LatexDiff::markdown(source, &path, cx)));
                 }
             }
             _ => {}

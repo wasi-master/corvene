@@ -218,6 +218,10 @@ pub struct Settings {
     /// diff header's Rendered / Text / Pages switch).
     #[serde(default)]
     pub latex_diff_view: LatexDiffView,
+    /// Corvene `1334-markdown-preview-diff`: how Markdown files are shown
+    /// (the diff header's Source / Preview switch).
+    #[serde(default)]
+    pub markdown_diff_view: MarkdownDiffView,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -552,6 +556,17 @@ pub enum LatexDiffView {
     Pages,
 }
 
+/// Corvene `1334-markdown-preview-diff`: the diff header's Source /
+/// Preview switch of a Markdown file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarkdownDiffView {
+    /// Git's own diff (GHD's only view).
+    #[default]
+    Source,
+    /// Both versions rendered, the changed blocks marked.
+    Preview,
+}
+
 /// Corvene (`1314-code-owners`): a file row's owners as text or an icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CodeOwnersDisplay {
@@ -638,6 +653,7 @@ impl Default for Settings {
             notebook_diff_view: NotebookDiffView::Notebook,
             notebook_filters: crate::notebook_diff::NotebookFilters::default(),
             latex_diff_view: LatexDiffView::Rendered,
+            markdown_diff_view: MarkdownDiffView::Source,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

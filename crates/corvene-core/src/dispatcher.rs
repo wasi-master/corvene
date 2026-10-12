@@ -184,6 +184,10 @@ impl Dispatcher {
             flags.bool(crate::flags::ids::NOTEBOOK_DIFF),
         );
         corvene_git::latex_file::set_read_latex_files(flags.bool(crate::flags::ids::LATEX_DIFF));
+        // `1334-markdown-preview-diff`
+        corvene_git::markdown_file::set_read_markdown_files(
+            flags.bool(crate::flags::ids::MARKDOWN_PREVIEW_DIFF),
+        );
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7275,6 +7279,15 @@ impl Dispatcher {
     /// Corvene `1332-latex-diff`: the LaTeX switch.
     pub fn set_latex_diff_view(view: crate::persistence::LatexDiffView, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.latex_diff_view = view);
+    }
+
+    /// Corvene `1334-markdown-preview-diff`: the diff header's Source /
+    /// Preview switch.
+    pub fn set_markdown_diff_view(
+        view: crate::persistence::MarkdownDiffView,
+        cx: &mut dyn Host,
+    ) {
+        Self::update_settings(cx, |s| s.markdown_diff_view = view);
     }
 
     /// Corvene `1331-notebook-diff`: a notebook cell's checkbox, the

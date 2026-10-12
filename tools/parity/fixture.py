@@ -1192,13 +1192,80 @@ def _notebooks(repo: Path) -> None:
     (paper / "refs.bib").write_text(_BIB_EDITED)
 
 
+# `repo-markdown` (`1334-markdown-preview-diff`): a README with front
+# matter, a picture, a list, a table and code, committed on top, then
+# edited: a reworded paragraph, a removed and an added list item, a
+# changed table cell, a new alert and a recoloured picture
+_README = """---
+title: Fruit survey
+---
+# Fruit survey
+
+We asked **120 people** which fruit they eat most often.
+
+![Chart of the answers](img/chart.png)
+
+## Findings
+
+- Apples are the favourite
+- Bananas come second
+- Nobody picked durian
+
+| Fruit | Share |
+| --- | --- |
+| Apple | 41% |
+| Banana | 27% |
+
+```python
+print("thanks for answering")
+```
+"""
+_README_EDITED = """---
+title: Fruit survey
+---
+# Fruit survey
+
+We asked **240 people** in two cities which fruit they eat most often.
+
+![Chart of the answers](img/chart.png)
+
+## Findings
+
+- Apples are the favourite
+- Bananas come second
+- Mangoes are rising fast
+
+| Fruit | Share |
+| --- | --- |
+| Apple | 38% |
+| Banana | 27% |
+
+> [!NOTE]
+> The second city was added in October.
+
+```python
+print("thanks for answering")
+```
+"""
+
+
+def _markdown(repo: Path) -> None:
+    (repo / "img").mkdir(parents=True, exist_ok=True)
+    (repo / "README.md").write_text(_README)
+    (repo / "img" / "chart.png").write_bytes(_png(240, 90, (84, 160, 255)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Write up the fruit survey", date="2026-09-28T09:00:00+00:00")
+    (repo / "README.md").write_text(_README_EDITED)
+    (repo / "img" / "chart.png").write_bytes(_png(240, 90, (255, 140, 60)))
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
-          documents: bool = False, notebooks: bool = False) -> Path:
+          documents: bool = False, notebooks: bool = False, markdown: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1362,6 +1429,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if documents:
         _documents(repo)
+        return repo
+    if markdown:
+        _markdown(repo)
         return repo
     if notebooks:
         _notebooks(repo)

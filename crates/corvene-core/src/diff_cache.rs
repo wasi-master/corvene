@@ -131,8 +131,11 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|n| n.weight())
             .sum(),
-        // `1332-latex-diff`
+        // `1332-latex-diff`, `1334-markdown-preview-diff`
         corvene_models::Diff::Latex {
+            previous, current, ..
+        }
+        | corvene_models::Diff::Markdown {
             previous, current, ..
         } => [previous, current]
             .into_iter()

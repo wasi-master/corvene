@@ -133,6 +133,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Document { .. } => "Document",
         Diff::Notebook { .. } => "Notebook",
         Diff::Latex { .. } => "Latex",
+        Diff::Markdown { .. } => "Markdown",
     }
 }
 

@@ -345,7 +345,9 @@ fn apply_hunks_to_index(
             return apply_hunks_to_index(git, workdir, file, source, options);
         }
         // `1331-notebook-diff` / `1332-latex-diff`: lines of git's own diff
-        Diff::Notebook { source, .. } | Diff::Latex { source, .. } => {
+        Diff::Notebook { source, .. }
+        | Diff::Latex { source, .. }
+        | Diff::Markdown { source, .. } => {
             return apply_hunks_to_index(git, workdir, file, source, options);
         }
         Diff::Binary

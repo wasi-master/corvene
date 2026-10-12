@@ -8922,6 +8922,25 @@ registry! {
         code: &["crates/corvene-math/src/lib.rs", "crates/corvene-core/src/markdown.rs", "crates/corvene-ui/src/markdown.rs", "crates/corvene-ui/src/math.rs"],
     },
 
+    /// A rendered preview of Markdown diffs.
+    MARKDOWN_PREVIEW_DIFF = 1334 "markdown-preview-diff" {
+        title: "Markdown preview diffs",
+        summary: "A changed Markdown file (.md, .markdown, .mdx, .Rmd, .qmd, .livemd and \
+                  other Markdown extensions) gets a Source / Preview switch in the diff \
+                  header. Preview renders both versions as GitHub would (headings, lists \
+                  item by item, tables, task lists, alerts, highlighted code, math, the \
+                  repository's pictures at each version, YAML front matter as code) with \
+                  added blocks green, removed ones red and edited paragraphs marked word by \
+                  word, side by side in split mode. Source is the usual line diff.",
+        ghd_behaviour: "Markdown files only have the text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/markdown_file.rs", "crates/corvene-core/src/markdown.rs", "crates/corvene-ui/src/latex_diff.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

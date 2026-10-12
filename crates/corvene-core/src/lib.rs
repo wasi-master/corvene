@@ -73,6 +73,7 @@ pub mod lfs_locks;
 pub mod line_selection;
 pub mod list_selection;
 pub mod markdown;
+pub mod markdown_doc;
 pub mod markdown_images;
 pub mod mco;
 pub mod menu_bar_status;
@@ -163,7 +164,7 @@ pub use persistence::{
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
 pub use persistence::DocumentDiffView;
-pub use persistence::{LatexDiffView, NotebookDiffView};
+pub use persistence::{LatexDiffView, MarkdownDiffView, NotebookDiffView};
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{

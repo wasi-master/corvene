@@ -9,6 +9,10 @@
 //!
 //! GitHub Desktop shows these files as text only (`app/src/ui/diff/
 //! text-diff.tsx`); the header's switch keeps that view as Text.
+//!
+//! Corvene `1334-markdown-preview-diff`: a Markdown file's Preview is the
+//! same view over `corvene_core::markdown_doc` blocks (math typeset with
+//! `1333-markdown-math`).
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -60,6 +64,9 @@ fn sides(diff: &Diff) -> (Option<&LatexBlob>, Option<&LatexBlob>) {
     match diff {
         Diff::Latex {
             previous, current, ..
+        }
+        | Diff::Markdown {
+            previous, current, ..
         } => (previous.as_deref(), current.as_deref()),
         _ => (None, None),
     }
@@ -84,14 +91,42 @@ enum Read {
 impl LatexDiff {
     /// `diff` is a `Diff::Latex`.
     pub fn new(diff: Arc<Diff>, cx: &mut Context<Self>) -> Self {
+        Self::build(diff, false, cx)
+    }
+
+    /// `1334-markdown-preview-diff`: `diff` is a `Diff::Markdown` of the
+    /// file at `path`.
+    pub fn markdown(diff: Arc<Diff>, path: &str, cx: &mut Context<Self>) -> Self {
+        Self::build(diff, corvene_core::markdown_doc::is_mdx(path), cx)
+    }
+
+    fn build(diff: Arc<Diff>, mdx: bool, cx: &mut Context<Self>) -> Self {
+        let math = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+            s.read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::MARKDOWN_MATH)
+        });
         let job = diff.clone();
         let task = cx.background_executor().spawn(async move {
-            let kind = match &*job {
-                Diff::Latex { kind, .. } => *kind,
-                _ => LatexKind::Document,
-            };
             let (previous, current) = sides(&job);
             let text = |b: Option<&LatexBlob>| b.map(|b| b.text.clone()).unwrap_or_default();
+            let kind = match &*job {
+                Diff::Latex { kind, .. } => *kind,
+                Diff::Markdown { .. } => {
+                    let parse = |t: String| corvene_core::markdown_doc::parse_document(&t, mdx, math);
+                    let old = parse(text(previous));
+                    let new = parse(text(current));
+                    let rows = block_diff(&old, &new);
+                    return Read::Document {
+                        old,
+                        new,
+                        rows,
+                        macros: String::new(),
+                        title: None,
+                    };
+                }
+                _ => LatexKind::Document,
+            };
             match kind {
                 LatexKind::Document => {
                     let old = corvene_core::latex_doc::parse(&text(previous));

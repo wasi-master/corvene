@@ -30,6 +30,7 @@ pub mod lfs_locks;
 pub mod lfs_progress;
 pub mod linked_files;
 pub mod log;
+pub mod markdown_file;
 mod log_gix;
 pub mod notebook_file;
 pub mod ops;

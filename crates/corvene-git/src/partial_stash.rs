@@ -308,7 +308,9 @@ fn part_of<'a>(
         crate::diff::working_directory_diff(git.clone(), workdir, file, false, false, false, None)?;
     // `1331-notebook-diff` / `1332-latex-diff`: the lines of git's own diff
     let diff = match diff {
-        Diff::Notebook { source, .. } | Diff::Latex { source, .. } => *source,
+        Diff::Notebook { source, .. }
+        | Diff::Latex { source, .. }
+        | Diff::Markdown { source, .. } => *source,
         diff => diff,
     };
     let (hunks, utf16) = match &diff {

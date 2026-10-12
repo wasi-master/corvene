@@ -2600,6 +2600,36 @@ pub struct LatexBlob {
     pub images: Vec<(String, ImageBlob)>,
 }
 
+/// Corvene `1334-markdown-preview-diff`: one side of a Markdown diff: the
+/// text and the repository pictures it links to, read at the same
+/// revision, by the path as written (the shape of a [`LatexBlob`]).
+pub type MarkdownBlob = LatexBlob;
+
+/// Corvene `1334-markdown-preview-diff`: whether `path` is Markdown (or a
+/// Markdown dialect: MDX, R Markdown, Quarto, Livebook).
+pub fn is_markdown_file(path: &str) -> bool {
+    let Some((_, ext)) = path.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown"
+            | "mdown"
+            | "mkd"
+            | "mkdn"
+            | "mkdown"
+            | "mdwn"
+            | "mdtxt"
+            | "mdtext"
+            | "mdx"
+            | "rmd"
+            | "qmd"
+            | "livemd"
+            | "ronn"
+            | "workbook"
+    )
+}
+
 /// Corvene `1331-notebook-diff`: whether `path` is a Jupyter notebook.
 pub fn is_notebook_file(path: &str) -> bool {
     path.rsplit_once('.')
@@ -2886,6 +2916,13 @@ pub enum Diff {
         current: Option<std::sync::Arc<LatexBlob>>,
         source: Box<Diff>,
     },
+    /// Corvene `1334-markdown-preview-diff`: a Markdown file that can be
+    /// shown rendered. `source` is git's own diff, for the Source view.
+    Markdown {
+        previous: Option<std::sync::Arc<MarkdownBlob>>,
+        current: Option<std::sync::Arc<MarkdownBlob>>,
+        source: Box<Diff>,
+    },
 }
 
 impl Diff {
@@ -2898,7 +2935,9 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.line_count(),
-            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.line_count(),
+            Diff::Notebook { source, .. }
+            | Diff::Latex { source, .. }
+            | Diff::Markdown { source, .. } => source.line_count(),
             _ => 0,
         }
     }
@@ -2912,7 +2951,9 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.hunks(),
-            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.hunks(),
+            Diff::Notebook { source, .. }
+            | Diff::Latex { source, .. }
+            | Diff::Markdown { source, .. } => source.hunks(),
             _ => None,
         }
     }
@@ -2925,7 +2966,9 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.warnings(),
-            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.warnings(),
+            Diff::Notebook { source, .. }
+            | Diff::Latex { source, .. }
+            | Diff::Markdown { source, .. } => source.warnings(),
             _ => None,
         }
     }

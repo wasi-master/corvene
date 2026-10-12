@@ -129,7 +129,9 @@ fn kind_of(diff: Option<&Arc<Diff>>, loading: bool) -> DiffKindVm {
         }) => DiffKindVm::Text,
         Some(Diff::Document { .. }) => DiffKindVm::Binary,
         // `1331-notebook-diff`, `1332-latex-diff`: git's own diff
-        Some(Diff::Notebook { .. } | Diff::Latex { .. }) => DiffKindVm::Text,
+        Some(Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. }) => {
+            DiffKindVm::Text
+        }
     }
 }
 

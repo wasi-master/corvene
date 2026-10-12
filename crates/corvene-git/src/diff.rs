@@ -244,11 +244,13 @@ pub fn working_directory_diff(
             )
             .unwrap_or(diff)
         }
-        // `1331-notebook-diff` / `1332-latex-diff`: a notebook read into
-        // cells, a LaTeX file shown rendered, next to git's own diff
+        // `1331-notebook-diff` / `1332-latex-diff` /
+        // `1334-markdown-preview-diff`: a notebook read into cells, a LaTeX
+        // or Markdown file shown rendered, next to git's own diff
         diff @ (Diff::Text { .. } | Diff::LargeText { .. })
             if crate::notebook_file::is_notebook(&file.path)
-                || crate::latex_file::is_latex(&file.path) =>
+                || crate::latex_file::is_latex(&file.path)
+                || crate::markdown_file::is_markdown(&file.path) =>
         {
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
             let (old_rev, old_path) = match &old_side {
@@ -268,6 +270,15 @@ pub fn working_directory_diff(
             let source = diff.clone();
             if crate::notebook_file::is_notebook(&file.path) {
                 crate::notebook_file::notebook_diff(
+                    &file.path,
+                    file.status.kind,
+                    current,
+                    previous,
+                    source,
+                    linked,
+                )
+            } else if crate::markdown_file::is_markdown(&file.path) {
+                crate::markdown_file::markdown_diff(
                     &file.path,
                     file.status.kind,
                     current,

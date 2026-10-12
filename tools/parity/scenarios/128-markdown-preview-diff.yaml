@@ -1,0 +1,21 @@
+# A README's Preview diff (1334-markdown-preview-diff, off in the GitHub
+# Desktop preset; deviations.md › Diff viewer). GHD shows the text diff,
+# which stays Corvene's default (Source). The preview shows the front
+# matter as code, the reworded paragraph old over new with its changed
+# words marked, the picture at both revisions, the replaced list item, the
+# edited table and the new alert.
+name: markdown-preview-diff
+description: A README diffed as Source, then as a rendered Preview (Corvene only)
+setup: repo-markdown
+corvene_flags: 1334-markdown-preview-diff=on
+steps:
+  - click: [125, 214]
+    wait: 1200
+  - snap: {name: source, note: "Source is the text diff, as in GHD"}
+  - ghd: {skip: true}
+    corvene: {click: [1262, 97]}
+    wait: 1500
+  - snap: {name: preview, corvene_only: true, note: "the Source / Preview switch (1334-markdown-preview-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [1205, 97]}
+    wait: 800

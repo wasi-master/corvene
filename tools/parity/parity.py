@@ -158,7 +158,8 @@ class Run:
                              "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks",
                              "repo-mismatch", "repo-codeowners", "repo-diff-marks",
                              "repo-pdf", "repo-images",
-                             "repo-archives", "repo-documents", "repo-notebooks")
+                             "repo-archives", "repo-documents", "repo-notebooks",
+                             "repo-markdown")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
@@ -191,6 +192,9 @@ class Run:
         # `repo-notebooks`: edited notebooks, a LaTeX paper and its
         # bibliography (`1331-notebook-diff`, `1332-latex-diff`)
         notebooks = setup == "repo-notebooks"
+        # `repo-markdown`: an edited README and its picture
+        # (`1334-markdown-preview-diff`)
+        markdown = setup == "repo-markdown"
         # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
         # fixtures' `lfs.url`
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
@@ -198,11 +202,13 @@ class Run:
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
-                               documents=documents, notebooks=notebooks) if with_repo else None
+                               documents=documents, notebooks=notebooks,
+                               markdown=markdown) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
-                               documents=documents, notebooks=notebooks) if with_repo else None
+                               documents=documents, notebooks=notebooks,
+                               markdown=markdown) if with_repo else None
         # `tags: {name: rev}`: lightweight tags added to both fixtures before
         # either app opens them
         for repo in (repo_g, repo_c) if with_repo else ():

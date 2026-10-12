@@ -3975,7 +3975,9 @@ impl DiffView {
             // `1324-document-diff`
             Diff::Document { .. } => self.document_panel(cx),
             // `1331-notebook-diff` / `1332-latex-diff`
-            Diff::Notebook { .. } | Diff::Latex { .. } => self.rich_panel(snap, cx),
+            Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. } => {
+                self.rich_panel(snap, cx)
+            }
         })
     }
 
