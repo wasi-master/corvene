@@ -335,7 +335,10 @@ mod tests {
         let old = [item("a", 1), item("b", 2), item("c", 3)];
         let new = [item("a", 1), item("c", 2)];
         use Status::*;
-        assert_eq!(statuses(&block_rows((&old, &[]), (&new, &[]))), [Same, Deleted, Same]);
+        assert_eq!(
+            statuses(&block_rows((&old, &[]), (&new, &[]))),
+            [Same, Deleted, Same]
+        );
     }
 
     #[test]

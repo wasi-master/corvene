@@ -167,10 +167,35 @@ pub fn working_directory_diff(
         ));
     }
     let diff = parse_raw_diff_with_warnings(&out.stdout, &out.stderr);
+    // `1335-video-diff` / `1336-audio-diff`: binary, or an LFS pointer's text
+    if crate::media_file::media_diff_kind(&file.path).is_some()
+        && matches!(
+            diff,
+            Diff::Binary | Diff::Text { .. } | Diff::LargeText { .. }
+        )
+    {
+        let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+        let working = workdir.join(&file.path);
+        let media = crate::media_file::media_diff(
+            git.clone(),
+            workdir,
+            &file.path,
+            file.status.kind,
+            crate::archive::SideRef::File(&working),
+            match &old_side {
+                Some((rev, path)) => crate::archive::SideRef::Blob(rev, path),
+                None => crate::archive::SideRef::Blob("HEAD", previous_path),
+            },
+        );
+        if let Some(media) = media {
+            return Ok(media);
+        }
+    }
     Ok(match diff {
         // `1306-utf16-diffs`: a UTF-16 text file (images stay images)
         Diff::Binary
             if binary_media_type(&file.path).is_none()
+                && crate::media_file::media_diff_kind(&file.path).is_none()
                 && crate::table_file::table_format(&file.path).is_none()
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)

@@ -70,8 +70,7 @@ fn find_soffice() -> Option<PathBuf> {
 /// used.
 type Converted = HashMap<u64, (Instant, Arc<Vec<u8>>)>;
 
-static CONVERTED: LazyLock<Mutex<Converted>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static CONVERTED: LazyLock<Mutex<Converted>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The Pages diff of a document diff: a `Diff::Image` of the two versions
 /// as PDF files (`corvene_git::PDF_MEDIA_TYPE`). Blocks for a few seconds

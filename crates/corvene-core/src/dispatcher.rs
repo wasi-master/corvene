@@ -188,6 +188,8 @@ impl Dispatcher {
         corvene_git::markdown_file::set_read_markdown_files(
             flags.bool(crate::flags::ids::MARKDOWN_PREVIEW_DIFF),
         );
+        // `1335-video-diff`, `1336-audio-diff`, `1337-media-ffmpeg`
+        crate::media::set_media_diffs(&flags);
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7283,10 +7285,7 @@ impl Dispatcher {
 
     /// Corvene `1334-markdown-preview-diff`: the diff header's Source /
     /// Preview switch.
-    pub fn set_markdown_diff_view(
-        view: crate::persistence::MarkdownDiffView,
-        cx: &mut dyn Host,
-    ) {
+    pub fn set_markdown_diff_view(view: crate::persistence::MarkdownDiffView, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.markdown_diff_view = view);
     }
 
@@ -7336,6 +7335,25 @@ impl Dispatcher {
     /// Modified-image diff tab (`_changeImageDiffType`).
     pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.image_diff_type = kind);
+    }
+
+    /// Corvene `1335-video-diff`: a modified video's tab.
+    pub fn set_video_diff_mode(mode: corvene_models::VideoDiffMode, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.video_diff_mode = mode);
+    }
+
+    /// Corvene `1336-audio-diff`: a modified sound's tab.
+    pub fn set_audio_diff_mode(mode: corvene_models::AudioDiffMode, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.audio_diff_mode = mode);
+    }
+
+    /// Corvene `1335-video-diff` / `1336-audio-diff`: the players' volume
+    /// (0..1) and mute.
+    pub fn set_media_volume(volume: f32, muted: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| {
+            s.media_volume = volume.clamp(0., 1.);
+            s.media_muted = muted;
+        });
     }
 
     /// Corvene `1329-font-diff`: the font viewer's tab.

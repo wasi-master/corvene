@@ -104,6 +104,12 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|c| c.len() + 24)
             .sum(),
+        // `1335-video-diff` / `1336-audio-diff`: the files stay on disk
+        corvene_models::Diff::Media(media) => [&media.previous, &media.current]
+            .into_iter()
+            .flatten()
+            .map(|s| 1024 + s.info.cover.as_ref().map_or(0, |c| c.bytes.len()))
+            .sum(),
         corvene_models::Diff::Font { previous, current } => {
             previous.as_ref().map_or(0, |f| f.bytes.len())
                 + current.as_ref().map_or(0, |f| f.bytes.len())

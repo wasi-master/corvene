@@ -228,6 +228,9 @@ impl Dispatcher {
                 ids::NOTEBOOK_DIFF,
                 ids::LATEX_DIFF,
                 ids::MARKDOWN_PREVIEW_DIFF,
+                ids::VIDEO_DIFF,
+                ids::AUDIO_DIFF,
+                ids::MEDIA_FFMPEG,
             ]
             .map(|id| flags.bool(id))
         };
@@ -245,6 +248,7 @@ impl Dispatcher {
             corvene_git::markdown_file::set_read_markdown_files(
                 now.bool(ids::MARKDOWN_PREVIEW_DIFF),
             );
+            crate::media::set_media_diffs(&now);
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);

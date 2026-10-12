@@ -119,6 +119,8 @@ fn kind_of(diff: Option<&Arc<Diff>>, loading: bool) -> DiffKindVm {
         Some(Diff::Binary | Diff::Table { .. } | Diff::Archive(_)) => DiffKindVm::Binary,
         Some(Diff::Image { .. }) => DiffKindVm::Image,
         Some(Diff::Font { .. } | Diff::FontSource { .. }) => DiffKindVm::Binary,
+        // `1335-video-diff` / `1336-audio-diff`: no player in the Android app
+        Some(Diff::Media(_)) => DiffKindVm::Binary,
         Some(Diff::Empty) => DiffKindVm::Empty,
         Some(Diff::TooLarge) => DiffKindVm::TooLarge,
         Some(Diff::Submodule(_)) => DiffKindVm::Submodule,

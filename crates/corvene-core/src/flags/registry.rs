@@ -8942,6 +8942,63 @@ registry! {
         code: &["crates/corvene-git/src/markdown_file.rs", "crates/corvene-core/src/markdown.rs", "crates/corvene-ui/src/latex_diff.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
     },
 
+    /// Video files diffed as synced players.
+    VIDEO_DIFF = 1335 "video-diff" {
+        title: "Video diffs",
+        summary: "A changed video file (.mp4, .mov, .m4v, .webm, .mkv, .avi and other \
+                  video extensions) plays both versions in step with sound: 2-up, Swipe, \
+                  Onion Skin and Difference views of the current frame, a timeline that \
+                  marks where the picture or sound changed with previous / next change \
+                  buttons, frame stepping, a loop range, speeds, an Old / New switch for \
+                  the sound and an Info tab comparing codecs, sizes, frame rates, bit \
+                  rates and tags. Videos are read by the system (AVFoundation on macOS, \
+                  Media Foundation on Windows) or by an installed ffmpeg \
+                  (1337-media-ffmpeg); a file nothing can read stays binary.",
+        ghd_behaviour: "Video files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-media/src/lib.rs", "crates/corvene-git/src/media_file.rs", "crates/corvene-ui/src/media_diff/mod.rs"],
+    },
+
+    /// Sound files diffed as waveforms and spectrograms.
+    AUDIO_DIFF = 1336 "audio-diff" {
+        title: "Sound diffs",
+        summary: "A changed sound file (.mp3, .wav, .flac, .ogg, .opus, .m4a, .aac, .aiff, \
+                  .caf and others) shows both versions' waveforms stacked or overlaid, or \
+                  their spectrograms with a difference lane, on one time axis with the \
+                  stretches that changed marked. Both play in step: switch between Old \
+                  and New mid-play to hear the change, loop a range, step to the next \
+                  change. The Info tab compares codecs, sample rates, channels, bit \
+                  rates, tags and cover art. Sound is read by Symphonia, the system or an \
+                  installed ffmpeg.",
+        ghd_behaviour: "Sound files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-media/src/analysis.rs", "crates/corvene-git/src/media_file.rs", "crates/corvene-ui/src/media_diff/audio.rs"],
+    },
+
+    /// An installed ffmpeg reads the media the system cannot.
+    MEDIA_FFMPEG = 1337 "media-ffmpeg" {
+        title: "Use ffmpeg for video and sound",
+        summary: "Video and sound diffs (1335-video-diff, 1336-audio-diff) use an ffmpeg and \
+                  ffprobe found on PATH, in /opt/homebrew/bin or /usr/local/bin for the \
+                  files the system and Symphonia cannot read: WebM, Matroska, AVI, Opus \
+                  and every video on Linux. Corvene never downloads ffmpeg.",
+        ghd_behaviour: "GitHub Desktop never runs ffmpeg.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-media/src/ffmpeg.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -1125,10 +1125,31 @@ fn finish_committed_diff(
         );
     }
     let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
-    match crate::diff::parse_raw_diff(patch) {
+    let diff = crate::diff::parse_raw_diff(patch);
+    // `1335-video-diff` / `1336-audio-diff`: binary, or an LFS pointer's text
+    if crate::media_file::media_diff_kind(&file.path).is_some()
+        && matches!(
+            diff,
+            Diff::Binary | Diff::Text { .. } | Diff::LargeText { .. }
+        )
+    {
+        use crate::archive::SideRef;
+        if let Some(media) = crate::media_file::media_diff(
+            git.clone(),
+            workdir,
+            &file.path,
+            file.status.kind,
+            SideRef::Blob(newest, &file.path),
+            SideRef::Blob(base, previous_path),
+        ) {
+            return media;
+        }
+    }
+    match diff {
         Diff::Binary
             if utf16
                 && crate::diff::binary_media_type(&file.path).is_none()
+                && crate::media_file::media_diff_kind(&file.path).is_none()
                 && crate::table_file::table_format(&file.path).is_none()
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)

@@ -357,6 +357,7 @@ fn apply_hunks_to_index(
         | Diff::Font { .. }
         | Diff::FontSource { .. }
         | Diff::Document { .. }
+        | Diff::Media(_)
         | Diff::Submodule(_) => {
             return Err(GitError::Gix(format!(
                 "Can't create partial commit in binary file: {}",

@@ -243,6 +243,17 @@ pub struct Settings {
     /// Corvene `1329-font-diff`: the font viewer's last tab.
     #[serde(default)]
     pub font_diff_view: corvene_models::FontDiffView,
+    /// Corvene `1335-video-diff`: a modified video's last tab.
+    #[serde(default)]
+    pub video_diff_mode: corvene_models::VideoDiffMode,
+    /// Corvene `1336-audio-diff`: a modified sound's last tab.
+    #[serde(default)]
+    pub audio_diff_mode: corvene_models::AudioDiffMode,
+    /// Corvene `1335-video-diff` / `1336-audio-diff`: the players' volume,
+    /// 0..1.
+    pub media_volume: f32,
+    #[serde(default)]
+    pub media_muted: bool,
     /// Corvene `1329-font-diff`: the specimen's own sample text (empty: the
     /// chosen preset).
     #[serde(default)]
@@ -660,6 +671,10 @@ impl Default for Settings {
             stacked_diff_history: false,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,
             font_diff_view: corvene_models::FontDiffView::Overview,
+            video_diff_mode: corvene_models::VideoDiffMode::TwoUp,
+            audio_diff_mode: corvene_models::AudioDiffMode::Stacked,
+            media_volume: 1.,
+            media_muted: false,
             font_specimen_text: String::new(),
             font_specimen_size: default_font_specimen_size(),
             font_glyph_tile: default_font_glyph_tile(),

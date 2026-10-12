@@ -134,6 +134,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Notebook { .. } => "Notebook",
         Diff::Latex { .. } => "Latex",
         Diff::Markdown { .. } => "Markdown",
+        Diff::Media(_) => "Media",
     }
 }
 
