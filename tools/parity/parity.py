@@ -159,7 +159,8 @@ class Run:
                              "repo-mismatch", "repo-codeowners", "repo-diff-marks",
                              "repo-pdf", "repo-images",
                              "repo-archives", "repo-documents", "repo-notebooks",
-                             "repo-markdown", "repo-media", "repo-inspect", "repo-converted")
+                             "repo-markdown", "repo-media", "repo-inspect", "repo-converted",
+                             "repo-markdown-edits")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
@@ -195,6 +196,9 @@ class Run:
         # `repo-markdown`: an edited README and its picture
         # (`1334-markdown-preview-diff`)
         markdown = setup == "repo-markdown"
+        # `repo-markdown-edits`: a guide edited inside its alert, quote,
+        # details, list item and long paragraph (`1334-markdown-preview-diff`)
+        markdown_edits = setup == "repo-markdown-edits"
         # `repo-media`: an edited video, WAVE tone and AAC song
         # (`1335-video-diff`, `1336-audio-diff`)
         media = setup == "repo-media"
@@ -214,13 +218,15 @@ class Run:
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
-                               converted=converted) if with_repo else None
+                               converted=converted,
+                               markdown_edits=markdown_edits) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
-                               converted=converted) if with_repo else None
+                               converted=converted,
+                               markdown_edits=markdown_edits) if with_repo else None
         # `tags: {name: rev}`: lightweight tags added to both fixtures before
         # either app opens them
         for repo in (repo_g, repo_c) if with_repo else ():

@@ -169,6 +169,51 @@ pub struct MarkdownOptions {
     pub references: Option<ReferenceRepository>,
     /// Backgrounds of a lone table's body rows, by row (a rendered diff).
     pub table_rows: Option<Rc<[TableRowTint]>>,
+    /// How blocks and list items inside the blocks drawn are tinted (an
+    /// edited block of a rendered diff drawn once); with it set,
+    /// [`Self::marks`] and [`Self::table_rows`] apply to no block.
+    pub tints: Option<Rc<BlockTints>>,
+}
+
+/// How one block (or list item) of a rendered diff is tinted.
+#[derive(Clone, Debug, Default)]
+pub struct BlockTint {
+    /// The background of the whole block.
+    pub bg: Option<Hsla>,
+    /// A bar down its left side.
+    pub bar: Option<Hsla>,
+    /// Marked ranges of a paragraph's or heading's text (a `<details>`
+    /// block's summary).
+    pub marks: Vec<MarkLayer>,
+    /// A table's body rows ([`MarkdownOptions::table_rows`]).
+    pub table_rows: Option<Rc<[TableRowTint]>>,
+}
+
+/// Ranges of a text marked with a background (and struck through).
+#[derive(Clone, Debug)]
+pub struct MarkLayer {
+    pub ranges: Rc<[Range<usize>]>,
+    pub bg: Hsla,
+    pub strike: bool,
+}
+
+/// [`BlockTint`]s by the address of the [`Block`] or [`ListItem`] they
+/// tint, which must be the one drawn (not a copy).
+#[derive(Clone, Debug, Default)]
+pub struct BlockTints(HashMap<usize, BlockTint>);
+
+impl BlockTints {
+    pub fn block(&mut self, block: &Block, tint: BlockTint) {
+        self.0.insert(std::ptr::from_ref(block) as usize, tint);
+    }
+
+    pub fn item(&mut self, item: &ListItem, tint: BlockTint) {
+        self.0.insert(std::ptr::from_ref(item) as usize, tint);
+    }
+
+    fn of<T>(&self, x: &T) -> Option<&BlockTint> {
+        self.0.get(&(std::ptr::from_ref(x) as usize))
+    }
 }
 
 /// How one body row of a table in a rendered diff is tinted.
@@ -274,12 +319,13 @@ pub fn markdown_with(
         next_details: Cell::new(0),
         align: Cell::new(None),
         macros: options.macros.clone(),
-        marks: options.marks.clone(),
+        marks: RefCell::new(mark_layers(options.marks.as_ref())),
         images: options.images.clone(),
         highlight_code: options.highlight_code,
         font_size: size,
         references: options.references.clone().map(Rc::new),
-        table_rows: options.table_rows.clone(),
+        table_rows: RefCell::new(options.table_rows.clone()),
+        tints: options.tints.clone(),
     };
     div()
         .text_size(zpx(size))
@@ -316,12 +362,13 @@ pub fn rich_text_with_issue_titles(
         next_details: Cell::new(0),
         align: Cell::new(None),
         macros: None,
-        marks: None,
+        marks: RefCell::new(Rc::from([])),
         images: None,
         highlight_code: false,
         font_size: 12.,
         references: None,
-        table_rows: None,
+        table_rows: RefCell::new(None),
+        tints: None,
     }
     .rich(text)
 }
@@ -462,14 +509,43 @@ struct Renderer<'a> {
     align: Cell<Option<Align>>,
     /// [`MarkdownOptions`]
     macros: Option<SharedMacros>,
-    marks: Option<(Rc<[Range<usize>]>, Hsla)>,
+    /// The marks of the paragraph being drawn.
+    marks: RefCell<Rc<[MarkLayer]>>,
     images: Option<ImageResolver>,
     highlight_code: bool,
     font_size: f32,
     /// [`MarkdownOptions::references`]
     references: Option<Rc<ReferenceRepository>>,
-    /// [`MarkdownOptions::table_rows`]
-    table_rows: Option<Rc<[TableRowTint]>>,
+    /// The body row tints of the table being drawn.
+    table_rows: RefCell<Option<Rc<[TableRowTint]>>>,
+    /// [`MarkdownOptions::tints`]
+    tints: Option<Rc<BlockTints>>,
+}
+
+fn mark_layers(marks: Option<&(Rc<[Range<usize>]>, Hsla)>) -> Rc<[MarkLayer]> {
+    marks
+        .map(|(ranges, bg)| MarkLayer {
+            ranges: ranges.clone(),
+            bg: *bg,
+            strike: false,
+        })
+        .into_iter()
+        .collect()
+}
+
+/// `child` on a tint's background, with its bar.
+fn tinted(child: AnyElement, tint: Option<&BlockTint>) -> AnyElement {
+    let Some(tint) = tint.filter(|t| t.bg.is_some() || t.bar.is_some()) else {
+        return child;
+    };
+    div()
+        .min_w_0()
+        .when_some(tint.bg, |d, bg| d.bg(bg))
+        .when_some(tint.bar, |d, bar| {
+            d.border_l(zpx(2.)).border_color(bar).pl(zpx(6.))
+        })
+        .child(child)
+        .into_any_element()
 }
 
 impl Renderer<'_> {
@@ -493,7 +569,23 @@ impl Renderer<'_> {
                 }
                 _ => BLOCK_GAP(),
             };
-            col = col.child(div().mt(gap).child(self.block(block, list_depth)));
+            let element = match &self.tints {
+                Some(tints) => {
+                    let tint = tints.of(block);
+                    let marks = self
+                        .marks
+                        .replace(tint.map_or_else(|| Rc::from([]), |t| t.marks.clone().into()));
+                    let rows = self
+                        .table_rows
+                        .replace(tint.and_then(|t| t.table_rows.clone()));
+                    let element = self.block(block, list_depth);
+                    self.marks.replace(marks);
+                    self.table_rows.replace(rows);
+                    tinted(element, tint)
+                }
+                None => self.block(block, list_depth),
+            };
+            col = col.child(div().mt(gap).child(element));
             prev = Some(block);
         }
         col
@@ -666,12 +758,17 @@ impl Renderer<'_> {
                 })
                 .into_any_element(),
             };
+            let tint = self.tints.as_ref().and_then(|t| t.of(item));
             col =
                 col.child(
                     div()
                         .flex()
                         .flex_row()
                         .text_align(TextAlign::Left)
+                        .when_some(tint.and_then(|t| t.bg), |d, bg| d.bg(bg))
+                        .when_some(tint.and_then(|t| t.bar), |d, bar| {
+                            d.border_l(zpx(2.)).border_color(bar)
+                        })
                         .child(
                             div()
                                 .flex_none()
@@ -700,10 +797,11 @@ impl Renderer<'_> {
     ) -> AnyElement {
         let t = self.t;
         let columns = align.len().max(1);
+        let table_rows = self.table_rows.borrow().clone();
         let cell = |text: &RichText, column: usize, row: usize, is_head: bool| {
             let align = align.get(column).copied().flatten();
             let tint = (!is_head)
-                .then(|| self.table_rows.as_ref().and_then(|r| r.get(row)))
+                .then(|| table_rows.as_ref().and_then(|r| r.get(row)))
                 .flatten();
             let bg = tint.and_then(|tint| {
                 let changed = tint.cells.get(column).copied().unwrap_or(false);
@@ -927,14 +1025,22 @@ impl Renderer<'_> {
     }
 
     /// The marks within `range` of the paragraph, from its start.
-    fn slice_marks(&self, range: Range<usize>) -> Vec<Range<usize>> {
-        let Some((marks, _)) = &self.marks else {
-            return Vec::new();
-        };
-        marks
+    fn slice_marks(&self, range: Range<usize>) -> Vec<Mark> {
+        let layers = self.marks.borrow();
+        layers
             .iter()
-            .filter(|m| m.end > range.start && m.start < range.end)
-            .map(|m| m.start.max(range.start) - range.start..m.end.min(range.end) - range.start)
+            .flat_map(|layer| {
+                layer
+                    .ranges
+                    .iter()
+                    .filter(|m| m.end > range.start && m.start < range.end)
+                    .map(|m| Mark {
+                        range: m.start.max(range.start) - range.start
+                            ..m.end.min(range.end) - range.start,
+                        bg: layer.bg,
+                        strike: layer.strike,
+                    })
+            })
             .collect()
     }
 
@@ -1050,7 +1156,7 @@ impl Renderer<'_> {
         self.rich_marked(text, &marks)
     }
 
-    fn rich_marked(&self, text: &RichText, marks: &[Range<usize>]) -> AnyElement {
+    fn rich_marked(&self, text: &RichText, marks: &[Mark]) -> AnyElement {
         let t = self.t;
         let mut highlights = Vec::new();
         let mut fonts: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
@@ -1101,10 +1207,8 @@ impl Renderer<'_> {
                 );
             }
         }
-        if !marks.is_empty()
-            && let Some((_, mark_bg)) = &self.marks
-        {
-            highlights = overlay_marks(&text.text, highlights, marks, *mark_bg);
+        if !marks.is_empty() {
+            highlights = overlay_marks(&text.text, highlights, marks);
         }
         let styled = StyledText::new(SharedString::from(text.text.clone()))
             .with_highlights(highlights)
@@ -1143,18 +1247,24 @@ impl Renderer<'_> {
     }
 }
 
+/// A marked range of a text being drawn.
+struct Mark {
+    range: Range<usize>,
+    bg: Hsla,
+    strike: bool,
+}
+
 /// `highlights` (sorted, not overlapping) with `marks` laid over them as a
 /// background: the ranges are cut where either starts or ends.
 fn overlay_marks(
     text: &str,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
-    marks: &[Range<usize>],
-    bg: Hsla,
+    marks: &[Mark],
 ) -> Vec<(Range<usize>, HighlightStyle)> {
     let mut cuts: Vec<usize> = highlights
         .iter()
         .flat_map(|(r, _)| [r.start, r.end])
-        .chain(marks.iter().flat_map(|m| [m.start, m.end]))
+        .chain(marks.iter().flat_map(|m| [m.range.start, m.range.end]))
         .map(|c| c.min(text.len()))
         .collect();
     cuts.sort_unstable();
@@ -1169,21 +1279,23 @@ fn overlay_marks(
             .iter()
             .find(|(r, _)| r.start <= a && b <= r.end)
             .map(|(_, h)| *h);
-        let marked = marks.iter().any(|m| m.start <= a && b <= m.end);
+        let marked = marks
+            .iter()
+            .find(|m| m.range.start <= a && b <= m.range.end);
         match (base, marked) {
-            (Some(mut h), true) => {
-                h.background_color = Some(bg);
+            (base, Some(mark)) => {
+                let mut h = base.unwrap_or_default();
+                h.background_color = Some(mark.bg);
+                if mark.strike {
+                    h.strikethrough = Some(StrikethroughStyle {
+                        thickness: zpx(1.),
+                        color: None,
+                    });
+                }
                 out.push((a..b, h));
             }
-            (Some(h), false) => out.push((a..b, h)),
-            (None, true) => out.push((
-                a..b,
-                HighlightStyle {
-                    background_color: Some(bg),
-                    ..HighlightStyle::default()
-                },
-            )),
-            (None, false) => {}
+            (Some(h), None) => out.push((a..b, h)),
+            (None, None) => {}
         }
     }
     out

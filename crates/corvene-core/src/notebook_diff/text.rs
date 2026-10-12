@@ -283,7 +283,7 @@ pub fn word_changes(a: &str, b: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) 
 }
 
 /// Word, white space and punctuation tokens.
-fn words(s: &str) -> Vec<Range<usize>> {
+pub(crate) fn words(s: &str) -> Vec<Range<usize>> {
     #[derive(PartialEq, Clone, Copy)]
     enum Class {
         Word,

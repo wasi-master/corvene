@@ -3,10 +3,15 @@
 //! (`corvene_core::latex_doc`: numbered sections, typeset equations, lists,
 //! tables, figures, theorems, footnotes, resolved references) and the two
 //! versions are aligned block by block: added blocks tinted green, removed
-//! ones red, edited paragraphs shown old over new (side by side in split
-//! mode) with their changed words marked, and an edited table under the
-//! same header is one table with its added rows green, removed rows red and
-//! changed cells marked. A `.bib` file shows each entry as
+//! ones red, and an edited block drawn once (`corvene_core::block_diff::
+//! merge`): a paragraph or heading with its removed words struck through in
+//! red before the added ones in green (each version with its own marks side
+//! by side in split mode), a table under the same header as one table with
+//! its added rows green, removed rows red and changed cells marked, and a
+//! block quote, alert, `<details>` or list item as one container with only
+//! the blocks inside it that changed tinted or marked. Other edited blocks
+//! (code, formulas, a paragraph whose pictures changed) show old over new.
+//! A `.bib` file shows each entry as
 //! a formatted reference with the fields that changed.
 //!
 //! GitHub Desktop shows these files as text only (`app/src/ui/diff/
@@ -26,15 +31,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use corvene_core::bibtex::{self, BibChange, BibEntry};
-use corvene_core::block_diff::{BlockRow, BlockStatus, block_diff, table_diff};
+use corvene_core::block_diff::{BlockRow, BlockStatus, Change, Merged, Side, block_diff};
 use corvene_core::fold::{FoldRow, FoldRule, fold};
-use corvene_core::markdown::Block;
+use corvene_core::markdown::{Block, ListItem};
 use corvene_core::{Diff, LatexBlob, LatexKind};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::icons::{Octicon, octicon};
-use crate::markdown::{ImageResolver, MarkdownOptions, TableRowTint, markdown_with};
+use crate::markdown::{
+    BlockTint, BlockTints, ImageResolver, MarkLayer, MarkdownOptions, TableRowTint, markdown_with,
+};
 use crate::math::SharedMacros;
 use crate::scrollbar::{gutter, scrollbar};
 use crate::theme::sizes::*;
@@ -469,7 +476,8 @@ fn strip(child: AnyElement, status: BlockStatus, t: &GhdTheme) -> Div {
     let (bar, bg) = match status {
         BlockStatus::Added => (t.diff_add_border, t.diff_add_background),
         BlockStatus::Deleted => (t.diff_delete_border, t.diff_delete_background),
-        _ => (gpui_kit::transparent_black(), gpui_kit::transparent_black()),
+        BlockStatus::Modified => (t.color_modified, gpui_kit::transparent_black()),
+        BlockStatus::Same => (gpui_kit::transparent_black(), gpui_kit::transparent_black()),
     };
     div()
         .w_full()
@@ -488,61 +496,118 @@ fn strip(child: AnyElement, status: BlockStatus, t: &GhdTheme) -> Div {
         )
 }
 
-/// An edited table under the same header as one table with its rows
-/// tinted: both versions' rows merged (`side` `None`), or one version's
-/// (`Some(0)` the old, `Some(1)` the new).
-pub(crate) fn table_view(
-    old: &Block,
-    new: &Block,
-    side: Option<usize>,
-    t: &GhdTheme,
-) -> Option<(Block, Rc<[TableRowTint]>)> {
-    let diff = table_diff(old, new)?;
-    let (
-        Block::Table {
-            align,
-            head,
-            rows: old_rows,
-        },
-        Block::Table { rows: new_rows, .. },
-    ) = (old, new)
-    else {
-        return None;
+/// What a path of a [`Merged`] block leads to.
+enum Target<'a> {
+    Block(&'a Block),
+    Item(&'a ListItem),
+}
+
+fn resolve<'a>(block: &'a Block, path: &[usize]) -> Option<Target<'a>> {
+    let Some((&first, rest)) = path.split_first() else {
+        return Some(Target::Block(block));
     };
-    let mut rows = Vec::with_capacity(diff.len());
-    let mut tints = Vec::with_capacity(diff.len());
-    for r in &diff {
-        let previous = r.previous.and_then(|i| old_rows.get(i));
-        let current = r.current.and_then(|j| new_rows.get(j));
-        let cells = match side {
-            None => current.or(previous),
-            Some(0) => previous,
-            Some(_) => current,
-        };
-        let Some(cells) = cells else {
-            continue;
-        };
-        rows.push(cells.clone());
-        tints.push(match r.status {
-            BlockStatus::Added => TableRowTint {
-                row: Some(t.diff_add_background),
-                cell: Some(t.diff_add_inner_background),
-                cells: r.cells.clone(),
-            },
-            BlockStatus::Deleted => TableRowTint {
-                row: Some(t.diff_delete_background),
-                cell: Some(t.diff_delete_inner_background),
-                cells: r.cells.clone(),
-            },
-            _ => TableRowTint::default(),
-        });
+    match block {
+        Block::BlockQuote(blocks)
+        | Block::Alert { blocks, .. }
+        | Block::Aligned { blocks, .. }
+        | Block::Details { blocks, .. } => resolve(blocks.get(first)?, rest),
+        Block::List { items, .. } => {
+            let item = items.get(first)?;
+            match rest.split_first() {
+                None => Some(Target::Item(item)),
+                Some((&k, rest)) => resolve(item.blocks.get(k)?, rest),
+            }
+        }
+        _ => None,
     }
-    let table = Block::Table {
-        align: align.clone(),
-        head: head.clone(),
-        rows,
+}
+
+/// How the blocks inside an edited block drawn once are tinted.
+fn merged_tints(merged: &Merged, side: Side, t: &GhdTheme) -> BlockTints {
+    let mut tints = BlockTints::default();
+    let layer = |ranges: &[std::ops::Range<usize>], bg, strike| MarkLayer {
+        ranges: ranges.to_vec().into(),
+        bg,
+        strike,
     };
-    Some((table, tints.into()))
+    for (path, change) in &merged.changes {
+        let tint = match change {
+            Change::Added => BlockTint {
+                bg: Some(t.diff_add_background),
+                bar: Some(t.diff_add_border),
+                ..BlockTint::default()
+            },
+            Change::Deleted => BlockTint {
+                bg: Some(t.diff_delete_background),
+                bar: Some(t.diff_delete_border),
+                ..BlockTint::default()
+            },
+            Change::Words { deleted, added } => BlockTint {
+                marks: vec![
+                    layer(deleted, t.diff_delete_inner_background, side == Side::Both),
+                    layer(added, t.diff_add_inner_background, false),
+                ],
+                ..BlockTint::default()
+            },
+            Change::Table(rows) => BlockTint {
+                table_rows: Some(
+                    rows.iter()
+                        .map(|(status, cells)| match status {
+                            BlockStatus::Added => TableRowTint {
+                                row: Some(t.diff_add_background),
+                                cell: Some(t.diff_add_inner_background),
+                                cells: cells.clone(),
+                            },
+                            BlockStatus::Deleted => TableRowTint {
+                                row: Some(t.diff_delete_background),
+                                cell: Some(t.diff_delete_inner_background),
+                                cells: cells.clone(),
+                            },
+                            _ => TableRowTint::default(),
+                        })
+                        .collect(),
+                ),
+                ..BlockTint::default()
+            },
+        };
+        match resolve(&merged.block, path) {
+            Some(Target::Block(block)) => tints.block(block, tint),
+            Some(Target::Item(item)) => tints.item(item, tint),
+            None => {}
+        }
+    }
+    tints
+}
+
+/// An edited block drawn once (`side` of it), in a strip with the
+/// modified bar. `options` are the side's (its pictures); for
+/// [`Side::Both`] they should resolve both versions' pictures.
+pub(crate) fn merged_block(
+    id: SharedString,
+    merged: &Merged,
+    side: Side,
+    options: MarkdownOptions,
+    t: &GhdTheme,
+    cx: &App,
+) -> AnyElement {
+    let options = MarkdownOptions {
+        marks: None,
+        table_rows: None,
+        tints: Some(Rc::new(merged_tints(merged, side, t))),
+        ..options
+    };
+    strip(
+        markdown_with(id, std::slice::from_ref(&merged.block), &options, cx).into_any_element(),
+        BlockStatus::Modified,
+        t,
+    )
+    .into_any_element()
+}
+
+/// `first`'s pictures, then `second`'s.
+pub(crate) fn either_images(first: &ImageResolver, second: &ImageResolver) -> ImageResolver {
+    let (first, second) = (first.clone(), second.clone());
+    Rc::new(move |src: &str| first(src).or_else(|| second(src)))
 }
 
 /// Pictures a version of the document names, drawn from its own bytes.
@@ -641,18 +706,15 @@ impl Rows {
                     font_size: Some(13.),
                     ..MarkdownOptions::default()
                 };
-                let draw_with = |side: usize, block: &Block, status, opts: MarkdownOptions| {
+                let draw = |side: usize, block: &Block, status: BlockStatus, marks: &[_]| {
                     let id = SharedString::from(format!("latex-{ix}-{side}"));
                     strip(
-                        markdown_with(id, std::slice::from_ref(block), &opts, cx)
+                        markdown_with(id, std::slice::from_ref(block), &opts(side, marks), cx)
                             .into_any_element(),
                         status,
                         t,
                     )
                     .into_any_element()
-                };
-                let draw = |side: usize, block: &Block, status: BlockStatus, marks: &[_]| {
-                    draw_with(side, block, status, opts(side, marks))
                 };
                 let old_el = |status| {
                     row.previous
@@ -665,33 +727,43 @@ impl Rows {
                         .map(|b| draw(1, b, status, &row.marks.1))
                 };
                 let column = |el: Option<AnyElement>| div().flex_1().min_w_0().children(el);
-                // an edited table: one table with its rows tinted
-                let tables = match (row.status, row.previous, row.current) {
-                    (BlockStatus::Modified, Some(i), Some(j)) => old.get(i).zip(new.get(j)),
-                    _ => None,
-                };
-                let table = |side: Option<usize>| {
-                    let (a, b) = tables?;
-                    let (block, tints) = table_view(a, b, side, t)?;
-                    let at = side.unwrap_or(1);
-                    let opts = MarkdownOptions {
-                        table_rows: Some(tints),
-                        ..opts(at, &[])
-                    };
-                    Some(draw_with(at, &block, BlockStatus::Same, opts))
-                };
-                let merged = tables.and_then(|_| {
+                // an edited block drawn once
+                let merged = row.merged.as_deref().map(|views| {
+                    let id = |side: &str| SharedString::from(format!("latex-{ix}-{side}"));
                     if self.split {
-                        table(Some(0)).zip(table(Some(1))).map(|(a, b)| {
-                            div()
-                                .w_full()
-                                .flex()
-                                .flex_row()
-                                .child(column(Some(a)))
-                                .child(column(Some(b)))
-                        })
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .child(column(Some(merged_block(
+                                id("old"),
+                                &views.old,
+                                Side::Old,
+                                opts(0, &[]),
+                                t,
+                                cx,
+                            ))))
+                            .child(column(Some(merged_block(
+                                id("new"),
+                                &views.new,
+                                Side::New,
+                                opts(1, &[]),
+                                t,
+                                cx,
+                            ))))
                     } else {
-                        table(None).map(|el| div().w_full().child(el))
+                        let opts = MarkdownOptions {
+                            images: Some(either_images(&self.images[1], &self.images[0])),
+                            ..opts(1, &[])
+                        };
+                        div().w_full().child(merged_block(
+                            id("both"),
+                            &views.both,
+                            Side::Both,
+                            opts,
+                            t,
+                            cx,
+                        ))
                     }
                 });
                 match (merged, row.status, self.split) {

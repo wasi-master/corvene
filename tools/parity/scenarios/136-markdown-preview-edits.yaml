@@ -1,0 +1,24 @@
+# Edits inside blocks in a Markdown Preview diff (1334-markdown-preview-diff,
+# Corvene only). Each edited block is drawn once: the alert with its added
+# words and its new paragraph green, the quote and the details block with
+# the replaced word struck through before the new one, the list item with
+# only its nested paragraph marked, and the long paragraph with only its
+# edited line marked.
+name: markdown-preview-edits
+description: A guide edited inside its alert, quote, details, list item and long paragraph, as a Preview
+setup: repo-markdown-edits
+corvene_flags: 1334-markdown-preview-diff=on
+steps:
+  - click: [125, 214]
+    wait: 1200
+  - ghd: {skip: true}
+    corvene: {click: [1262, 97]}
+    wait: 1500
+  - snap: {name: preview, corvene_only: true, note: "edited blocks drawn once with their changed words marked"}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [800, 500], dy: 600}}
+    wait: 800
+  - snap: {name: preview-long, corvene_only: true, note: "the long paragraph with only its edited line marked"}
+  - ghd: {skip: true}
+    corvene: {click: [1205, 97]}
+    wait: 800

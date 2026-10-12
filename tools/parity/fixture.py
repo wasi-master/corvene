@@ -1310,6 +1310,76 @@ def _markdown(repo: Path) -> None:
     (repo / "img" / "chart.png").write_bytes(_png(240, 90, (255, 140, 60)))
 
 
+# `repo-markdown-edits` (`1334-markdown-preview-diff`): a guide whose
+# edits sit inside blocks, each drawn once with only its changed words or
+# inner blocks marked: a reworded sentence of a long paragraph, a reworded
+# alert with a paragraph added inside it, a block quote, a `<details>`
+# block and a list item with nested content
+_GUIDE_LONG = "".join(
+    f"Line {n} of the long paragraph says the same thing again and again.\n" for n in range(1, 31)
+)
+_GUIDE = """# Guide
+
+> [!NOTE]
+> Notes render as GitHub alerts.
+
+> Quoted advice stays mostly the same.
+>
+> A second quoted paragraph.
+
+<details>
+<summary>Setup details</summary>
+
+Install the tap before the basin.
+
+</details>
+
+- Fill the basin
+
+  Use warm water.
+
+- Rinse
+
+## Long section
+
+""" + _GUIDE_LONG
+_GUIDE_EDITED = """# Guide
+
+> [!NOTE]
+> Notes render as GitHub alerts, with an icon.
+>
+> Each kind has its own colour.
+
+> Quoted advice stays nearly the same.
+>
+> A second quoted paragraph.
+
+<details>
+<summary>Setup details</summary>
+
+Install the tap after the basin.
+
+</details>
+
+- Fill the basin
+
+  Use warm water and a drop of soap.
+
+- Rinse
+
+## Long section
+
+""" + _GUIDE_LONG.replace("Line 24 of the long paragraph says",
+                          "Line 24 of the long paragraph (edited) now says")
+
+
+def _markdown_edits(repo: Path) -> None:
+    (repo / "guide.md").write_text(_GUIDE)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Write the guide", date="2026-09-28T09:00:00+00:00")
+    (repo / "guide.md").write_text(_GUIDE_EDITED)
+
+
 # `repo-inspect` (flags 1338-1341): a package-lock.json and a Cargo.lock
 # with upgraded, added and removed packages, a minified bundle with one
 # changed function, a safetensors model with a reshaped and an added
@@ -1550,7 +1620,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
           documents: bool = False, notebooks: bool = False, markdown: bool = False,
-          media: bool = False, inspect: bool = False, converted: bool = False) -> Path:
+          media: bool = False, inspect: bool = False, converted: bool = False,
+          markdown_edits: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1723,6 +1794,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if markdown:
         _markdown(repo)
+        return repo
+    if markdown_edits:
+        _markdown_edits(repo)
         return repo
     if inspect:
         _inspect(repo)
