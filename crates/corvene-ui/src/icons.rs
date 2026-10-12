@@ -126,6 +126,17 @@ pub enum Octicon {
     FileZip,
     Law,
     Markdown,
+    /// `1335-video-diff` / `1336-audio-diff` transport glyphs (drawn for
+    /// Corvene in the octicon style; not part of Primer).
+    MediaPlay,
+    MediaPause,
+    MediaFrameBack,
+    MediaFrameForward,
+    MediaPrevChange,
+    MediaNextChange,
+    MediaVolume,
+    MediaMute,
+    MediaLoop,
 }
 
 impl Octicon {
@@ -239,6 +250,15 @@ impl Octicon {
             Octicon::FileSubmodule => "octicons/file-submodule-16.svg",
             Octicon::FileBinary => "octicons/file-binary-16.svg",
             Octicon::Image => "octicons/image-16.svg",
+            Octicon::MediaPlay => "octicons/media-play-16.svg",
+            Octicon::MediaPause => "octicons/media-pause-16.svg",
+            Octicon::MediaFrameBack => "octicons/media-frame-back-16.svg",
+            Octicon::MediaFrameForward => "octicons/media-frame-forward-16.svg",
+            Octicon::MediaPrevChange => "octicons/media-prev-change-16.svg",
+            Octicon::MediaNextChange => "octicons/media-next-change-16.svg",
+            Octicon::MediaVolume => "octicons/media-volume-16.svg",
+            Octicon::MediaMute => "octicons/media-mute-16.svg",
+            Octicon::MediaLoop => "octicons/media-loop-16.svg",
         }
     }
 }

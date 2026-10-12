@@ -879,6 +879,8 @@ pub struct DiffView {
     archive: Option<Entity<crate::archive_diff_view::ArchiveDiffView>>,
     /// `1329-font-diff` / `1330-font-source-preview`
     font: Option<FontPane>,
+    /// `1335-video-diff` / `1336-audio-diff`: the players of a media diff.
+    media: Option<Entity<crate::media_diff::MediaDiffView>>,
     /// `1324-document-diff`: the document diff last shown (any view), its
     /// rendered view, its text diff and (`1325-document-pages`) its pages.
     document_source: Option<Arc<Diff>>,
@@ -1013,6 +1015,7 @@ impl DiffView {
             _pdf_observer: None,
             archive: None,
             font: None,
+            media: None,
             document_source: None,
             document: None,
             document_text: None,
@@ -1650,6 +1653,21 @@ impl DiffView {
             _ => {}
         }
         self.load_archive(snap, cx);
+        // `1335-video-diff` / `1336-audio-diff`: a reload of the same files
+        // keeps the players (and where they are)
+        match &*snap.diff {
+            Diff::Media(media)
+                if self
+                    .media
+                    .as_ref()
+                    .is_some_and(|m| **m.read(cx).diff() == **media) => {}
+            Diff::Media(media) => {
+                let (media, kind) = (Arc::new((**media).clone()), snap.kind);
+                self.media =
+                    Some(cx.new(|cx| crate::media_diff::MediaDiffView::new(media, kind, cx)));
+            }
+            _ => self.media = None,
+        }
         // a reload of the same bytes keeps the font view (and its state)
         let keep = self
             .font
@@ -3949,6 +3967,30 @@ impl DiffView {
             Diff::Font { .. } | Diff::FontSource { .. } => match self.font.clone() {
                 Some(FontPane::Font(v)) => v.into_any_element(),
                 Some(FontPane::Source(v)) => v.into_any_element(),
+                None => self.panel("This binary file has changed.", cx),
+            },
+            // `1335-video-diff` / `1336-audio-diff` off after the file was read
+            Diff::Media(media)
+                if !self.state.read(cx).flags.bool(match media.kind {
+                    corvene_core::MediaKind::Video => corvene_core::flags::ids::VIDEO_DIFF,
+                    corvene_core::MediaKind::Audio => corvene_core::flags::ids::AUDIO_DIFF,
+                }) =>
+            {
+                self.binary_panel(snap, cx)
+            }
+            Diff::Media(media) if self.stacked_path.is_some() => self.panel(
+                match media.kind {
+                    corvene_core::MediaKind::Video => {
+                        "This video changed. Select the file alone to play it."
+                    }
+                    corvene_core::MediaKind::Audio => {
+                        "This sound changed. Select the file alone to play it."
+                    }
+                },
+                cx,
+            ),
+            Diff::Media(_) => match self.media.clone() {
+                Some(view) => view.into_any_element(),
                 None => self.panel("This binary file has changed.", cx),
             },
             Diff::TooLarge => self.too_large_panel(snap, cx),

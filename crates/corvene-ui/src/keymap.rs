@@ -15,6 +15,7 @@ use corvene_core::keymap_file::{KeymapOverrides, resolve_action_name};
 use gpui_kit::{App, DummyKeyboardMapper, Global, KeyBinding, KeyBindingContextPredicate};
 
 use crate::actions::*;
+use crate::media_diff;
 
 /// The flags that add or remove key bindings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -274,6 +275,64 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("end", SelectLastFile, Some("ArchiveEntryList")),
         KeyBinding::new("enter", OpenArchiveEntry, Some("ArchiveEntryList")),
         KeyBinding::new("backspace", ArchiveUp, Some("ArchiveEntryList")),
+        // `1335-video-diff` / `1336-audio-diff`: a focused media diff
+        KeyBinding::new(
+            "space",
+            media_diff::PlayPause,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new("k", media_diff::PlayPause, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("left", media_diff::FrameBack, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new(
+            "right",
+            media_diff::FrameForward,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new(",", media_diff::FrameBack, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new(".", media_diff::FrameForward, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new(
+            "shift-left",
+            media_diff::SecondBack,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new(
+            "shift-right",
+            media_diff::SecondForward,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new(
+            "alt-left",
+            media_diff::JumpBack,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new(
+            "alt-right",
+            media_diff::JumpForward,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new("j", media_diff::JumpBack, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new(
+            "[",
+            media_diff::PreviousChange,
+            Some(media_diff::KEY_CONTEXT),
+        ),
+        KeyBinding::new("]", media_diff::NextChange, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("l", media_diff::ToggleLoop, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("i", media_diff::LoopIn, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("o", media_diff::LoopOut, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("home", media_diff::GoToStart, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("end", media_diff::GoToEnd, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("a", media_diff::ListenOld, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("b", media_diff::ListenNew, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("x", media_diff::FlipListen, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("m", media_diff::ToggleMute, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("<", media_diff::SlowDown, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new(">", media_diff::SpeedUp, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("1", media_diff::Mode1, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("2", media_diff::Mode2, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("3", media_diff::Mode3, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("4", media_diff::Mode4, Some(media_diff::KEY_CONTEXT)),
+        KeyBinding::new("5", media_diff::Mode5, Some(media_diff::KEY_CONTEXT)),
         KeyBinding::new("down", SelectNextFile, Some("StashFileList")),
         KeyBinding::new("up", SelectPreviousFile, Some("StashFileList")),
         KeyBinding::new("shift-down", ExtendSelectionDown, Some("StashFileList")),
