@@ -8951,7 +8951,9 @@ registry! {
                   item by item, tables, task lists, alerts, highlighted code, math, the \
                   repository's pictures at each version, YAML front matter as code) with \
                   added blocks green, removed ones red and edited paragraphs marked word by \
-                  word, side by side in split mode. Source is the usual line diff.",
+                  word, side by side in split mode, opening at the first change (or where \
+                  the Source view was scrolled). MDX callouts, admonitions and components \
+                  show as alerts, collapsibles and labels. Source is the usual line diff.",
         ghd_behaviour: "Markdown files only have the text diff.",
         nature: Nature::Feature,
         kind: Kind::Bool,
@@ -9042,8 +9044,9 @@ registry! {
         title: "Pretty printed diffs of minified files",
         summary: "A changed minified JSON, JavaScript, TypeScript, CSS, HTML or XML file (a \
                   .min. name, or very long lines) is diffed pretty printed, so a change in a \
-                  one-line bundle shows as the few lines it touched. A Source switch shows \
-                  git's own diff, which is the one used for staging.",
+                  one-line bundle shows as the few lines it touched. Source (git's own \
+                  diff, the one used for staging) stays the default; the header's \
+                  Formatted switch shows the printed diff.",
         ghd_behaviour: "Minified files are diffed as they are, usually one huge changed line.",
         nature: Nature::Feature,
         kind: Kind::Bool,

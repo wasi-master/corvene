@@ -308,6 +308,13 @@ pub fn parse(markdown: &str) -> Vec<Block> {
 
 /// Parse Markdown into blocks with `options`.
 pub fn parse_with(markdown: &str, options: ParseOptions) -> Vec<Block> {
+    parse_with_lines(markdown, options).0
+}
+
+/// [`parse_with`], with the 0-based line each top-level block ends on (where
+/// the parser handed it over; a few lines late at most, and counted in the
+/// text with math environments wrapped).
+pub fn parse_with_lines(markdown: &str, options: ParseOptions) -> (Vec<Block>, Vec<usize>) {
     let mut flags = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
@@ -325,10 +332,31 @@ pub fn parse_with(markdown: &str, options: ParseOptions) -> Vec<Block> {
         math: options.math,
         ..Walk::default()
     };
-    for event in Parser::new_ext(markdown, flags) {
+    let mut ends = Vec::new();
+    let mut line = 0;
+    let mut counted = 0;
+    for (event, range) in Parser::new_ext(markdown, flags).into_offset_iter() {
         walk.event(event);
+        let pushed = walk.frames.first().map_or(0, |f| f.blocks.len());
+        if pushed > ends.len() {
+            let end = range.end.min(markdown.len());
+            // the range ends past its last line's newline
+            let last = markdown[..end]
+                .trim_end_matches(['\r', '\n'])
+                .len()
+                .max(counted);
+            line += markdown.as_bytes()[counted..last]
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count();
+            counted = last;
+            ends.resize(pushed, line);
+        }
     }
-    walk.finish()
+    let blocks = walk.finish();
+    let last = markdown.lines().count().saturating_sub(1);
+    ends.resize(blocks.len(), last);
+    (blocks, ends)
 }
 
 /// Math environments MathJax typesets where they stand in Jupyter markdown.

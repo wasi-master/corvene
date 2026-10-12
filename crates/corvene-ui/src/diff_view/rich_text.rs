@@ -73,6 +73,10 @@ pub(super) struct RichPane {
     pages: Option<PagesOf>,
     _pages_task: Option<Task<()>>,
     pages_running: bool,
+    /// `1334-markdown-preview-diff`: the Source view was drawn last, with
+    /// the new file's line at its top (`None`: scrolled to the top), for
+    /// the Preview to open at.
+    markdown_source_top: Option<Option<u32>>,
 }
 
 /// `1338-lockfile-diff` / `1340-tensor-diff` / `1341-signing-material-diff`.
@@ -332,8 +336,7 @@ pub(super) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl Into
         }
         Diff::Signing { .. }
             if signing_has_source(&source)
-                && s
-                    .flags
+                && s.flags
                     .bool(corvene_core::flags::ids::SIGNING_MATERIAL_DIFF) =>
         {
             Some(inspect_switch(
@@ -505,6 +508,16 @@ impl DiffView {
         }
     }
 
+    /// The new file's line at the top of the text rows (`None` while
+    /// scrolled to the very top).
+    fn source_top_line(&self) -> Option<u32> {
+        if self.list_state.logical_scroll_top().item_ix == 0 {
+            return None;
+        }
+        let start = self.preview_window().start;
+        self.rows.get(start..)?.iter().find_map(|r| r.new.or(r.old))
+    }
+
     /// Starts the Script view or the pages of the shown diff when asked.
     pub(super) fn request_rich_view(&mut self, snap: &Snapshot, cx: &mut Context<Self>) {
         self.rich.source = snap.rich_source.clone();
@@ -513,6 +526,21 @@ impl DiffView {
         };
         if self.stacked_path.is_some() {
             return;
+        }
+        if matches!(*source, Diff::Markdown { .. }) {
+            match effective(&source, self.state.read(cx)) {
+                Effective::Text => self.rich.markdown_source_top = Some(self.source_top_line()),
+                _ => {
+                    if let Some(line) = self.rich.markdown_source_top.take()
+                        && let Some(view) = self.rich.latex.clone()
+                        && Arc::ptr_eq(view.read(cx).diff(), &source)
+                    {
+                        view.update(cx, |v, cx| v.reveal(line, cx));
+                    }
+                }
+            }
+        } else {
+            self.rich.markdown_source_top = None;
         }
         let fresh = |s: Option<&Arc<Diff>>| s.is_some_and(|s| Arc::ptr_eq(s, &source));
         match effective(&source, self.state.read(cx)) {

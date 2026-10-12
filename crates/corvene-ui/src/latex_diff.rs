@@ -12,7 +12,8 @@
 //!
 //! Corvene `1334-markdown-preview-diff`: a Markdown file's Preview is the
 //! same view over `corvene_core::markdown_doc` blocks (math typeset with
-//! `1333-markdown-math`).
+//! `1333-markdown-math`). It opens scrolled to the first change, or to
+//! the block the Source view's top line is in when switched from there.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -41,6 +42,8 @@ enum Content {
         old: Rc<Vec<Block>>,
         new: Rc<Vec<Block>>,
         rows: Rc<Vec<BlockRow>>,
+        /// The line each new block ends on (Markdown only).
+        new_lines: Rc<Vec<u32>>,
         macros: SharedMacros,
         title: Option<String>,
     },
@@ -58,6 +61,9 @@ pub struct LatexDiff {
     list: ListState,
     /// Each version's pictures, ready to draw.
     images: [ImageResolver; 2],
+    /// A scroll asked for before the content was read: to the block
+    /// holding this line of the new file, or (`None`) to the first change.
+    reveal: Option<Option<u32>>,
 }
 
 fn sides(diff: &Diff) -> (Option<&LatexBlob>, Option<&LatexBlob>) {
@@ -78,6 +84,7 @@ enum Read {
         old: Vec<Block>,
         new: Vec<Block>,
         rows: Vec<BlockRow>,
+        new_lines: Vec<u32>,
         macros: String,
         title: Option<String>,
     },
@@ -114,9 +121,9 @@ impl LatexDiff {
                 Diff::Latex { kind, .. } => *kind,
                 Diff::Markdown { .. } => {
                     let parse =
-                        |t: String| corvene_core::markdown_doc::parse_document(&t, mdx, math);
-                    let old = parse(text(previous));
-                    let new = parse(text(current));
+                        |t: String| corvene_core::markdown_doc::parse_document_lines(&t, mdx, math);
+                    let (old, _) = parse(text(previous));
+                    let (new, new_lines) = parse(text(current));
                     let mut rows = block_diff(&old, &new);
                     // a picture redrawn under the same name changed its block
                     let bytes = |blob: Option<&LatexBlob>, src: &str| {
@@ -143,6 +150,7 @@ impl LatexDiff {
                         old,
                         new,
                         rows,
+                        new_lines,
                         macros: String::new(),
                         title: None,
                     };
@@ -160,6 +168,7 @@ impl LatexDiff {
                         old: old.blocks,
                         new: new.blocks,
                         rows,
+                        new_lines: Vec::new(),
                     }
                 }
                 LatexKind::Bibliography => {
@@ -178,12 +187,14 @@ impl LatexDiff {
                         old,
                         new,
                         rows,
+                        new_lines,
                         macros,
                         title,
                     } => Content::Document {
                         old: Rc::new(old),
                         new: Rc::new(new),
                         rows: Rc::new(rows),
+                        new_lines: Rc::new(new_lines),
                         macros: Arc::new(corvene_math::Macros::collect(&macros)),
                         title,
                     },
@@ -199,19 +210,60 @@ impl LatexDiff {
                 };
                 this.list.reset(count);
                 this.content = Some(Rc::new(content));
+                this.apply_reveal();
                 cx.notify();
             })
             .ok();
         }));
         let (previous, current) = sides(&diff);
         let images = [resolver(previous), resolver(current)];
+        let markdown = matches!(*diff, Diff::Markdown { .. });
         Self {
             diff,
             content: None,
             _task,
             list: ListState::new(0, ListAlignment::Top, zpx(600.)),
             images,
+            // a Markdown preview opens at its first change
+            reveal: markdown.then_some(None),
         }
+    }
+
+    /// Scroll to the block holding `line` of the new file (`None`: to the
+    /// first change), now or once read.
+    pub fn reveal(&mut self, line: Option<u32>, cx: &mut Context<Self>) {
+        self.reveal = Some(line);
+        self.apply_reveal();
+        cx.notify();
+    }
+
+    fn apply_reveal(&mut self) {
+        let Some(content) = self.content.clone() else {
+            return;
+        };
+        let Some(line) = self.reveal.take() else {
+            return;
+        };
+        let at_line = match (&*content, line) {
+            (
+                Content::Document {
+                    rows, new_lines, ..
+                },
+                Some(line),
+            ) => rows.iter().position(|r| {
+                r.current
+                    .and_then(|j| new_lines.get(j))
+                    .is_some_and(|&end| end >= line)
+            }),
+            _ => None,
+        };
+        let Some(ix) = at_line.or_else(|| (0..self.count()).find(|&i| self.changed(i))) else {
+            return;
+        };
+        self.list.scroll_to(ListOffset {
+            item_ix: ix,
+            offset_in_item: px(0.),
+        });
     }
 
     /// The LaTeX diff shown.
