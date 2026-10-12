@@ -8735,15 +8735,16 @@ registry! {
     ARCHIVE_ENTRIES_IN_FILE_LIST = 1328 "archive-entries-in-file-list" {
         title: "Archive entries in file lists",
         summary: "With archive diffs on, a changed archive in the Changes, History and stash \
-                  file lists gets a disclosure arrow that lists its changed entries under it, \
-                  like a folder. Clicking an entry shows the archive with that entry's diff.",
+                  file lists gets a small pill with its number of changed entries that lists \
+                  them under it, like a folder. Clicking an entry shows the archive with that \
+                  entry's diff.",
         ghd_behaviour: "An archive is one row like any other file.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[],
-        code: &["crates/corvene-ui/src/file_tree_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+        code: &["crates/corvene-ui/src/archive_list_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/stash_view.rs"],
     },
 
     /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
