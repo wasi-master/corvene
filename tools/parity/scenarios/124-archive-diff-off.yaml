@@ -1,0 +1,10 @@
+# With 1323-archive-diff off a changed zip is a binary file, as in GHD
+# (deviations.md › Diff viewer).
+name: archive-diff-off
+description: A changed zip with archive diffs off shows GHD's binary panel
+setup: repo-archives
+corvene_flags: 1323-archive-diff=off
+steps:
+  - click: [125, 185]
+    wait: 1200
+  - snap: {name: binary}

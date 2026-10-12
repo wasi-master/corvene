@@ -1,0 +1,12 @@
+# A changed zip shown as a folder (1323-archive-diff, off in the GitHub
+# Desktop preset; deviations.md › Diff viewer): the summary bar, the entry
+# tree and the first changed entry's text diff. GHD shows "This binary
+# file has changed." (124 compares that with the flag off).
+name: archive-diff
+description: A changed zip as an entry tree beside its first changed entry's diff
+setup: repo-archives
+corvene_flags: 1323-archive-diff=on
+steps:
+  - click: [125, 185]
+    wait: 1500
+  - snap: {name: tree, corvene_only: true, note: "GHD shows archives as binary files (1323-archive-diff)"}

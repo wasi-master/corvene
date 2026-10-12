@@ -677,6 +677,125 @@ def _pdf(repo: Path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "Add the quarterly report", date="2026-09-28T09:00:00+00:00")
     p.write_bytes(_pdf_bytes(_PDF_PAGES_EDITED))
+# `repo-archives` (`1323-archive-diff`, `1328-archive-entries-in-file-list`):
+# a zip with an archive inside it, a gzipped tar, a gzipped log and a zip
+# rebuilt with new timestamps only; one commit changes the tar, then the
+# working copy changes all four
+def _zip(entries: list, stamp=(2026, 9, 1, 12, 0, 0)) -> bytes:
+    """A zip of `(name, bytes, mode)` entries; a name ending in `/` is a folder."""
+    import io
+    import zipfile
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data, mode in entries:
+            info = zipfile.ZipInfo(name, date_time=stamp)
+            info.compress_type = zipfile.ZIP_STORED if name.endswith("/") else zipfile.ZIP_DEFLATED
+            kind = 0o040000 if name.endswith("/") else 0o100000
+            info.external_attr = ((kind | mode) << 16) | (0x10 if name.endswith("/") else 0)
+            z.writestr(info, data)
+    return out.getvalue()
+
+
+def _targz(entries: list) -> bytes:
+    """A gzipped tar of `(name, bytes | None, mode, link)` entries (a link when bytes is None)."""
+    import gzip
+    import io
+    import tarfile
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as t:
+        for name, data, mode, link in entries:
+            info = tarfile.TarInfo(name)
+            info.mtime = 1_790_000_000
+            info.mode = mode
+            info.uname, info.gname = "build", "build"
+            if data is None:
+                info.type = tarfile.SYMTYPE
+                info.linkname = link
+                t.addfile(info)
+            else:
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+    return gzip.compress(raw.getvalue(), mtime=0)
+
+
+_ARCHIVE_MAIN = """use std::env;
+
+fn main() {
+    let name = env::args().nth(1).unwrap_or_else(|| "world".into());
+    println!("Hello, {name}!");
+}
+"""
+_ARCHIVE_MAIN_EDITED = """use std::env;
+
+mod util;
+
+fn main() {
+    let name = env::args().nth(1).unwrap_or_else(|| "world".into());
+    println!("{}", util::greeting(&name));
+}
+"""
+_ARCHIVE_UTIL = """/// The greeting for `name`.
+pub fn greeting(name: &str) -> String {
+    format!("Hello, {name}! Welcome back.")
+}
+"""
+_ARCHIVE_INDEX = "<!doctype html>\n<title>Site</title>\n<h1>Welcome</h1>\n<p>Version 1</p>\n"
+_ARCHIVE_LOG = "".join(f"2026-09-01 12:00:{i:02d} INFO request {i} served in {10 + i} ms\n" for i in range(20))
+
+
+def _archives_bundle(edited: bool) -> bytes:
+    lib = _zip([
+        ("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\n", 0o644),
+        ("com/example/App.class", b"class App v2" if edited else b"class App v1", 0o644),
+    ] + ([("com/example/Helper.class", b"class Helper", 0o644)] if edited else []))
+    entries = [
+        ("README.md", b"# Bundle\n\nEverything the app ships with.\n", 0o644),
+        ("src/", b"", 0o755),
+        ("src/main.rs", (_ARCHIVE_MAIN_EDITED if edited else _ARCHIVE_MAIN).encode(), 0o644),
+        ("img/logo.png", _png(64, 64, _marks_picture(edited)), 0o644),
+        ("libs/lib.jar", lib, 0o644),
+        ("new/name.txt" if edited else "old/name.txt", b"This file moves without changing.\n", 0o644),
+        ("bin/run.sh", b"#!/bin/sh\nexec ./app \"$@\"\n", 0o755 if edited else 0o644),
+    ]
+    if edited:
+        entries.append(("src/util.rs", _ARCHIVE_UTIL.encode(), 0o644))
+    else:
+        entries.append(("docs/guide.md", b"# Guide\n\nStart the app with bin/run.sh.\n", 0o644))
+    return _zip(entries)
+
+
+def _archives_site(version: int) -> bytes:
+    entries = [
+        ("site/index.html", _ARCHIVE_INDEX.replace("Version 1", f"Version {version}").encode(), 0o644, None),
+        ("site/style.css", b"body { font: 14px sans-serif; }\n", 0o644, None),
+        ("site/current", None, 0o777, "index.html"),
+    ]
+    entries.append(("site/main.js" if version > 2 else "site/app.js", b"console.log('hi');\n", 0o644, None))
+    return _targz(entries)
+
+
+def _archives(repo: Path) -> None:
+    import gzip
+    rebuilt = [("a.txt", b"same\n", 0o644), ("b.txt", b"also same\n", 0o644)]
+    files = {
+        "assets/bundle.zip": _archives_bundle(False),
+        "build/rebuilt.zip": _zip(rebuilt),
+        "dist/site.tar.gz": _archives_site(1),
+        "logs/run.txt.gz": gzip.compress(_ARCHIVE_LOG.encode(), mtime=0),
+    }
+    for rel, data in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the archives", date="2026-09-27T09:00:00+00:00")
+    (repo / "dist" / "site.tar.gz").write_bytes(_archives_site(2))
+    _git(repo, "commit", "-q", "-am", "Publish the site again", date="2026-09-28T09:00:00+00:00")
+    (repo / "assets" / "bundle.zip").write_bytes(_archives_bundle(True))
+    (repo / "build" / "rebuilt.zip").write_bytes(_zip(rebuilt, stamp=(2026, 10, 12, 9, 30, 0)))
+    (repo / "dist" / "site.tar.gz").write_bytes(_archives_site(3))
+    log = _ARCHIVE_LOG.replace("request 7 served", "request 7 failed") + "2026-09-01 12:00:20 WARN slow request\n"
+    (repo / "logs" / "run.txt.gz").write_bytes(gzip.compress(log.encode(), mtime=0))
 
 
 # `repo-images` (`1326-more-image-formats`, `794-svg-image-diff`,
@@ -714,7 +833,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
-          diff_marks: bool = False, pdf: bool = False, *, images: bool = False) -> Path:
+          diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -870,6 +989,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "Add the artwork", date="2026-09-28T10:00:00+00:00")
         _images(repo, True)
+        return repo
+    if archives:
+        _archives(repo)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
