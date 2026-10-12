@@ -63,6 +63,7 @@ pub mod host;
 pub mod hosts;
 pub mod image_decode;
 pub mod insights;
+pub mod inspect_diff;
 pub mod integrations;
 pub mod issues;
 pub mod job_log;
@@ -167,7 +168,9 @@ pub use persistence::{
     DEFAULT_TIME_FORMAT, NotificationClickAction, PullRequestEventNotifications, Settings,
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
-pub use persistence::{LatexDiffView, MarkdownDiffView, NotebookDiffView};
+pub use persistence::{
+    InspectDiffView, InspectKind, LatexDiffView, MarkdownDiffView, NotebookDiffView,
+};
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{

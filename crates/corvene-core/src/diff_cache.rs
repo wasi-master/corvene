@@ -76,6 +76,17 @@ impl<K: PartialEq, V: Clone> Lru<K, V> {
 
 const MB: usize = 1024 * 1024;
 
+/// Approximate heap bytes of a text diff's lines (0 for other diffs).
+fn loaded_weight(diff: &corvene_models::Diff) -> usize {
+    diff.hunks().map_or(0, |hunks| {
+        hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .map(|l| l.text.len() + 48)
+            .sum()
+    })
+}
+
 /// Approximate heap bytes of a loaded diff and its contents.
 fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
     let lines = |l: &Option<Arc<Vec<String>>>| {
@@ -137,6 +148,38 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|n| n.weight())
             .sum(),
+        // `1338-lockfile-diff`
+        corvene_models::Diff::Lockfile { diff, source } => diff.weight() + loaded_weight(source),
+        // `1339-pretty-diff`
+        corvene_models::Diff::Pretty { pretty, source, .. } => {
+            loaded_weight(pretty) + loaded_weight(source)
+        }
+        // `1340-tensor-diff`
+        corvene_models::Diff::Tensors {
+            previous,
+            current,
+            source,
+        } => {
+            [previous, current]
+                .into_iter()
+                .flatten()
+                .map(|t| t.weight())
+                .sum::<usize>()
+                + loaded_weight(source)
+        }
+        // `1341-signing-material-diff`
+        corvene_models::Diff::Signing {
+            previous,
+            current,
+            source,
+        } => {
+            [previous, current]
+                .into_iter()
+                .flatten()
+                .map(|t| t.weight())
+                .sum::<usize>()
+                + loaded_weight(source)
+        }
         // `1332-latex-diff`, `1334-markdown-preview-diff`
         corvene_models::Diff::Latex {
             previous, current, ..

@@ -310,7 +310,11 @@ fn part_of<'a>(
     let diff = match diff {
         Diff::Notebook { source, .. }
         | Diff::Latex { source, .. }
-        | Diff::Markdown { source, .. } => *source,
+        | Diff::Markdown { source, .. }
+        | Diff::Lockfile { source, .. }
+        | Diff::Pretty { source, .. }
+        | Diff::Tensors { source, .. }
+        | Diff::Signing { source, .. } => *source,
         diff => diff,
     };
     let (hunks, utf16) = match &diff {

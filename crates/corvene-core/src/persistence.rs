@@ -222,6 +222,15 @@ pub struct Settings {
     /// (the diff header's Source / Preview switch).
     #[serde(default)]
     pub markdown_diff_view: MarkdownDiffView,
+    /// Corvene `1338-lockfile-diff`: Dependencies or Source.
+    #[serde(default)]
+    pub lockfile_diff_view: InspectDiffView,
+    /// Corvene `1339-pretty-diff`: Formatted or Source.
+    #[serde(default)]
+    pub pretty_diff_view: InspectDiffView,
+    /// Corvene `1341-signing-material-diff`: Fields or Source (text files).
+    #[serde(default)]
+    pub signing_diff_view: InspectDiffView,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -578,6 +587,26 @@ pub enum MarkdownDiffView {
     Preview,
 }
 
+/// Corvene `1338-lockfile-diff`, `1339-pretty-diff`,
+/// `1341-signing-material-diff`: the diff header's switch between the
+/// file read into something legible and git's own diff.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InspectDiffView {
+    /// The dependency table, the pretty printed diff, the fields.
+    #[default]
+    Read,
+    /// Git's own diff (GHD's only view).
+    Source,
+}
+
+/// Which switch [`InspectDiffView`] is stored for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectKind {
+    Lockfile,
+    Pretty,
+    Signing,
+}
+
 /// Corvene (`1314-code-owners`): a file row's owners as text or an icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CodeOwnersDisplay {
@@ -665,6 +694,9 @@ impl Default for Settings {
             notebook_filters: crate::notebook_diff::NotebookFilters::default(),
             latex_diff_view: LatexDiffView::Rendered,
             markdown_diff_view: MarkdownDiffView::Source,
+            lockfile_diff_view: InspectDiffView::Read,
+            pretty_diff_view: InspectDiffView::Read,
+            signing_diff_view: InspectDiffView::Read,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

@@ -1,0 +1,38 @@
+# Files whose line diff says little, read into something legible (flags
+# 1338-lockfile-diff, 1339-pretty-diff, 1340-tensor-diff and
+# 1341-signing-material-diff, all off in the GitHub Desktop preset;
+# deviations.md › Diff viewer). GHD shows text diffs and a binary panel.
+# Rows (GHD's case-insensitive order): authorized_keys, Cargo.lock,
+# certs/api.pem, models/tiny.safetensors, web/dist/shop.min.js,
+# web/package-lock.json.
+# Coordinates: calibrate the switch clicks on the first run.
+name: inspect-diffs
+description: Lockfiles as dependency tables, a minified bundle pretty printed, a model's tensors, a certificate and SSH keys as fields (Corvene only)
+setup: repo-inspect
+corvene_flags: 1338-lockfile-diff=on,1339-pretty-diff=on,1340-tensor-diff=on,1341-signing-material-diff=on
+steps:
+  - click: [125, 214]
+    wait: 1500
+  - snap: {name: cargo-lock, corvene_only: true, note: "upgraded, added and removed crates (1338-lockfile-diff)"}
+  - click: [125, 330]
+    wait: 1500
+  - snap: {name: package-lock, corvene_only: true, note: "direct and transitive npm packages with semver bumps"}
+  - ghd: {skip: true}
+    corvene: {click: [1262, 97]}
+    wait: 1200
+  - snap: {name: package-lock-source, corvene_only: true, note: "the Dependencies / Source switch: Source"}
+  - ghd: {skip: true}
+    corvene: {click: [1180, 97]}
+    wait: 800
+  - click: [125, 301]
+    wait: 1500
+  - snap: {name: minified, corvene_only: true, note: "the bundle pretty printed, one changed line (1339-pretty-diff)"}
+  - click: [125, 272]
+    wait: 1500
+  - snap: {name: tensors, corvene_only: true, note: "a reshaped and an added tensor (1340-tensor-diff)"}
+  - click: [125, 243]
+    wait: 1500
+  - snap: {name: certificate, corvene_only: true, note: "the renewed certificate's fields (1341-signing-material-diff)"}
+  - click: [125, 185]
+    wait: 1500
+  - snap: {name: authorized-keys, corvene_only: true, note: "a new key with a from= option"}

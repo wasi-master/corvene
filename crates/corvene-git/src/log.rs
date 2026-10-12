@@ -1145,6 +1145,21 @@ fn finish_committed_diff(
             return media;
         }
     }
+    // `1338-lockfile-diff` / `1339-pretty-diff` / `1340-tensor-diff` /
+    // `1341-signing-material-diff`
+    let diff = match crate::inspect::inspect_diff(
+        &git,
+        workdir,
+        &file.path,
+        file.status.kind,
+        crate::archive::SideRef::Blob(newest, &file.path),
+        crate::archive::SideRef::Blob(base, previous_path),
+        diff,
+        hide_whitespace,
+    ) {
+        Ok(diff) => return diff,
+        Err(diff) => diff,
+    };
     match diff {
         Diff::Binary
             if utf16
@@ -1154,6 +1169,7 @@ fn finish_committed_diff(
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)
                 && !crate::document_file::is_binary_document(&file.path)
+                && !crate::inspect::is_inspected(&file.path)
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;

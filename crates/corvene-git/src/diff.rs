@@ -191,6 +191,29 @@ pub fn working_directory_diff(
             return Ok(media);
         }
     }
+    // `1338-lockfile-diff` / `1339-pretty-diff` / `1340-tensor-diff` /
+    // `1341-signing-material-diff`
+    let diff = {
+        let working = workdir.join(&file.path);
+        let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+        let old = match &old_side {
+            Some((rev, path)) => crate::archive::SideRef::Blob(rev, path),
+            None => crate::archive::SideRef::Blob("HEAD", previous_path),
+        };
+        match crate::inspect::inspect_diff(
+            &git,
+            workdir,
+            &file.path,
+            file.status.kind,
+            crate::archive::SideRef::File(&working),
+            old,
+            diff,
+            hide_whitespace,
+        ) {
+            Ok(diff) => return Ok(diff),
+            Err(diff) => diff,
+        }
+    };
     Ok(match diff {
         // `1306-utf16-diffs`: a UTF-16 text file (images stay images)
         Diff::Binary
@@ -200,6 +223,7 @@ pub fn working_directory_diff(
                 && crate::archive::archive_format(&file.path).is_none()
                 && !corvene_models::is_font_file(&file.path)
                 && !crate::document_file::is_binary_document(&file.path)
+                && !crate::inspect::is_inspected(&file.path)
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;

@@ -203,6 +203,11 @@ pub fn commit_detail(s: &AppState, repo: u64) -> Option<CommitDetailVm> {
         Some(Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. }) => {
             DiffKindVm::Text
         }
+        // `1338-lockfile-diff` .. `1341-signing-material-diff`: git's own
+        // diff (the Android app has none of these views yet)
+        Some(Diff::Lockfile { .. } | Diff::Pretty { .. }) => DiffKindVm::Text,
+        Some(Diff::Signing { source, .. }) if source.hunks().is_some() => DiffKindVm::Text,
+        Some(Diff::Tensors { .. } | Diff::Signing { .. }) => DiffKindVm::Binary,
     };
     Some(CommitDetailVm {
         repo,

@@ -135,6 +135,10 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Latex { .. } => "Latex",
         Diff::Markdown { .. } => "Markdown",
         Diff::Media(_) => "Media",
+        Diff::Lockfile { .. } => "Lockfile",
+        Diff::Pretty { .. } => "Pretty",
+        Diff::Tensors { .. } => "Tensors",
+        Diff::Signing { .. } => "Signing",
     }
 }
 

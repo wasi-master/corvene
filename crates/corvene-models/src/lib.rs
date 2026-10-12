@@ -3078,6 +3078,37 @@ pub enum Diff {
         current: Option<std::sync::Arc<MarkdownBlob>>,
         source: Box<Diff>,
     },
+    /// Corvene `1338-lockfile-diff`: a package manager lockfile read as
+    /// dependency changes. `source` is git's own diff, for the Source view
+    /// and staging.
+    Lockfile {
+        diff: std::sync::Arc<LockfileDiff>,
+        source: Box<Diff>,
+    },
+    /// Corvene `1339-pretty-diff`: a minified JSON, JavaScript, CSS, HTML
+    /// or XML file. `pretty` is the diff of both versions pretty printed
+    /// (`language` names the printer); `source` is git's own diff.
+    Pretty {
+        language: String,
+        pretty: Box<Diff>,
+        source: Box<Diff>,
+    },
+    /// Corvene `1340-tensor-diff`: a model weight file read as its tensors.
+    /// `previous` is missing for new files, `current` for deleted ones.
+    /// `source` is git's own diff (binary, or a Git LFS pointer diff).
+    Tensors {
+        previous: Option<std::sync::Arc<TensorFile>>,
+        current: Option<std::sync::Arc<TensorFile>>,
+        source: Box<Diff>,
+    },
+    /// Corvene `1341-signing-material-diff`: certificates and keys read as
+    /// their public fields. `source` is git's own diff (text for PEM,
+    /// armored and SSH keys).
+    Signing {
+        previous: Option<std::sync::Arc<SigningFile>>,
+        current: Option<std::sync::Arc<SigningFile>>,
+        source: Box<Diff>,
+    },
 }
 
 impl Diff {
@@ -3092,7 +3123,11 @@ impl Diff {
             } => source.line_count(),
             Diff::Notebook { source, .. }
             | Diff::Latex { source, .. }
-            | Diff::Markdown { source, .. } => source.line_count(),
+            | Diff::Markdown { source, .. }
+            | Diff::Lockfile { source, .. }
+            | Diff::Pretty { source, .. }
+            | Diff::Tensors { source, .. }
+            | Diff::Signing { source, .. } => source.line_count(),
             _ => 0,
         }
     }
@@ -3108,7 +3143,11 @@ impl Diff {
             } => source.hunks(),
             Diff::Notebook { source, .. }
             | Diff::Latex { source, .. }
-            | Diff::Markdown { source, .. } => source.hunks(),
+            | Diff::Markdown { source, .. }
+            | Diff::Lockfile { source, .. }
+            | Diff::Pretty { source, .. }
+            | Diff::Tensors { source, .. }
+            | Diff::Signing { source, .. } => source.hunks(),
             _ => None,
         }
     }
@@ -3123,7 +3162,11 @@ impl Diff {
             } => source.warnings(),
             Diff::Notebook { source, .. }
             | Diff::Latex { source, .. }
-            | Diff::Markdown { source, .. } => source.warnings(),
+            | Diff::Markdown { source, .. }
+            | Diff::Lockfile { source, .. }
+            | Diff::Pretty { source, .. }
+            | Diff::Tensors { source, .. }
+            | Diff::Signing { source, .. } => source.warnings(),
             _ => None,
         }
     }

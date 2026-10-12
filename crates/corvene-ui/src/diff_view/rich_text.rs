@@ -9,26 +9,35 @@
 //! Corvene `1334-markdown-preview-diff`: a Markdown file's Source /
 //! Preview switch works the same way (Source is git's diff; Preview the
 //! LaTeX view over the Markdown blocks).
+//!
+//! Corvene `1338-lockfile-diff` / `1339-pretty-diff` / `1340-tensor-diff` /
+//! `1341-signing-material-diff`: a lockfile's dependency table, a minified
+//! file's pretty printed diff (derived text, not stageable), a model
+//! file's tensors and a key's fields, each with git's diff as Source.
 
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use corvene_core::{
-    Diff, Dispatcher, LatexDiffView as LatexView, MarkdownDiffView as MarkdownView,
-    NotebookDiffView as NotebookView,
+    Diff, Dispatcher, InspectDiffView as InspectView, InspectKind, LatexDiffView as LatexView,
+    MarkdownDiffView as MarkdownView, NotebookDiffView as NotebookView,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use super::{DiffSource, DiffView, PdfText, Snapshot, view_switch_n};
+use super::{DiffSource, DiffView, InspectContext, PdfText, Snapshot, view_switch_n};
 use crate::latex_diff::LatexDiff;
+use crate::lockfile_diff::LockfileDiffView;
 use crate::notebook_diff::{NotebookContext, NotebookDiffView};
+use crate::signing_diff::SigningDiffView;
+use crate::tensor_diff::TensorDiffView;
 
 /// Flipped into the diff generation of the replacement views, so their rows
 /// are built apart from each other's.
 const JSON_GENERATION: u64 = 1 << 60;
 const SCRIPT_GENERATION: u64 = 1 << 59;
 const LATEX_PAGES_GENERATION: u64 = 1 << 58;
+const PRETTY_GENERATION: u64 = 1 << 57;
 
 /// A LaTeX diff and its pages (or why they could not be drawn).
 type PagesOf = (Arc<Diff>, Result<Arc<Diff>, String>);
@@ -40,6 +49,11 @@ pub(super) struct RichPane {
     source: Option<Arc<Diff>>,
     notebook: Option<Entity<NotebookDiffView>>,
     latex: Option<Entity<LatexDiff>>,
+    /// A lockfile's, model file's or key's view.
+    inspect: Option<InspectPane>,
+    /// A minified file's pretty printed diff as its own `Arc`, with the
+    /// diff it came from.
+    pretty: RefCell<Option<(Arc<Diff>, Arc<Diff>)>>,
     /// git's diff of the shown file as its own `Arc` (for the JSON / Text
     /// view), with the diff it came from.
     text: RefCell<Option<(Arc<Diff>, Arc<Diff>)>>,
@@ -52,11 +66,43 @@ pub(super) struct RichPane {
     pages_running: bool,
 }
 
-/// A notebook or LaTeX diff.
+/// `1338-lockfile-diff` / `1340-tensor-diff` / `1341-signing-material-diff`.
+enum InspectPane {
+    Lockfile(Entity<LockfileDiffView>),
+    Tensors(Entity<TensorDiffView>),
+    Signing(Entity<SigningDiffView>),
+}
+
+impl InspectPane {
+    fn diff<'a>(&self, cx: &'a App) -> &'a Arc<Diff> {
+        match self {
+            InspectPane::Lockfile(v) => v.read(cx).diff(),
+            InspectPane::Tensors(v) => v.read(cx).diff(),
+            InspectPane::Signing(v) => v.read(cx).diff(),
+        }
+    }
+
+    fn element(&self) -> AnyElement {
+        match self {
+            InspectPane::Lockfile(v) => v.clone().into_any_element(),
+            InspectPane::Tensors(v) => v.clone().into_any_element(),
+            InspectPane::Signing(v) => v.clone().into_any_element(),
+        }
+    }
+}
+
+/// A notebook, LaTeX, Markdown, lockfile, pretty printed, tensor or
+/// signing material diff.
 pub(super) fn is_rich(diff: &Diff) -> bool {
     matches!(
         diff,
-        Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. }
+        Diff::Notebook { .. }
+            | Diff::Latex { .. }
+            | Diff::Markdown { .. }
+            | Diff::Lockfile { .. }
+            | Diff::Pretty { .. }
+            | Diff::Tensors { .. }
+            | Diff::Signing { .. }
     )
 }
 
@@ -64,9 +110,19 @@ fn source_of(diff: &Diff) -> Option<&Diff> {
     match diff {
         Diff::Notebook { source, .. }
         | Diff::Latex { source, .. }
-        | Diff::Markdown { source, .. } => Some(source),
+        | Diff::Markdown { source, .. }
+        | Diff::Lockfile { source, .. }
+        | Diff::Pretty { source, .. }
+        | Diff::Tensors { source, .. }
+        | Diff::Signing { source, .. } => Some(source),
         _ => None,
     }
+}
+
+/// A signing material file git diffs as text (PEM, armored or SSH keys):
+/// only those have a Source view.
+fn signing_has_source(diff: &Diff) -> bool {
+    matches!(diff, Diff::Signing { source, .. } if source.hunks().is_some())
 }
 
 /// `1332-latex-diff`: whether a TeX engine can draw a document's pages
@@ -111,6 +167,35 @@ fn effective(diff: &Diff, s: &corvene_core::AppState) -> Effective {
             MarkdownView::Source => Effective::Text,
             MarkdownView::Preview => Effective::Rendered,
         },
+        Diff::Lockfile { .. } if !s.flags.bool(corvene_core::flags::ids::LOCKFILE_DIFF) => {
+            Effective::Text
+        }
+        Diff::Lockfile { .. } => match s.settings.lockfile_diff_view {
+            InspectView::Read => Effective::Rendered,
+            InspectView::Source => Effective::Text,
+        },
+        Diff::Pretty { .. }
+            if !s.flags.bool(corvene_core::flags::ids::PRETTY_DIFF)
+                || s.settings.pretty_diff_view == InspectView::Source =>
+        {
+            Effective::Text
+        }
+        Diff::Pretty { .. } => Effective::Pretty,
+        Diff::Tensors { .. } if !s.flags.bool(corvene_core::flags::ids::TENSOR_DIFF) => {
+            Effective::Text
+        }
+        Diff::Signing { .. }
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::SIGNING_MATERIAL_DIFF) =>
+        {
+            Effective::Text
+        }
+        Diff::Signing { .. }
+            if signing_has_source(diff) && s.settings.signing_diff_view == InspectView::Source =>
+        {
+            Effective::Text
+        }
         _ => Effective::Rendered,
     }
 }
@@ -121,6 +206,8 @@ enum Effective {
     Text,
     Script,
     Pages,
+    /// `1339-pretty-diff`: the pretty printed diff.
+    Pretty,
 }
 
 /// The header's switch while the diff is a notebook or LaTeX diff.
@@ -205,8 +292,71 @@ pub(super) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl Into
                 cx,
             ))
         }
+        Diff::Lockfile { .. } if s.flags.bool(corvene_core::flags::ids::LOCKFILE_DIFF) => {
+            Some(inspect_switch(
+                InspectKind::Lockfile,
+                s.settings.lockfile_diff_view,
+                "Dependencies",
+                cx,
+            ))
+        }
+        Diff::Pretty { .. } if s.flags.bool(corvene_core::flags::ids::PRETTY_DIFF) => {
+            Some(inspect_switch(
+                InspectKind::Pretty,
+                s.settings.pretty_diff_view,
+                "Formatted",
+                cx,
+            ))
+        }
+        Diff::Signing { .. }
+            if signing_has_source(&source)
+                && s
+                    .flags
+                    .bool(corvene_core::flags::ids::SIGNING_MATERIAL_DIFF) =>
+        {
+            Some(inspect_switch(
+                InspectKind::Signing,
+                s.settings.signing_diff_view,
+                "Fields",
+                cx,
+            ))
+        }
         _ => None,
     }
+}
+
+/// A read view / Source switch (`1338-lockfile-diff`, `1339-pretty-diff`,
+/// `1341-signing-material-diff`).
+fn inspect_switch(
+    kind: InspectKind,
+    current: InspectView,
+    read: &'static str,
+    cx: &App,
+) -> Stateful<Div> {
+    let values = [InspectView::Read, InspectView::Source];
+    let selected = values.iter().position(|v| *v == current).unwrap_or(0);
+    let (switch, ids): (&str, [&str; 2]) = match kind {
+        InspectKind::Lockfile => (
+            "lockfile-view-switch",
+            ["lockfile-view-dependencies", "lockfile-view-source"],
+        ),
+        InspectKind::Pretty => (
+            "pretty-view-switch",
+            ["pretty-view-formatted", "pretty-view-source"],
+        ),
+        InspectKind::Signing => (
+            "signing-view-switch",
+            ["signing-view-fields", "signing-view-source"],
+        ),
+    };
+    view_switch_n(
+        switch,
+        &ids,
+        &[read, "Source"],
+        selected,
+        move |ix, cx| Dispatcher::set_inspect_diff_view(kind, values[ix], cx),
+        cx,
+    )
 }
 
 use corvene_core::AppState;
@@ -257,6 +407,21 @@ impl DiffView {
                 }
                 _ => None,
             },
+            Effective::Pretty => {
+                let Diff::Pretty { pretty, .. } = &**diff else {
+                    return None;
+                };
+                let mut cache = self.rich.pretty.borrow_mut();
+                let fresh = cache
+                    .as_ref()
+                    .is_some_and(|(from, _)| Arc::ptr_eq(from, diff));
+                if !fresh {
+                    *cache = Some((diff.clone(), Arc::new((**pretty).clone())));
+                }
+                cache
+                    .as_ref()
+                    .map(|(_, pretty)| (pretty.clone(), PRETTY_GENERATION, false))
+            }
         }
     }
 
@@ -334,9 +499,43 @@ impl DiffView {
         let Some(source) = snap.rich_source.clone() else {
             self.rich.notebook = None;
             self.rich.latex = None;
+            self.rich.inspect = None;
             return;
         };
+        if !matches!(
+            &*source,
+            Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. }
+        ) {
+            self.rich.inspect = None;
+        }
         match &*source {
+            Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. } => {
+                self.rich.notebook = None;
+                self.rich.latex = None;
+                let keep = self
+                    .rich
+                    .inspect
+                    .as_ref()
+                    .is_some_and(|v| Arc::ptr_eq(v.diff(cx), &source));
+                if !keep {
+                    let context = InspectContext {
+                        repo: snap.repo,
+                        path: snap.path.clone(),
+                        working: self.source == DiffSource::WorkingDirectory,
+                    };
+                    self.rich.inspect = Some(match &*source {
+                        Diff::Lockfile { .. } => InspectPane::Lockfile(
+                            cx.new(|cx| LockfileDiffView::new(source, context, cx)),
+                        ),
+                        Diff::Tensors { .. } => InspectPane::Tensors(
+                            cx.new(|cx| TensorDiffView::new(source, context, cx)),
+                        ),
+                        _ => InspectPane::Signing(
+                            cx.new(|cx| SigningDiffView::new(source, context, cx)),
+                        ),
+                    });
+                }
+            }
             Diff::Notebook { .. } => {
                 self.rich.latex = None;
                 match self.rich.notebook.clone() {
@@ -400,6 +599,12 @@ impl DiffView {
                     }
                     None => self.panel("Reading the notebook…", cx),
                 },
+                Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. } => {
+                    match self.rich.inspect.as_ref() {
+                        Some(view) => view.element(),
+                        None => self.panel("Reading the file…", cx),
+                    }
+                }
                 _ => match self.rich.latex.clone() {
                     Some(view) => view.into_any_element(),
                     None => self.panel("Reading the document…", cx),
@@ -416,7 +621,7 @@ impl DiffView {
                 }
                 _ => self.panel("Compiling both versions of the document…", cx),
             },
-            Effective::Text => self.panel("This file has changed.", cx),
+            Effective::Text | Effective::Pretty => self.panel("This file has changed.", cx),
         }
     }
 }

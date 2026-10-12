@@ -138,6 +138,10 @@ use crate::diff_view_rows::{
     unified_to_split,
 };
 use crate::document_diff::DocumentDiff;
+/// Corvene `1338-lockfile-diff` / `1340-tensor-diff` /
+/// `1341-signing-material-diff`: where a lockfile, model file or key is
+/// shown (the repository, the file, and whether it is the Changes tab).
+pub use crate::notebook_diff::NotebookContext as InspectContext;
 use crate::font_diff::FontDiffView;
 use crate::font_diff::source::FontSourceView;
 use crate::icons::{Octicon, octicon};
@@ -4017,9 +4021,13 @@ impl DiffView {
             // `1324-document-diff`
             Diff::Document { .. } => self.document_panel(cx),
             // `1331-notebook-diff` / `1332-latex-diff`
-            Diff::Notebook { .. } | Diff::Latex { .. } | Diff::Markdown { .. } => {
-                self.rich_panel(snap, cx)
-            }
+            Diff::Notebook { .. }
+            | Diff::Latex { .. }
+            | Diff::Markdown { .. }
+            | Diff::Lockfile { .. }
+            | Diff::Pretty { .. }
+            | Diff::Tensors { .. }
+            | Diff::Signing { .. } => self.rich_panel(snap, cx),
         })
     }
 

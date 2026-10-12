@@ -28,6 +28,7 @@ pub mod latex_file;
 pub mod lfs;
 pub mod lfs_locks;
 pub mod lfs_progress;
+pub mod inspect;
 pub mod linked_files;
 pub mod log;
 mod log_gix;

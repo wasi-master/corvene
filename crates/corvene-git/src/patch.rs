@@ -347,7 +347,11 @@ fn apply_hunks_to_index(
         // `1331-notebook-diff` / `1332-latex-diff`: lines of git's own diff
         Diff::Notebook { source, .. }
         | Diff::Latex { source, .. }
-        | Diff::Markdown { source, .. } => {
+        | Diff::Markdown { source, .. }
+        | Diff::Lockfile { source, .. }
+        | Diff::Pretty { source, .. }
+        | Diff::Tensors { source, .. }
+        | Diff::Signing { source, .. } => {
             return apply_hunks_to_index(git, workdir, file, source, options);
         }
         Diff::Binary

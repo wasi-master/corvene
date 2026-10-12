@@ -36,6 +36,12 @@ crc32fast = "1"
 thiserror.workspace = true
 tracing.workspace = true
 calamine = "0.36.1"
+# flags 1338-lockfile-diff, 1339-pretty-diff, 1340-tensor-diff,
+# 1341-signing-material-diff
+corvene-lockfiles.workspace = true
+corvene-pretty.workspace = true
+corvene-tensors.workspace = true
+corvene-keys.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # Android has no Trash; discarded files are deleted there

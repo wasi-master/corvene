@@ -159,7 +159,7 @@ class Run:
                              "repo-mismatch", "repo-codeowners", "repo-diff-marks",
                              "repo-pdf", "repo-images",
                              "repo-archives", "repo-documents", "repo-notebooks",
-                             "repo-markdown", "repo-media")
+                             "repo-markdown", "repo-media", "repo-inspect")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
@@ -198,6 +198,9 @@ class Run:
         # `repo-media`: an edited video, WAVE tone and AAC song
         # (`1335-video-diff`, `1336-audio-diff`)
         media = setup == "repo-media"
+        # `repo-inspect`: a changed lockfile, minified bundle, model file,
+        # certificate and authorized_keys (flags 1338-1341)
+        inspect = setup == "repo-inspect"
         # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
         # fixtures' `lfs.url`
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
@@ -206,12 +209,12 @@ class Run:
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
-                               markdown=markdown, media=media) if with_repo else None
+                               markdown=markdown, media=media, inspect=inspect) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
-                               markdown=markdown, media=media) if with_repo else None
+                               markdown=markdown, media=media, inspect=inspect) if with_repo else None
         # `tags: {name: rev}`: lightweight tags added to both fixtures before
         # either app opens them
         for repo in (repo_g, repo_c) if with_repo else ():

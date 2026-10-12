@@ -190,6 +190,14 @@ impl Dispatcher {
         );
         // `1335-video-diff`, `1336-audio-diff`, `1337-media-ffmpeg`
         crate::media::set_media_diffs(&flags);
+        // `1338-lockfile-diff` / `1339-pretty-diff` / `1340-tensor-diff` /
+        // `1341-signing-material-diff`
+        corvene_git::inspect::set_inspected_diffs(
+            flags.bool(crate::flags::ids::LOCKFILE_DIFF),
+            flags.bool(crate::flags::ids::PRETTY_DIFF),
+            flags.bool(crate::flags::ids::TENSOR_DIFF),
+            flags.bool(crate::flags::ids::SIGNING_MATERIAL_DIFF),
+        );
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7287,6 +7295,22 @@ impl Dispatcher {
     /// Preview switch.
     pub fn set_markdown_diff_view(view: crate::persistence::MarkdownDiffView, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.markdown_diff_view = view);
+    }
+
+    /// Corvene `1338-lockfile-diff` / `1339-pretty-diff` /
+    /// `1341-signing-material-diff`: the diff header's switch between the
+    /// read view and git's own diff, per kind.
+    pub fn set_inspect_diff_view(
+        kind: crate::persistence::InspectKind,
+        view: crate::persistence::InspectDiffView,
+        cx: &mut dyn Host,
+    ) {
+        use crate::persistence::InspectKind as K;
+        Self::update_settings(cx, |s| match kind {
+            K::Lockfile => s.lockfile_diff_view = view,
+            K::Pretty => s.pretty_diff_view = view,
+            K::Signing => s.signing_diff_view = view,
+        });
     }
 
     /// Corvene `1331-notebook-diff`: a notebook cell's checkbox, the

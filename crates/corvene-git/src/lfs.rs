@@ -212,7 +212,10 @@ pub fn resolve_lfs_text(
     current: impl FnOnce() -> Option<LfsSide>,
     previous: impl FnOnce() -> Option<LfsSide>,
 ) -> Diff {
-    if !diff.hunks().is_some_and(is_pointer_diff) {
+    // `1340-tensor-diff` / `1341-signing-material-diff` read the objects
+    if !diff.hunks().is_some_and(is_pointer_diff)
+        || matches!(diff, Diff::Tensors { .. } | Diff::Signing { .. })
+    {
         return diff;
     }
     let file = |side: LfsSide| side_path(&git, workdir, side, LFS_TEXT_DIFF_MAX_BYTES);

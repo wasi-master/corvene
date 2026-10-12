@@ -155,7 +155,7 @@ pub fn clear_cache() {
     }
 }
 
-fn mtime_ns(meta: &std::fs::Metadata) -> i128 {
+pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i128 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -163,14 +163,19 @@ fn mtime_ns(meta: &std::fs::Metadata) -> i128 {
 }
 
 /// Pins a side: a file's size and mtime, a blob's id. `Ok(None)` for a
-/// missing side, `Err` when it cannot be read or is too large.
-fn pin(git: &Arc<GitBinary>, workdir: &Path, side: SideRef) -> Result<Option<ArchiveRoot>, ()> {
+/// missing side, `Err` when it cannot be read or is larger than `max`.
+pub(crate) fn pin(
+    git: &Arc<GitBinary>,
+    workdir: &Path,
+    side: &SideRef,
+    max: u64,
+) -> Result<Option<ArchiveRoot>, ()> {
     match side {
         SideRef::Missing => Ok(None),
         SideRef::File(path) => {
             // a regular file only: never read through a link (a FIFO hangs)
             let meta = std::fs::symlink_metadata(path).map_err(|_| ())?;
-            if !meta.is_file() || meta.len() > MAX_ARCHIVE_BYTES {
+            if !meta.is_file() || meta.len() > max {
                 return Err(());
             }
             Ok(Some(ArchiveRoot::File {
@@ -213,7 +218,7 @@ fn pin(git: &Arc<GitBinary>, workdir: &Path, side: SideRef) -> Result<Option<Arc
                     (true, size, oid)
                 }
             };
-            if !blob || size > MAX_ARCHIVE_BYTES {
+            if !blob || size > max {
                 return Err(());
             }
             Ok(Some(ArchiveRoot::Blob { oid }))
@@ -221,7 +226,11 @@ fn pin(git: &Arc<GitBinary>, workdir: &Path, side: SideRef) -> Result<Option<Arc
     }
 }
 
-fn read_root(git: &Arc<GitBinary>, workdir: &Path, root: &ArchiveRoot) -> Result<Vec<u8>, String> {
+pub(crate) fn read_root(
+    git: &Arc<GitBinary>,
+    workdir: &Path,
+    root: &ArchiveRoot,
+) -> Result<Vec<u8>, String> {
     match root {
         ArchiveRoot::File {
             path,
@@ -408,8 +417,8 @@ pub fn archive_diff(
         name: path.to_string(),
         chain: Vec::new(),
     };
-    let new = pin(&git, workdir, new).ok()?.map(source);
-    let old = pin(&git, workdir, old).ok()?.map(source);
+    let new = pin(&git, workdir, &new, MAX_ARCHIVE_BYTES).ok()?.map(source);
+    let old = pin(&git, workdir, &old, MAX_ARCHIVE_BYTES).ok()?.map(source);
     if new.is_none() && old.is_none() {
         return None;
     }

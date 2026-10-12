@@ -8999,6 +8999,75 @@ registry! {
         code: &["crates/corvene-media/src/ffmpeg.rs"],
     },
 
+    /// Lockfile changes shown as dependency changes.
+    LOCKFILE_DIFF = 1338 "lockfile-diff" {
+        title: "Lockfile dependency diffs",
+        summary: "A changed lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, \
+                  Cargo.lock, poetry.lock, uv.lock, Pipfile.lock, go.sum, Gemfile.lock, \
+                  composer.lock, Podfile.lock, Package.resolved, pubspec.lock, mix.lock, \
+                  flake.lock, .terraform.lock.hcl and more) is shown as a table of dependency \
+                  changes: upgraded, downgraded, added and removed packages with the semver \
+                  bump, direct or transitive, source changes, and a warning when a checksum \
+                  changes while the version stays. A Source switch shows git's line diff.",
+        ghd_behaviour: "Lockfiles are shown as their text diff, often thousands of lines.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-lockfiles/src/lib.rs", "crates/corvene-git/src/inspect.rs", "crates/corvene-ui/src/lockfile_diff.rs"],
+    },
+
+    /// Minified files diffed pretty printed.
+    PRETTY_DIFF = 1339 "pretty-diff" {
+        title: "Pretty printed diffs of minified files",
+        summary: "A changed minified JSON, JavaScript, TypeScript, CSS, HTML or XML file (a \
+                  .min. name, or very long lines) is diffed pretty printed, so a change in a \
+                  one-line bundle shows as the few lines it touched. A Source switch shows \
+                  git's own diff, which is the one used for staging.",
+        ghd_behaviour: "Minified files are diffed as they are, usually one huge changed line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-pretty/src/lib.rs", "crates/corvene-git/src/inspect.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// Model weight files shown as their tensors.
+    TENSOR_DIFF = 1340 "tensor-diff" {
+        title: "Model weight file diffs",
+        summary: "A changed model file (safetensors, GGUF, ONNX, TFLite, HDF5 and Keras, \
+                  PyTorch, NumPy, Core ML), also when stored in Git LFS, is shown as its \
+                  tensor list: added, removed, reshaped and retyped tensors with shapes, \
+                  dtypes and sizes, plus the file's metadata. Compare Values reads both \
+                  versions and shows per tensor statistics and how far the values moved.",
+        ghd_behaviour: "Model files are binary files with no diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-tensors/src/lib.rs", "crates/corvene-git/src/inspect.rs", "crates/corvene-ui/src/tensor_diff.rs"],
+    },
+
+    /// Certificates and keys shown as their public fields.
+    SIGNING_MATERIAL_DIFF = 1341 "signing-material-diff" {
+        title: "Certificate and key diffs",
+        summary: "Certificates (.pem, .crt, .cer, .der, .p7b, .csr), PKCS#12 bundles (.p12, \
+                  .pfx, with a password field when needed), provisioning profiles, Java \
+                  keystores, OpenPGP keys and SSH keys are shown as their public fields: \
+                  subjects, fingerprints, expiry, entitlements, devices, key types and \
+                  options, with changed fields marked. Private keys are never decoded.",
+        ghd_behaviour: "Shown as binary files or as their text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-keys/src/lib.rs", "crates/corvene-git/src/inspect.rs", "crates/corvene-ui/src/signing_diff.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

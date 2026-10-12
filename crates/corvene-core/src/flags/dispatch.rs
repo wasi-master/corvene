@@ -231,6 +231,10 @@ impl Dispatcher {
                 ids::VIDEO_DIFF,
                 ids::AUDIO_DIFF,
                 ids::MEDIA_FFMPEG,
+                ids::LOCKFILE_DIFF,
+                ids::PRETTY_DIFF,
+                ids::TENSOR_DIFF,
+                ids::SIGNING_MATERIAL_DIFF,
             ]
             .map(|id| flags.bool(id))
         };
@@ -249,6 +253,12 @@ impl Dispatcher {
                 now.bool(ids::MARKDOWN_PREVIEW_DIFF),
             );
             crate::media::set_media_diffs(&now);
+            corvene_git::inspect::set_inspected_diffs(
+                now.bool(ids::LOCKFILE_DIFF),
+                now.bool(ids::PRETTY_DIFF),
+                now.bool(ids::TENSOR_DIFF),
+                now.bool(ids::SIGNING_MATERIAL_DIFF),
+            );
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);
