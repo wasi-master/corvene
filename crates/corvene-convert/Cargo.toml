@@ -1,0 +1,32 @@
+[package]
+name = "corvene-convert"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Files read into forms that diff well: compiled code, serialized data, translations, diagrams, maps, mail"
+
+[dependencies]
+corvene-models.workspace = true
+serde_json.workspace = true
+# flag 1350-compiled-code-diff: native binaries and static libraries
+object = { version = "0.37", default-features = false, features = ["std", "read_core", "archive", "coff", "elf", "macho", "pe", "unaligned"] }
+rustc-demangle = "0.1"
+# WebAssembly modules as text
+wasmprinter = { version = "0.244", default-features = false }
+wasmparser = { version = "0.244", default-features = false, features = ["std", "validate", "features"] }
+# flags 1351-serialized-data-diff / 1352-translation-diff: binary property
+# lists (and .stringsdict)
+plist = { version = "1", default-features = false }
+# flags 1352-translation-diff / 1353-diagram-diff / 1354-map-diff: XML
+roxmltree = "0.21"
+# draw.io's compressed pages, KMZ, mail bodies
+flate2 = "1"
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+base64 = "0.22"
+# flag 1354-map-diff: GeoPackage files (SQLite)
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+tempfile = "3"
+# flag 1355-email-diff: Outlook .msg files
+cfb = "0.14"
+mail-parser = { version = "0.11", default-features = false }
+encoding_rs = "0.8"
