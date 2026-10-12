@@ -1,0 +1,16 @@
+[package]
+name = "corvene-tensors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Model weight files (safetensors, GGUF, ONNX, TFLite, HDF5, PyTorch, NumPy) read for tensor diffs"
+
+[dependencies]
+corvene-models.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+# f16 / bf16 values
+half = "2"
+# chunked HDF5 datasets, zipped formats
+flate2 = "1"
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }

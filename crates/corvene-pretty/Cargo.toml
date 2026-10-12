@@ -1,0 +1,8 @@
+[package]
+name = "corvene-pretty"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pretty printers for minified JSON, JavaScript, CSS, HTML and XML (diff views)"
+
+[dependencies]

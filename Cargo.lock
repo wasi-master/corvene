@@ -1830,7 +1830,11 @@ dependencies = [
  "calamine",
  "chardetng",
  "corvene-fonts",
+ "corvene-keys",
+ "corvene-lockfiles",
  "corvene-models",
+ "corvene-pretty",
+ "corvene-tensors",
  "corvene-test-support",
  "crc32fast",
  "dunce",
@@ -2009,6 +2013,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvene-keys"
+version = "0.1.0"
+dependencies = [
+ "aes 0.8.4",
+ "base64 0.22.1",
+ "cbc 0.1.2",
+ "corvene-models",
+ "des",
+ "md-5",
+ "rc2",
+ "roxmltree 0.21.1",
+ "sha1_smol",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "corvene-lockfiles"
+version = "0.1.0"
+dependencies = [
+ "corvene-models",
+ "serde_json",
+ "toml 1.1.6+spec-1.1.0",
+ "yaml-rust",
+]
+
+[[package]]
 name = "corvene-math"
 version = "0.1.0"
 dependencies = [
@@ -2099,6 +2130,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvene-pretty"
+version = "0.1.0"
+
+[[package]]
 name = "corvene-store"
 version = "0.1.0"
 dependencies = [
@@ -2109,6 +2144,18 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "corvene-tensors"
+version = "0.1.0"
+dependencies = [
+ "corvene-models",
+ "flate2",
+ "half",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]
@@ -2438,6 +2485,15 @@ dependencies = [
  "rustc_version",
  "syn 2.0.119",
  "unicode-xid",
+]
+
+[[package]]
+name = "des"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
+dependencies = [
+ "cipher 0.4.4",
 ]
 
 [[package]]
@@ -8315,6 +8371,15 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rc2"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62c64daa8e9438b84aaae55010a93f396f8e60e3911590fcba770d04643fc1dd"
+dependencies = [
+ "cipher 0.4.4",
 ]
 
 [[package]]

@@ -20,6 +20,10 @@ corvene-core = { path = "crates/corvene-core" }
 corvene-extensions = { path = "crates/corvene-extensions" }
 corvene-fonts = { path = "crates/corvene-fonts" }
 corvene-math = { path = "crates/corvene-math" }
+corvene-keys = { path = "crates/corvene-keys" }
+corvene-lockfiles = { path = "crates/corvene-lockfiles" }
+corvene-pretty = { path = "crates/corvene-pretty" }
+corvene-tensors = { path = "crates/corvene-tensors" }
 corvene-media = { path = "crates/corvene-media" }
 corvene-git = { path = "crates/corvene-git" }
 corvene-github = { path = "crates/corvene-github" }

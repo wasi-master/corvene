@@ -7,9 +7,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 mod hosts;
+pub mod lockfile;
 mod signature;
+pub mod signing;
+pub mod tensors;
 pub use hosts::*;
+pub use lockfile::LockfileDiff;
 pub use signature::*;
+pub use signing::SigningFile;
+pub use tensors::TensorFile;
 
 /// A repository known to Corvene (`models/repository.ts`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

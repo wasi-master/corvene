@@ -1,0 +1,21 @@
+[package]
+name = "corvene-keys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Signing material (certificates, PKCS#12, provisioning profiles, Java keystores, OpenPGP and SSH keys) read for diffs; private keys are never decoded"
+
+[dependencies]
+corvene-models.workspace = true
+thiserror.workspace = true
+base64 = "0.22"
+roxmltree = "0.21"
+sha1_smol = "1"
+sha2 = "0.10"
+md-5 = "0.10"
+# PKCS#12 bags: PBES2 (AES-CBC) and the legacy PKCS#12 PBE
+# ciphers (3DES, RC2) used by Keychain and older OpenSSL exports
+aes = "0.8"
+cbc = "0.1"
+des = "0.8"
+rc2 = "0.8"
