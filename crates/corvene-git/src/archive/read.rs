@@ -13,7 +13,7 @@ use super::{MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_UNPACKED, archive_format};
 
 /// Entry contents a tar archive keeps after listing, so an entry diff does
 /// not stream the archive again (beyond it entries are read by re-streaming).
-const KEEP_BUDGET: u64 = 128 << 20;
+const KEEP_BUDGET: u64 = 32 << 20;
 /// Longest symbolic link target read from a zip entry.
 const MAX_LINK: u64 = 4096;
 

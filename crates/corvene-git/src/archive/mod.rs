@@ -45,8 +45,10 @@ pub const MAX_UNPACKED: u64 = 1 << 30;
 pub const MAX_ENTRY_BYTES: u64 = 64 << 20;
 /// Archives inside archives opened, the outermost one not counted.
 pub const MAX_DEPTH: usize = 4;
-/// Memory the listed archives may hold.
-pub const CACHE_BUDGET: usize = 384 << 20;
+/// Memory the listed archives may hold. The cache lives as long as the
+/// process, so this is what archive diffs can keep resident after they
+/// are closed; a larger archive is listed again when an entry is opened.
+pub const CACHE_BUDGET: usize = 64 << 20;
 
 /// Set by the dispatcher from the flag.
 static READ_ARCHIVES: AtomicBool = AtomicBool::new(false);
