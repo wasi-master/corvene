@@ -70,6 +70,11 @@ fn similar_blocks(a: &Block, b: &Block) -> bool {
     if kind(a) != kind(b) {
         return false;
     }
+    // a table under the same header is the same table, however many rows
+    // changed
+    if table_diff(a, b).is_some() {
+        return true;
+    }
     let (x, y) = (text_of(a), text_of(b));
     if x.trim().is_empty() || y.trim().is_empty() {
         return matches!((a, b), (Block::Rule, Block::Rule));
@@ -89,6 +94,86 @@ fn marks(a: &Block, b: &Block) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
         }
         _ => (Vec::new(), Vec::new()),
     }
+}
+
+/// One row of an edited table: a body row of either version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TableRowDiff {
+    pub previous: Option<usize>,
+    pub current: Option<usize>,
+    /// `Same`, `Deleted` or `Added`.
+    pub status: BlockStatus,
+    /// The cells that differ from the row it replaced (or that replaced
+    /// it), by column; empty when it was not paired with one.
+    pub cells: Vec<bool>,
+}
+
+/// The body rows of two versions of a table, aligned row by row (`None`
+/// unless both are tables with the same header): an edited row is its old
+/// row deleted, then its new row added, with the changed cells marked.
+pub fn table_diff(old: &Block, new: &Block) -> Option<Vec<TableRowDiff>> {
+    let (
+        Block::Table {
+            align: oa,
+            head: oh,
+            rows: or,
+        },
+        Block::Table {
+            align: na,
+            head: nh,
+            rows: nr,
+        },
+    ) = (old, new)
+    else {
+        return None;
+    };
+    if oa.len() != na.len() || oh != nh {
+        return None;
+    }
+    let row_key = |cells: &Vec<crate::markdown::RichText>| {
+        let mut h = DefaultHasher::new();
+        format!("{cells:?}").hash(&mut h);
+        h.finish()
+    };
+    let ok: Vec<u64> = or.iter().map(row_key).collect();
+    let nk: Vec<u64> = nr.iter().map(row_key).collect();
+    let row = |previous, current, status, cells| TableRowDiff {
+        previous,
+        current,
+        status,
+        cells,
+    };
+    let mut out = Vec::with_capacity(or.len().max(nr.len()));
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &ok, &nk) {
+        let (tag, o, n) = op.as_tag_tuple();
+        if tag == similar::DiffTag::Equal {
+            out.extend(
+                o.zip(n)
+                    .map(|(i, j)| row(Some(i), Some(j), BlockStatus::Same, Vec::new())),
+            );
+            continue;
+        }
+        let (olds, news): (Vec<usize>, Vec<usize>) = (o.collect(), n.collect());
+        let paired = olds.len().min(news.len());
+        for (&i, &j) in olds.iter().zip(&news) {
+            let cells: Vec<bool> = (0..oa.len().max(1))
+                .map(|c| or[i].get(c).map(|t| &t.text) != nr[j].get(c).map(|t| &t.text))
+                .collect();
+            out.push(row(Some(i), None, BlockStatus::Deleted, cells.clone()));
+            out.push(row(None, Some(j), BlockStatus::Added, cells));
+        }
+        out.extend(
+            olds[paired..]
+                .iter()
+                .map(|&i| row(Some(i), None, BlockStatus::Deleted, Vec::new())),
+        );
+        out.extend(
+            news[paired..]
+                .iter()
+                .map(|&j| row(None, Some(j), BlockStatus::Added, Vec::new())),
+        );
+    }
+    Some(out)
 }
 
 /// Aligns `old` and `new`.
@@ -178,5 +263,39 @@ mod tests {
             panic!()
         };
         assert_eq!(&t.text[rows[1].marks.1[0].clone()], "red");
+    }
+
+    #[test]
+    fn table_rows_are_aligned() {
+        let old = md("| A | B |\n|---|---|\n| 1 | one |\n| 2 | two |\n| 3 | three |\n");
+        let new =
+            md("| A | B |\n|---|---|\n| 1 | one |\n| 2 | TWO |\n| 3 | three |\n| 4 | four |\n");
+        let rows = block_diff(&old, &new);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, BlockStatus::Modified);
+        let table = table_diff(&old[0], &new[0]).unwrap();
+        let shape: Vec<_> = table
+            .iter()
+            .map(|r| (r.previous, r.current, r.status))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Some(0), Some(0), BlockStatus::Same),
+                (Some(1), None, BlockStatus::Deleted),
+                (None, Some(1), BlockStatus::Added),
+                (Some(2), Some(2), BlockStatus::Same),
+                (None, Some(3), BlockStatus::Added),
+            ]
+        );
+        assert_eq!(table[1].cells, vec![false, true]);
+        assert!(table[4].cells.is_empty());
+    }
+
+    #[test]
+    fn retitled_table_is_not_aligned() {
+        let old = md("| A | B |\n|---|---|\n| 1 | 2 |\n");
+        let new = md("| A | C |\n|---|---|\n| 1 | 2 |\n");
+        assert!(table_diff(&old[0], &new[0]).is_none());
     }
 }

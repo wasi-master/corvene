@@ -4,7 +4,9 @@
 //! tables, figures, theorems, footnotes, resolved references) and the two
 //! versions are aligned block by block: added blocks tinted green, removed
 //! ones red, edited paragraphs shown old over new (side by side in split
-//! mode) with their changed words marked. A `.bib` file shows each entry as
+//! mode) with their changed words marked, and an edited table under the
+//! same header is one table with its added rows green, removed rows red and
+//! changed cells marked. A `.bib` file shows each entry as
 //! a formatted reference with the fields that changed.
 //!
 //! GitHub Desktop shows these files as text only (`app/src/ui/diff/
@@ -19,12 +21,12 @@
 //! runs of unchanged blocks fold as the text diff's context does
 //! (`corvene_core::fold`).
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::collections::HashSet;
 
 use corvene_core::bibtex::{self, BibChange, BibEntry};
-use corvene_core::block_diff::{BlockRow, BlockStatus, block_diff};
+use corvene_core::block_diff::{BlockRow, BlockStatus, block_diff, table_diff};
 use corvene_core::fold::{FoldRow, FoldRule, fold};
 use corvene_core::markdown::Block;
 use corvene_core::{Diff, LatexBlob, LatexKind};
@@ -32,7 +34,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::icons::{Octicon, octicon};
-use crate::markdown::{ImageResolver, MarkdownOptions, markdown_with};
+use crate::markdown::{ImageResolver, MarkdownOptions, TableRowTint, markdown_with};
 use crate::math::SharedMacros;
 use crate::scrollbar::{gutter, scrollbar};
 use crate::theme::sizes::*;
@@ -70,13 +72,13 @@ pub struct LatexDiff {
     /// A scroll asked for before the content was read: to the block
     /// holding this line of the new file, or (`None`) to the first change.
     reveal: Option<Option<u32>>,
-}
-
     /// The list's rows: blocks (or entries) and folds of unchanged ones.
     view: Rc<Vec<FoldRow>>,
     /// The `start` of folds the user opened.
     expanded: HashSet<usize>,
     weak: WeakEntity<Self>,
+}
+
 fn sides(diff: &Diff) -> (Option<&LatexBlob>, Option<&LatexBlob>) {
     match diff {
         Diff::Latex {
@@ -216,9 +218,9 @@ impl LatexDiff {
                     },
                 };
                 this.content = Some(Rc::new(content));
+                this.refold();
                 this.apply_reveal();
                 cx.notify();
-                this.refold();
             })
             .ok();
         }));
@@ -237,8 +239,6 @@ impl LatexDiff {
         }
     }
 
-    /// Scroll to the block holding `line` of the new file (`None`: to the
-    /// first change), now or once read.
     /// Rebuild the list's rows from the content and the opened folds.
     fn refold(&mut self) {
         let changed: Vec<bool> = (0..self.count()).map(|i| self.changed(i)).collect();
@@ -267,6 +267,8 @@ impl LatexDiff {
         matches!(self.view.get(ix), Some(FoldRow::Item(i)) if self.changed(*i))
     }
 
+    /// Scroll to the block holding `line` of the new file (`None`: to the
+    /// first change), now or once read.
     pub fn reveal(&mut self, line: Option<u32>, cx: &mut Context<Self>) {
         self.reveal = Some(line);
         self.apply_reveal();
@@ -486,6 +488,63 @@ fn strip(child: AnyElement, status: BlockStatus, t: &GhdTheme) -> Div {
         )
 }
 
+/// An edited table under the same header as one table with its rows
+/// tinted: both versions' rows merged (`side` `None`), or one version's
+/// (`Some(0)` the old, `Some(1)` the new).
+pub(crate) fn table_view(
+    old: &Block,
+    new: &Block,
+    side: Option<usize>,
+    t: &GhdTheme,
+) -> Option<(Block, Rc<[TableRowTint]>)> {
+    let diff = table_diff(old, new)?;
+    let (
+        Block::Table {
+            align,
+            head,
+            rows: old_rows,
+        },
+        Block::Table { rows: new_rows, .. },
+    ) = (old, new)
+    else {
+        return None;
+    };
+    let mut rows = Vec::with_capacity(diff.len());
+    let mut tints = Vec::with_capacity(diff.len());
+    for r in &diff {
+        let previous = r.previous.and_then(|i| old_rows.get(i));
+        let current = r.current.and_then(|j| new_rows.get(j));
+        let cells = match side {
+            None => current.or(previous),
+            Some(0) => previous,
+            Some(_) => current,
+        };
+        let Some(cells) = cells else {
+            continue;
+        };
+        rows.push(cells.clone());
+        tints.push(match r.status {
+            BlockStatus::Added => TableRowTint {
+                row: Some(t.diff_add_background),
+                cell: Some(t.diff_add_inner_background),
+                cells: r.cells.clone(),
+            },
+            BlockStatus::Deleted => TableRowTint {
+                row: Some(t.diff_delete_background),
+                cell: Some(t.diff_delete_inner_background),
+                cells: r.cells.clone(),
+            },
+            _ => TableRowTint::default(),
+        });
+    }
+    let table = Block::Table {
+        align: align.clone(),
+        head: head.clone(),
+        rows,
+    };
+    Some((table, tints.into()))
+}
+
 /// Pictures a version of the document names, drawn from its own bytes.
 fn resolver(blob: Option<&LatexBlob>) -> ImageResolver {
     let images: Vec<(String, Arc<Image>)> = blob
@@ -524,9 +583,35 @@ struct Rows {
     content: Rc<Content>,
     images: [ImageResolver; 2],
     split: bool,
+    view: Rc<Vec<FoldRow>>,
+    this: WeakEntity<LatexDiff>,
 }
 
 impl Rows {
+    fn list_row(&self, ix: usize, cx: &App) -> AnyElement {
+        match self.view.get(ix) {
+            Some(FoldRow::Item(i)) => self.row(*i, cx),
+            Some(FoldRow::Folded { start, end }) => {
+                let (start, this) = (*start, self.this.clone());
+                let noun = match &*self.content {
+                    Content::Document { .. } => ("block", "blocks"),
+                    Content::Bibliography { .. } => ("entry", "entries"),
+                };
+                crate::unchanged_fold::fold_row(
+                    ("latex-fold", start),
+                    end - start,
+                    noun,
+                    false,
+                    move |_, cx| {
+                        this.update(cx, |v, cx| v.expand_fold(start, cx)).ok();
+                    },
+                    cx,
+                )
+            }
+            None => div().into_any_element(),
+        }
+    }
+
     fn row(&self, ix: usize, cx: &App) -> AnyElement {
         let t = cx.ghd();
         let body = match &*self.content {
@@ -556,15 +641,18 @@ impl Rows {
                     font_size: Some(13.),
                     ..MarkdownOptions::default()
                 };
-                let draw = |side: usize, block: &Block, status: BlockStatus, marks: &[_]| {
+                let draw_with = |side: usize, block: &Block, status, opts: MarkdownOptions| {
                     let id = SharedString::from(format!("latex-{ix}-{side}"));
                     strip(
-                        markdown_with(id, std::slice::from_ref(block), &opts(side, marks), cx)
+                        markdown_with(id, std::slice::from_ref(block), &opts, cx)
                             .into_any_element(),
                         status,
                         t,
                     )
                     .into_any_element()
+                };
+                let draw = |side: usize, block: &Block, status: BlockStatus, marks: &[_]| {
+                    draw_with(side, block, status, opts(side, marks))
                 };
                 let old_el = |status| {
                     row.previous
@@ -577,49 +665,53 @@ impl Rows {
                         .map(|b| draw(1, b, status, &row.marks.1))
                 };
                 let column = |el: Option<AnyElement>| div().flex_1().min_w_0().children(el);
-                match (row.status, self.split) {
-                    (BlockStatus::Same, false) => {
+                // an edited table: one table with its rows tinted
+                let tables = match (row.status, row.previous, row.current) {
+                    (BlockStatus::Modified, Some(i), Some(j)) => old.get(i).zip(new.get(j)),
+                    _ => None,
+                };
+                let table = |side: Option<usize>| {
+                    let (a, b) = tables?;
+                    let (block, tints) = table_view(a, b, side, t)?;
+                    let at = side.unwrap_or(1);
+                    let opts = MarkdownOptions {
+                        table_rows: Some(tints),
+                        ..opts(at, &[])
+                    };
+                    Some(draw_with(at, &block, BlockStatus::Same, opts))
+                };
+                let merged = tables.and_then(|_| {
+                    if self.split {
+                        table(Some(0)).zip(table(Some(1))).map(|(a, b)| {
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_row()
+                                .child(column(Some(a)))
+                                .child(column(Some(b)))
+                        })
+                    } else {
+                        table(None).map(|el| div().w_full().child(el))
+                    }
+                });
+                match (merged, row.status, self.split) {
+                    (Some(merged), ..) => merged,
+                    (None, BlockStatus::Same, false) => {
                         div().w_full().children(new_el(BlockStatus::Same))
                     }
-                    (BlockStatus::Same, true) => div()
+                    (None, BlockStatus::Same, true) => div()
                         .w_full()
-    view: Rc<Vec<FoldRow>>,
-    this: WeakEntity<LatexDiff>,
                         .flex()
                         .flex_row()
                         .child(column(old_el(BlockStatus::Same)))
-    fn list_row(&self, ix: usize, cx: &App) -> AnyElement {
-        match self.view.get(ix) {
-            Some(FoldRow::Item(i)) => self.row(*i, cx),
-            Some(FoldRow::Folded { start, end }) => {
-                let (start, this) = (*start, self.this.clone());
-                let noun = match &*self.content {
-                    Content::Document { .. } => ("block", "blocks"),
-                    Content::Bibliography { .. } => ("entry", "entries"),
-                };
-                crate::unchanged_fold::fold_row(
-                    ("latex-fold", start),
-                    end - start,
-                    noun,
-                    false,
-                    move |_, cx| {
-                        this.update(cx, |v, cx| v.expand_fold(start, cx)).ok();
-                    },
-                    cx,
-                )
-            }
-            None => div().into_any_element(),
-        }
-    }
-
                         .child(column(new_el(BlockStatus::Same))),
-                    (_, true) => div()
+                    (None, _, true) => div()
                         .w_full()
                         .flex()
                         .flex_row()
                         .child(column(old_el(BlockStatus::Deleted)))
                         .child(column(new_el(BlockStatus::Added))),
-                    (_, false) => div()
+                    (None, _, false) => div()
                         .w_full()
                         .flex()
                         .flex_col()
@@ -762,6 +854,8 @@ impl Render for LatexDiff {
                     content,
                     images: self.images.clone(),
                     split,
+                    view: self.view.clone(),
+                    this: self.weak.clone(),
                 });
                 div()
                     .relative()
@@ -799,5 +893,3 @@ impl Render for LatexDiff {
             .child(body)
     }
 }
-                    view: self.view.clone(),
-                    this: self.weak.clone(),

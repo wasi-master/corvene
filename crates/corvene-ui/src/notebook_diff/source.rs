@@ -19,6 +19,7 @@ use gpui_kit::*;
 
 use super::Shared;
 use crate::icons::{Octicon, octicon};
+use crate::latex_diff::table_view;
 use crate::markdown::{ImageResolver, MarkdownOptions, markdown_with, parsed_math};
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme, mono_font};
@@ -496,6 +497,50 @@ fn rendered_markdown(
             })
         };
         let column = |el: Option<AnyElement>| div().flex_1().min_w_0().children(el);
+        // an edited table: one table with its rows tinted
+        let tables = match (row.status, row.previous, row.current) {
+            (BlockStatus::Modified, Some(i), Some(j)) => old_blocks.get(i).zip(new_blocks.get(j)),
+            _ => None,
+        };
+        let table = |side: Option<usize>| {
+            let (a, b) = tables?;
+            let (block, tints) = table_view(a, b, side, &t)?;
+            let (images, name) = match side {
+                Some(0) => (old_images.clone(), "old"),
+                _ => (new_images.clone(), "new"),
+            };
+            let opts = MarkdownOptions {
+                table_rows: Some(tints),
+                ..options(images, &[], side == Some(0))
+            };
+            Some(
+                strip(
+                    markdown_with(id(name), std::slice::from_ref(&block), &opts, cx)
+                        .into_any_element(),
+                    BlockStatus::Same,
+                    &t,
+                )
+                .into_any_element(),
+            )
+        };
+        let merged = tables.and_then(|_| {
+            if shared.split && !unchanged_cell {
+                table(Some(0)).zip(table(Some(1))).map(|(a, b)| {
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .child(column(Some(a)))
+                        .child(column(Some(b)))
+                })
+            } else {
+                table(None).map(|el| div().w_full().child(el))
+            }
+        });
+        if let Some(element) = merged {
+            out.push(element.into_any_element());
+            continue;
+        }
         let element = match (row.status, shared.split && !unchanged_cell) {
             (BlockStatus::Same, false) => div().w_full().children(new_el(BlockStatus::Same)),
             (BlockStatus::Same, true) => div()

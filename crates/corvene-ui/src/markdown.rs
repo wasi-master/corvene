@@ -167,6 +167,19 @@ pub struct MarkdownOptions {
     /// Link `#123` and pasted issue links of this repository (GHD's issue
     /// markdown filters, `corvene_core::markdown_filters`).
     pub references: Option<ReferenceRepository>,
+    /// Backgrounds of a lone table's body rows, by row (a rendered diff).
+    pub table_rows: Option<Rc<[TableRowTint]>>,
+}
+
+/// How one body row of a table in a rendered diff is tinted.
+#[derive(Clone, Debug, Default)]
+pub struct TableRowTint {
+    /// The row's background (`None`: GitHub's zebra striping).
+    pub row: Option<Hsla>,
+    /// The stronger background of its changed cells.
+    pub cell: Option<Hsla>,
+    /// The changed cells, by column.
+    pub cells: Vec<bool>,
 }
 
 /// The repository GitHub Markdown under `base_href` refers to.
@@ -266,6 +279,7 @@ pub fn markdown_with(
         highlight_code: options.highlight_code,
         font_size: size,
         references: options.references.clone().map(Rc::new),
+        table_rows: options.table_rows.clone(),
     };
     div()
         .text_size(zpx(size))
@@ -307,6 +321,7 @@ pub fn rich_text_with_issue_titles(
         highlight_code: false,
         font_size: 12.,
         references: None,
+        table_rows: None,
     }
     .rich(text)
 }
@@ -453,6 +468,8 @@ struct Renderer<'a> {
     font_size: f32,
     /// [`MarkdownOptions::references`]
     references: Option<Rc<ReferenceRepository>>,
+    /// [`MarkdownOptions::table_rows`]
+    table_rows: Option<Rc<[TableRowTint]>>,
 }
 
 impl Renderer<'_> {
@@ -685,7 +702,14 @@ impl Renderer<'_> {
         let columns = align.len().max(1);
         let cell = |text: &RichText, column: usize, row: usize, is_head: bool| {
             let align = align.get(column).copied().flatten();
-            let zebra = !is_head && row % 2 == 1;
+            let tint = (!is_head)
+                .then(|| self.table_rows.as_ref().and_then(|r| r.get(row)))
+                .flatten();
+            let bg = tint.and_then(|tint| {
+                let changed = tint.cells.get(column).copied().unwrap_or(false);
+                changed.then_some(tint.cell).flatten().or(tint.row)
+            });
+            let zebra = !is_head && row % 2 == 1 && bg.is_none();
             div()
                 .min_w_0()
                 .px(zpx(13.))
@@ -696,6 +720,7 @@ impl Renderer<'_> {
                 .when(column == 0, |d| d.border_l_1())
                 .when(is_head || (head.is_empty() && row == 0), |d| d.border_t_1())
                 .when(zebra, |d| d.bg(t.md_canvas_subtle))
+                .when_some(bg, |d, bg| d.bg(bg))
                 .when(is_head, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .map(|d| match (align, is_head) {
                     (Some(Align::Center), _) | (None, true) => d.text_center(),
