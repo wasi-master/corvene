@@ -7,6 +7,10 @@
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+/// Log lines waiting for the writer thread; past this they are dropped
+/// (a refresh logs a few dozen).
+const LOG_QUEUE_LINES: usize = 4096;
+
 pub fn init() -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_env("CORVENE_LOG").unwrap_or_else(|_| {
         // Android: every line is a write to logcat on the thread that
@@ -24,7 +28,11 @@ pub fn init() -> Option<WorkerGuard> {
     let file_layer = std::fs::create_dir_all(&logs_dir).ok().map(|_| {
         let transport =
             corvene_platform::desktop_file_transport::DesktopFileTransport::new(&logs_dir);
-        let (writer, guard) = tracing_appender::non_blocking(transport);
+        // the queue to the writer thread is allocated whole at launch:
+        // tracing-appender's default of 128 000 lines held about 4 MB
+        let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+            .buffered_lines_limit(LOG_QUEUE_LINES)
+            .finish(transport);
         (fmt::layer().with_ansi(false).with_writer(writer), guard)
     });
 
