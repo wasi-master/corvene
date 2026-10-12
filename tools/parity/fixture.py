@@ -681,6 +681,73 @@ def _pdf(repo: Path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "Add the quarterly report", date="2026-09-28T09:00:00+00:00")
     p.write_bytes(_pdf_bytes(_PDF_PAGES_EDITED))
+# `repo-page-strip` (`1359-page-strip`): a five-page PDF that gets a page
+# inserted after page 2 and page 4 edited, and an EPUB book of six chapters
+# whose third chapter is edited, fifth removed and a seventh added
+_STRIP_PDF_PAGES = [
+    ["Field guide", "Prepared by the parity team"],
+    ["Birds of the coast", "Gulls terns and plovers"],
+    ["Birds of the forest", "Owls woodpeckers and jays"],
+    ["Birds of the marsh", "Herons rails and bitterns"],
+    ["Index", "Every species by family"],
+]
+_STRIP_PDF_PAGES_EDITED = [
+    _STRIP_PDF_PAGES[0],
+    _STRIP_PDF_PAGES[1],
+    ["Birds of the mountains", "Eagles ravens and pipits"],
+    _STRIP_PDF_PAGES[2],
+    ["Birds of the marsh", "Herons rails bitterns and harriers"],
+    _STRIP_PDF_PAGES[4],
+]
+_STRIP_CHAPTERS = [
+    ("Chapter One", "The ship left the harbour at dawn."),
+    ("Chapter Two", "The crew sighted land after nine days."),
+    ("Chapter Three", "A storm broke the main mast."),
+    ("Chapter Four", "They repaired the hull on the beach."),
+    ("Chapter Five", "The captain kept a careful log."),
+    ("Chapter Six", "They sailed home with the spring winds."),
+]
+
+
+def _epub_bytes(chapters: list) -> bytes:
+    """A minimal EPUB 3 book, one XHTML file per `(title, text)` chapter."""
+    items = "".join(
+        f'<item id="c{i}" href="c{i}.xhtml" media-type="application/xhtml+xml"/>'
+        for i in range(len(chapters)))
+    spine = "".join(f'<itemref idref="c{i}"/>' for i in range(len(chapters)))
+    opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+           '<metadata><dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Voyage</dc:title>'
+           f'</metadata><manifest>{items}</manifest><spine>{spine}</spine></package>')
+    container = ('<?xml version="1.0"?><container version="1.0" '
+                 'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                 '<rootfile full-path="OEBPS/content.opf" '
+                 'media-type="application/oebps-package+xml"/></rootfiles></container>')
+    entries = [("mimetype", b"application/epub+zip", 0o644),
+               ("META-INF/container.xml", container.encode(), 0o644),
+               ("OEBPS/content.opf", opf.encode(), 0o644)]
+    for i, (title, text) in enumerate(chapters):
+        page = (f'<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head>'
+                f'<title>{title}</title></head><body><h1>{title}</h1><p>{text}</p></body></html>')
+        entries.append((f"OEBPS/c{i}.xhtml", page.encode(), 0o644))
+    return _zip(entries)
+
+
+def _page_strip(repo: Path) -> None:
+    pdf = repo / "docs" / "guide.pdf"
+    book = repo / "docs" / "voyage.epub"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf.write_bytes(_pdf_bytes(_STRIP_PDF_PAGES))
+    book.write_bytes(_epub_bytes(_STRIP_CHAPTERS))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the field guide and the book", date="2026-09-28T09:00:00+00:00")
+    pdf.write_bytes(_pdf_bytes(_STRIP_PDF_PAGES_EDITED))
+    edited = list(_STRIP_CHAPTERS)
+    edited[2] = ("Chapter Three", "A storm broke the main mast and the foresail.")
+    del edited[4]
+    edited.append(("Chapter Seven", "The log was printed as a book."))
+    book.write_bytes(_epub_bytes(edited))
+
+
 # `repo-archives` (`1323-archive-diff`, `1328-archive-entries-in-file-list`):
 # a zip with an archive inside it, a gzipped tar, a gzipped log and a zip
 # rebuilt with new timestamps only; one commit changes the tar, then the
@@ -1621,7 +1688,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
           documents: bool = False, notebooks: bool = False, markdown: bool = False,
           media: bool = False, inspect: bool = False, converted: bool = False,
-          markdown_edits: bool = False) -> Path:
+          markdown_edits: bool = False, page_strip: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1773,6 +1840,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if pdf:
         _pdf(repo)
+        return repo
+    if page_strip:
+        _page_strip(repo)
         return repo
     if images:
         _images(repo, False)

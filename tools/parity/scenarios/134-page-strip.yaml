@@ -1,0 +1,30 @@
+# The page strip (1359-page-strip, off in the GitHub Desktop preset;
+# deviations.md › Diff viewer): a PDF whose working copy inserts a page
+# after page 2 and edits page 4 shows a strip of thumbnails beside the page,
+# the inserted page added and the later pages paired by content (3 → 4,
+# 4 → 5). Clicking a thumbnail shows that page; Changed only hides the
+# unchanged pages. An EPUB book gets a chapter list beside its tabs with
+# its edited, removed and added chapters marked. GHD shows both files as
+# binary.
+name: page-strip
+description: A PDF's page thumbnails and an EPUB's chapter list (Corvene only)
+setup: repo-page-strip
+corvene_flags: 1322-pdf-diff=on,1324-document-diff=on,1359-page-strip=on
+steps:
+  - click: [125, 185]
+    wait: 3500
+  - snap: {name: pdf-strip, corvene_only: true, note: "GHD shows the binary panel (1359-page-strip)"}
+  - ghd: {skip: true}
+    corvene: {click: [330, 444]}
+    wait: 2000
+  - snap: {name: pdf-strip-click, corvene_only: true, note: "a clicked thumbnail shows its page"}
+  - ghd: {skip: true}
+    corvene: {click: [275, 104]}
+    wait: 1500
+  - snap: {name: pdf-strip-changed-only, corvene_only: true, note: "Changed only hides unchanged pages"}
+  - ghd: {skip: true}
+    corvene: {click: [275, 104]}
+    wait: 500
+  - click: [125, 214]
+    wait: 1500
+  - snap: {name: epub-chapters, corvene_only: true, note: "the EPUB chapter list (1359-page-strip)"}

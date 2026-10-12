@@ -275,6 +275,13 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("end", SelectLastFile, Some("ArchiveEntryList")),
         KeyBinding::new("enter", OpenArchiveEntry, Some("ArchiveEntryList")),
         KeyBinding::new("backspace", ArchiveUp, Some("ArchiveEntryList")),
+        // `1359-page-strip`: a page diff's thumbnail strip, an EPUB's chapter list
+        KeyBinding::new("down", SelectNextFile, Some(crate::page_strip::KEY_CONTEXT)),
+        KeyBinding::new("up", SelectPreviousFile, Some(crate::page_strip::KEY_CONTEXT)),
+        list_end_binding(true, crate::page_strip::KEY_CONTEXT),
+        list_end_binding(false, crate::page_strip::KEY_CONTEXT),
+        KeyBinding::new("home", SelectFirstFile, Some(crate::page_strip::KEY_CONTEXT)),
+        KeyBinding::new("end", SelectLastFile, Some(crate::page_strip::KEY_CONTEXT)),
         // `1335-video-diff` / `1336-audio-diff`: a focused media diff
         KeyBinding::new(
             "space",

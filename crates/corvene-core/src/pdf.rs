@@ -10,6 +10,11 @@
 //! where the baseline moves, a space where the gap between two glyphs is
 //! wider than the letters around it. Encrypted (with a password) or broken
 //! files do not open, and the diff shows the binary panel.
+//!
+//! [`match_pages`] pairs the pages of the two versions the way a line diff
+//! pairs lines (identical drawings first, then the most alike text or ink
+//! in between), so an inserted page shows as added instead of every later
+//! page as changed. The page strip of `1359-page-strip` lists these pairs.
 
 use std::sync::Arc;
 
@@ -85,6 +90,13 @@ impl PdfDocument {
         Some(PageImage { png, width, height })
     }
 
+    /// Page `index` as straight RGBA pixels (width, height, bytes) on
+    /// white, its longer side `longest_px` (at most [`MAX_PAGE_PX`]); for
+    /// thumbnails.
+    pub fn render_pixels(&self, index: usize, longest_px: u32) -> Option<(u32, u32, Vec<u8>)> {
+        self.render_rgba(index, longest_px.min(MAX_PAGE_PX))
+    }
+
     /// Page `index` as straight RGBA pixels (width, height, bytes).
     fn render_rgba(&self, index: usize, longest_px: u32) -> Option<(u32, u32, Vec<u8>)> {
         let pixmap = self.pixmap(index, longest_px)?;
@@ -127,25 +139,14 @@ impl PdfDocument {
         if pages.len() > MAX_TEXT_PAGES {
             return None;
         }
-        let settings = InterpreterSettings::default();
         let cache = InterpreterCache::new();
         let mut out = String::new();
-        for (i, page) in pages.iter().enumerate() {
+        for i in 0..pages.len() {
             if i > 0 {
                 out.push('\n');
             }
             out.push_str(&format!("Page {}\n\n", i + 1));
-            let (w, h) = page.render_dimensions();
-            let mut context = Context::new(
-                Affine::IDENTITY,
-                Rect::new(0.0, 0.0, f64::from(w.max(1.0)), f64::from(h.max(1.0))),
-                &cache,
-                page.xref(),
-                settings.clone(),
-            );
-            let mut device = TextDevice::default();
-            interpret_page(page, &mut context, &mut device);
-            let text = device.finish();
+            let text = self.page_text_with(i, &cache);
             out.push_str(&text);
             if !text.is_empty() {
                 out.push('\n');
@@ -155,6 +156,29 @@ impl PdfDocument {
             }
         }
         Some(out)
+    }
+
+    /// The text of page `index` (empty past the last page).
+    pub fn page_text(&self, index: usize) -> String {
+        self.page_text_with(index, &InterpreterCache::new())
+    }
+
+    fn page_text_with<'a>(&'a self, index: usize, cache: &InterpreterCache<'a>) -> String {
+        let pages = self.pdf.pages();
+        let Some(page) = pages.get(index) else {
+            return String::new();
+        };
+        let (w, h) = page.render_dimensions();
+        let mut context = Context::new(
+            Affine::IDENTITY,
+            Rect::new(0.0, 0.0, f64::from(w.max(1.0)), f64::from(h.max(1.0))),
+            cache,
+            page.xref(),
+            InterpreterSettings::default(),
+        );
+        let mut device = TextDevice::default();
+        interpret_page(page, &mut context, &mut device);
+        device.finish()
     }
 }
 
@@ -206,23 +230,293 @@ pub fn line_diff(old: Option<&str>, new: Option<&str>) -> corvene_models::Diff {
     corvene_git::parse_unified(&patch)
 }
 
-/// Whether each page pair differs (by index; a page only one side has is
-/// changed), from small thumbnails. `None` past [`MAX_SCANNED_PAGES`].
-pub fn changed_pages(old: Option<&PdfDocument>, new: Option<&PdfDocument>) -> Option<Vec<bool>> {
+/// How the two versions of a page compare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageStatus {
+    /// Drawn the same.
+    Same,
+    /// Drawn differently.
+    Changed,
+    /// Only the new version has it.
+    Added,
+    /// Only the old version has it.
+    Removed,
+    /// Not compared (yet, or the document is too long).
+    Unknown,
+}
+
+/// A page of the old version and the page of the new one it became.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PagePair {
+    pub previous: Option<usize>,
+    pub current: Option<usize>,
+    pub status: PageStatus,
+}
+
+impl PagePair {
+    /// Changed, added or removed.
+    pub fn is_change(&self) -> bool {
+        matches!(
+            self.status,
+            PageStatus::Changed | PageStatus::Added | PageStatus::Removed
+        )
+    }
+}
+
+/// Pages paired by number (the pairs before [`match_pages`] is done, or
+/// past [`MAX_SCANNED_PAGES`]); pages on both sides are `Unknown`.
+pub fn pairs_by_number(previous: usize, current: usize) -> Vec<PagePair> {
+    (0..previous.max(current))
+        .map(|i| {
+            let (old, new) = ((i < previous).then_some(i), (i < current).then_some(i));
+            let status = match (old, new) {
+                (Some(_), Some(_)) => PageStatus::Unknown,
+                (None, _) => PageStatus::Added,
+                (_, None) => PageStatus::Removed,
+            };
+            PagePair {
+                previous: old,
+                current: new,
+                status,
+            }
+        })
+        .collect()
+}
+
+/// The longest side of the thumbnails compared to pair pages.
+const MATCH_THUMB_PX: u32 = THUMB_PX;
+/// Two pages count as the same page edited when they are more alike than
+/// this (0 to 1).
+const MIN_LIKENESS: f64 = 0.3;
+/// A run of differing pages longer than this (old × new) pairs by position.
+const MAX_ALIGN_CELLS: usize = 40_000;
+
+/// What a page is compared by.
+struct PageSig {
+    pixels: Option<(u32, u32, Vec<u8>)>,
+    key: PageKey,
+    words: std::collections::HashMap<String, u32>,
+    word_count: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum PageKey {
+    Pixels(u64),
+    /// Not drawn: equal to no other page.
+    Unique(bool, usize),
+}
+
+fn page_sig(doc: &PdfDocument, i: usize, new: bool) -> PageSig {
+    use std::hash::{Hash, Hasher};
+    let pixels = doc.render_rgba(i, MATCH_THUMB_PX);
+    let key = match &pixels {
+        Some((w, h, rgba)) => {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (w, h).hash(&mut hasher);
+            for b in rgba {
+                (b >> 4).hash(&mut hasher);
+            }
+            PageKey::Pixels(hasher.finish())
+        }
+        None => PageKey::Unique(new, i),
+    };
+    let mut words = std::collections::HashMap::new();
+    let mut word_count = 0;
+    let text = doc.page_text(i).to_lowercase();
+    for word in text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+    {
+        *words.entry(word.to_string()).or_insert(0) += 1;
+        word_count += 1;
+    }
+    PageSig {
+        pixels,
+        key,
+        words,
+        word_count,
+    }
+}
+
+/// How alike two pages are, 0 to 1: their words when both have text,
+/// else their ink.
+fn likeness(a: &PageSig, b: &PageSig) -> f64 {
+    if a.word_count > 0 && b.word_count > 0 {
+        let common: u32 = a
+            .words
+            .iter()
+            .map(|(w, n)| (*n).min(b.words.get(w).copied().unwrap_or(0)))
+            .sum();
+        return 2.0 * f64::from(common) / f64::from(a.word_count + b.word_count);
+    }
+    match (&a.pixels, &b.pixels) {
+        (Some((aw, ah, a)), Some((bw, bh, b))) if aw == bw && ah == bh => {
+            let gray = |p: &[u8; 4]| (u16::from(p[0]) + u16::from(p[1]) + u16::from(p[2])) / 3;
+            let (mut ink, mut differ) = (0u32, 0u32);
+            for (p, q) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
+                let (g, h) = (gray(p), gray(q));
+                if g < 224 || h < 224 {
+                    ink += 1;
+                    if g.abs_diff(h) > 48 {
+                        differ += 1;
+                    }
+                }
+            }
+            if ink == 0 {
+                1.0
+            } else {
+                1.0 - f64::from(differ) / f64::from(ink)
+            }
+        }
+        _ => 0.0,
+    }
+}
+
+/// Pairs the pages of the two versions (`None` past
+/// [`MAX_SCANNED_PAGES`]): pages drawn identically pair as in a line diff,
+/// and between them the most alike pages pair as changed (or the same, when
+/// their drawings are within a rounding step); the rest are added or
+/// removed.
+pub fn match_pages(old: Option<&PdfDocument>, new: Option<&PdfDocument>) -> Option<Vec<PagePair>> {
     let count = |doc: Option<&PdfDocument>| doc.map_or(0, PdfDocument::page_count);
-    let pages = count(old).max(count(new));
-    if pages > MAX_SCANNED_PAGES {
+    let (old_count, new_count) = (count(old), count(new));
+    let (Some(old), Some(new)) = (old, new) else {
+        return Some(pairs_by_number(old_count, new_count));
+    };
+    if old_count.max(new_count) > MAX_SCANNED_PAGES {
         return None;
     }
-    let thumb = |doc: Option<&PdfDocument>, i: usize| doc.and_then(|d| d.render_rgba(i, THUMB_PX));
-    Some(
-        (0..pages)
-            .map(|i| match (thumb(old, i), thumb(new, i)) {
-                (Some(a), Some(b)) => !same_pixels(&a, &b),
-                _ => true,
-            })
-            .collect(),
-    )
+    let olds: Vec<PageSig> = (0..old_count).map(|i| page_sig(old, i, false)).collect();
+    let news: Vec<PageSig> = (0..new_count).map(|i| page_sig(new, i, true)).collect();
+    Some(pair_sigs(&olds, &news))
+}
+
+fn pair_sigs(olds: &[PageSig], news: &[PageSig]) -> Vec<PagePair> {
+    let old_keys: Vec<PageKey> = olds.iter().map(|s| s.key).collect();
+    let new_keys: Vec<PageKey> = news.iter().map(|s| s.key).collect();
+    let ops = similar::capture_diff_slices(similar::Algorithm::Myers, &old_keys, &new_keys);
+    let mut out = Vec::new();
+    // the differing run since the last equal pages
+    let (mut old_run, mut new_run) = (0..0, 0..0);
+    let flush = |out: &mut Vec<PagePair>,
+                 old_run: &mut std::ops::Range<usize>,
+                 new_run: &mut std::ops::Range<usize>| {
+        align_run(olds, news, old_run.clone(), new_run.clone(), out);
+        *old_run = old_run.end..old_run.end;
+        *new_run = new_run.end..new_run.end;
+    };
+    for op in ops {
+        match op {
+            similar::DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                flush(&mut out, &mut old_run, &mut new_run);
+                out.extend((0..len).map(|k| PagePair {
+                    previous: Some(old_index + k),
+                    current: Some(new_index + k),
+                    status: PageStatus::Same,
+                }));
+                old_run = old_index + len..old_index + len;
+                new_run = new_index + len..new_index + len;
+            }
+            other => {
+                let (o, n) = (other.old_range(), other.new_range());
+                if old_run.is_empty() {
+                    old_run = o.start..o.start;
+                }
+                if new_run.is_empty() {
+                    new_run = n.start..n.start;
+                }
+                old_run.end = old_run.end.max(o.end);
+                new_run.end = new_run.end.max(n.end);
+            }
+        }
+    }
+    flush(&mut out, &mut old_run, &mut new_run);
+    out
+}
+
+/// Pairs a run of pages that differ between the versions: the pairing
+/// with the most likeness (each pair above [`MIN_LIKENESS`]), in order.
+fn align_run(
+    olds: &[PageSig],
+    news: &[PageSig],
+    old_run: std::ops::Range<usize>,
+    new_run: std::ops::Range<usize>,
+    out: &mut Vec<PagePair>,
+) {
+    let (n, m) = (old_run.len(), new_run.len());
+    if n == 0 && m == 0 {
+        return;
+    }
+    let pair = |i: usize, j: usize| {
+        let (a, b) = (&olds[i], &news[j]);
+        let same = match (&a.pixels, &b.pixels) {
+            (Some(p), Some(q)) => same_pixels(p, q),
+            _ => false,
+        };
+        PagePair {
+            previous: Some(i),
+            current: Some(j),
+            status: if same {
+                PageStatus::Same
+            } else {
+                PageStatus::Changed
+            },
+        }
+    };
+    let removed = |i: usize| PagePair {
+        previous: Some(i),
+        current: None,
+        status: PageStatus::Removed,
+    };
+    let added = |j: usize| PagePair {
+        previous: None,
+        current: Some(j),
+        status: PageStatus::Added,
+    };
+    // the matched (old, new) pages, in order
+    let matched: Vec<(usize, usize)> = if n * m > MAX_ALIGN_CELLS {
+        (0..n.min(m)).map(|k| (k, k)).collect()
+    } else {
+        let mut score = vec![vec![0.0f64; m + 1]; n + 1];
+        for i in 1..=n {
+            for j in 1..=m {
+                let gain = likeness(&olds[old_run.start + i - 1], &news[new_run.start + j - 1]);
+                let mut best = score[i - 1][j].max(score[i][j - 1]);
+                if gain > MIN_LIKENESS {
+                    best = best.max(score[i - 1][j - 1] + gain - MIN_LIKENESS);
+                }
+                score[i][j] = best;
+            }
+        }
+        let mut matched = Vec::new();
+        let (mut i, mut j) = (n, m);
+        while i > 0 && j > 0 {
+            if score[i][j] == score[i - 1][j] {
+                i -= 1;
+            } else if score[i][j] == score[i][j - 1] {
+                j -= 1;
+            } else {
+                matched.push((i - 1, j - 1));
+                i -= 1;
+                j -= 1;
+            }
+        }
+        matched.reverse();
+        matched
+    };
+    let (mut i, mut j) = (0, 0);
+    for (a, b) in matched.into_iter().chain([(n, m)]) {
+        out.extend((i..a).map(|k| removed(old_run.start + k)));
+        out.extend((j..b).map(|k| added(new_run.start + k)));
+        if a < n && b < m {
+            out.push(pair(old_run.start + a, new_run.start + b));
+        }
+        (i, j) = (a + 1, b + 1);
+    }
 }
 
 /// Same size and no channel more than a rounding step apart.
@@ -442,16 +736,71 @@ mod tests {
     }
 
     #[test]
-    fn finds_changed_pages() {
-        let old = PdfDocument::open(sample_pdf(&[&["same"], &["before"]])).unwrap();
-        let new = PdfDocument::open(sample_pdf(&[&["same"], &["after"], &["added"]])).unwrap();
+    fn pairs_pages_around_an_inserted_one() {
+        let old = PdfDocument::open(sample_pdf(&[
+            &["Title"],
+            &["Revenue grew 12% year on year", "Costs were flat"],
+            &["Figures"],
+            &["Appendix"],
+        ]))
+        .unwrap();
+        let new = PdfDocument::open(sample_pdf(&[
+            &["Title"],
+            &["Revenue grew 14% year on year", "Costs were flat"],
+            &["Inserted page", "This page is new"],
+            &["Figures"],
+            &["Appendix"],
+        ]))
+        .unwrap();
+        let pairs: Vec<_> = match_pages(Some(&old), Some(&new))
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.previous, p.current, p.status))
+            .collect();
+        use PageStatus::*;
         assert_eq!(
-            changed_pages(Some(&old), Some(&new)),
-            Some(vec![false, true, true])
+            pairs,
+            [
+                (Some(0), Some(0), Same),
+                (Some(1), Some(1), Changed),
+                (None, Some(2), Added),
+                (Some(2), Some(3), Same),
+                (Some(3), Some(4), Same),
+            ]
         );
+    }
+
+    #[test]
+    fn unlike_pages_are_removed_and_added() {
+        let old = PdfDocument::open(sample_pdf(&[&["same"], &["alpha beta gamma"]])).unwrap();
+        let new =
+            PdfDocument::open(sample_pdf(&[&["same"], &["delta epsilon"], &["zeta"]])).unwrap();
+        let statuses: Vec<_> = match_pages(Some(&old), Some(&new))
+            .unwrap()
+            .into_iter()
+            .map(|p| p.status)
+            .collect();
+        use PageStatus::*;
+        assert_eq!(statuses, [Same, Removed, Added, Added]);
+        let all_new: Vec<_> = match_pages(None, Some(&new))
+            .unwrap()
+            .into_iter()
+            .map(|p| p.status)
+            .collect();
+        assert_eq!(all_new, [Added, Added, Added]);
+    }
+
+    #[test]
+    fn pairs_by_number_marks_the_longer_side() {
+        let pairs = pairs_by_number(1, 2);
+        assert_eq!(pairs[0].status, PageStatus::Unknown);
         assert_eq!(
-            changed_pages(None, Some(&new)),
-            Some(vec![true, true, true])
+            pairs[1],
+            PagePair {
+                previous: None,
+                current: Some(1),
+                status: PageStatus::Added
+            }
         );
     }
 }

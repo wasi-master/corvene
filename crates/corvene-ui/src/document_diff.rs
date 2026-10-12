@@ -12,6 +12,10 @@
 //!
 //! A section opens scrolled to its first change, and runs of unchanged
 //! blocks fold as the text diff's context does (`corvene_core::fold`).
+//!
+//! `1359-page-strip`: a book also gets a resizable chapter list beside the
+//! diff (`page_strip`), each chapter marked added, removed or changed like
+//! its tab, with the strip's Changed only box and arrow keys.
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -24,8 +28,11 @@ use corvene_core::{Diff, DocBlob, DocBlock, DocKind, DocRun, ImageBlob};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+use crate::actions::{SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile};
 use crate::diff_view_rows::word_changes;
 use crate::icons::{Octicon, octicon};
+use crate::page_strip::{self, RowLook};
+use crate::scrollbar::ScrollbarExt;
 use crate::scrollbar::{gutter, scrollbar};
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme};
@@ -72,6 +79,12 @@ pub struct DocumentDiff {
     weak: WeakEntity<Self>,
     /// The pictures of (previous, current), ready to draw.
     images: Rc<[Vec<Option<Arc<Image>>>; 2]>,
+    /// `1359-page-strip`: the chapter list.
+    strip_focus: FocusHandle,
+    strip_scroll: UniformListScrollHandle,
+    strip_split: Entity<gpui_kit::component::resizable::ResizableState>,
+    /// The section last scrolled into view in the chapter list.
+    scrolled_to: Option<usize>,
 }
 
 impl DocumentDiff {
@@ -97,6 +110,10 @@ impl DocumentDiff {
             list: ListState::new(0, ListAlignment::Top, zpx(400.)),
             weak: cx.weak_entity(),
             images,
+            strip_focus: cx.focus_handle(),
+            strip_scroll: UniformListScrollHandle::new(),
+            strip_split: page_strip::split_state(cx),
+            scrolled_to: None,
         };
         this.build_rows();
         this.reveal_first_change();
@@ -369,6 +386,92 @@ impl DocumentDiff {
         )
     }
 
+    /// `1359-page-strip`: whether a chapter list shows beside the diff.
+    fn has_chapter_list(&self, cx: &App) -> bool {
+        let (previous, current) = self.blobs();
+        current.or(previous).map(|d| d.kind) == Some(DocKind::Book)
+            && self.sections.len() > 1
+            && page_strip::enabled(cx)
+    }
+
+    /// The sections the chapter list shows.
+    fn chapter_rows(&self, cx: &App) -> Vec<usize> {
+        page_strip::visible_rows(
+            self.sections.iter().map(|s| strip_status(s.status)),
+            page_strip::changed_only(cx),
+        )
+    }
+
+    fn chapter_step(&mut self, step: isize, cx: &mut Context<Self>) {
+        let rows = self.chapter_rows(cx);
+        if let Some(ix) = page_strip::step_row(&rows, self.section, step) {
+            self.select_section(ix, cx);
+        }
+    }
+
+    fn chapter_edge(&mut self, last: bool, cx: &mut Context<Self>) {
+        let rows = self.chapter_rows(cx);
+        if let Some(&ix) = if last { rows.last() } else { rows.first() } {
+            self.select_section(ix, cx);
+        }
+    }
+
+    /// `1359-page-strip`: the chapter list.
+    fn chapter_list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        let rows = Rc::new(self.chapter_rows(cx));
+        if self.scrolled_to != Some(self.section) {
+            self.scrolled_to = Some(self.section);
+            if let Some(ix) = rows.iter().position(|&r| r == self.section) {
+                self.strip_scroll
+                    .scroll_to_item(ix, ScrollStrategy::Nearest);
+            }
+        }
+        let focused = self.strip_focus.contains_focused(window, cx);
+        let list = if rows.is_empty() {
+            page_strip::empty_note("No chapters changed.", &t)
+        } else {
+            uniform_list(
+                "document-chapter-rows",
+                rows.len(),
+                cx.processor(move |this, range: Range<usize>, _, cx| {
+                    let t = cx.ghd().clone();
+                    range
+                        .map(|ix| {
+                            let section = rows[ix];
+                            let pair = this.sections[section];
+                            page_strip::name_row(
+                                ("document-chapter", section).into(),
+                                this.section_name(&pair).into(),
+                                strip_status(pair.status),
+                                RowLook {
+                                    selected: section == this.section,
+                                    focused,
+                                },
+                                &t,
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                window.focus(&this.strip_focus, cx);
+                                this.select_section(section, cx);
+                            }))
+                            .into_any_element()
+                        })
+                        .collect()
+                }),
+            )
+            .flex_1()
+            .min_h_0()
+            .with_scrollbar_handle(&self.strip_scroll)
+            .into_any_element()
+        };
+        page_strip::frame("document-chapters", "Chapters", &self.strip_focus, list, cx)
+            .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| this.chapter_step(1, cx)))
+            .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| this.chapter_step(-1, cx)))
+            .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| this.chapter_edge(false, cx)))
+            .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| this.chapter_edge(true, cx)))
+            .into_any_element()
+    }
+
     /// What changed, and the change buttons.
     fn summary(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.ghd().clone();
@@ -478,6 +581,17 @@ impl DocumentDiff {
                     }),
             )
             .into_any_element()
+    }
+}
+
+/// A section's mark in the chapter list.
+fn strip_status(status: Status) -> corvene_core::pdf::PageStatus {
+    use corvene_core::pdf::PageStatus as P;
+    match status {
+        Status::Same => P::Same,
+        Status::Added => P::Added,
+        Status::Deleted => P::Removed,
+        Status::Modified => P::Changed,
     }
 }
 
@@ -925,7 +1039,12 @@ impl Rows {
 }
 
 impl DocumentDiff {
-    pub fn render_with(&mut self, side_by_side: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub fn render_with(
+        &mut self,
+        side_by_side: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd().clone();
         let shared = Rc::new(Rows {
             diff: self.diff.clone(),
@@ -936,7 +1055,7 @@ impl DocumentDiff {
         });
         let tabs = self.tabs(cx);
         let summary = self.summary(cx);
-        div()
+        let main = div()
             .id("document-diff")
             .relative()
             .flex_1()
@@ -962,14 +1081,32 @@ impl DocumentDiff {
                 .pr(gutter(&self.list)),
             )
             .child(scrollbar("document-scrollbar", self.list.clone()))
+            .into_any_element();
+        if !self.has_chapter_list(cx) {
+            return main;
+        }
+        let chapters = self.chapter_list(window, cx);
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .bg(t.background)
+            .child(page_strip::split(
+                "document-chapter-split",
+                &self.strip_split,
+                chapters,
+                main,
+                cx,
+            ))
             .into_any_element()
     }
 }
 
 impl Render for DocumentDiff {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let side_by_side = corvene_core::AppState::try_global(cx)
             .is_some_and(|s| s.read(cx).settings.show_side_by_side_diff);
-        self.render_with(side_by_side, cx)
+        self.render_with(side_by_side, window, cx)
     }
 }

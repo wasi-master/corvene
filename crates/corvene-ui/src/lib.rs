@@ -68,6 +68,7 @@ pub mod no_repositories;
 pub mod notebook_diff;
 pub mod path_label;
 pub mod path_text;
+pub mod page_strip;
 pub mod pdf_diff;
 pub mod popover;
 pub mod progress_bar;

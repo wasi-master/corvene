@@ -199,6 +199,13 @@ pub struct Settings {
     /// Corvene `1323-archive-diff`: width of the archive view's entry tree.
     #[serde(default = "default_file_list_width")]
     pub archive_tree_width: f32,
+    /// Corvene `1359-page-strip`: width of the page diff's thumbnail strip
+    /// (and the EPUB chapter list).
+    #[serde(default = "default_page_strip_width")]
+    pub page_strip_width: f32,
+    /// Corvene `1359-page-strip`: the strip lists only changed pages.
+    #[serde(default)]
+    pub page_strip_changed_only: bool,
     /// Corvene `1330-font-source-preview`: font source diffs show the text
     /// (off: the glyphs). The diff header's Text / Glyphs switch flips it.
     #[serde(default)]
@@ -473,6 +480,10 @@ fn default_file_list_width() -> f32 {
     250.0
 }
 
+fn default_page_strip_width() -> f32 {
+    160.0
+}
+
 fn default_file_icon_theme() -> String {
     crate::file_icons::NONE.to_string()
 }
@@ -698,6 +709,8 @@ impl Default for Settings {
             archive_show_metadata_only: false,
             archive_stacked: false,
             archive_tree_width: 250.0,
+            page_strip_width: default_page_strip_width(),
+            page_strip_changed_only: false,
             font_source_text_diff: false,
             document_diff_view: DocumentDiffView::Rendered,
             notebook_diff_view: NotebookDiffView::Notebook,

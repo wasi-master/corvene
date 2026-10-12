@@ -9266,6 +9266,26 @@ registry! {
         code: &["crates/corvene-paginate/src/lib.rs", "crates/corvene-core/src/document_pages.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// A thumbnail strip beside page diffs, a chapter list beside EPUBs.
+    PAGE_STRIP = 1359 "page-strip" {
+        title: "Page thumbnails beside page diffs",
+        summary: "PDF files and the Pages views of documents and LaTeX files get a resizable \
+                  strip of page thumbnails beside the shown page, each marked added, removed, \
+                  changed or unchanged with its old and new page number. Pages pair up as \
+                  lines do in a text diff, so an inserted page shows as added. A Changed only \
+                  box hides unchanged pages; clicking a thumbnail or pressing the up and down \
+                  arrows in the strip shows that page. Thumbnails are drawn in the background \
+                  as they scroll into view. EPUB books get a chapter list with the same marks \
+                  beside their chapter tabs.",
+        ghd_behaviour: "These files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/page_strip.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/document_diff.rs", "crates/corvene-core/src/pdf.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

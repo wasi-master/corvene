@@ -90,6 +90,7 @@ pub mod notebook_stage;
 pub mod notifications;
 pub mod offset_from;
 pub mod packs;
+pub mod page_strip;
 pub mod pdf;
 pub mod persistence;
 pub mod popup_manager;

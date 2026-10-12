@@ -6,23 +6,34 @@
 //! (`corvene_core::pdf`). The current page pair is drawn to PNGs in the
 //! background and shown by an [`ImageDiff`], so the usual modes (2-up,
 //! Swipe, Onion Skin, Difference) and image settings apply. Pages pair up by
-//! number; a page only one version has shows as added or deleted. A
-//! toolbar above steps through the pages and jumps to the next page whose
-//! thumbnail differs (documents of up to
-//! [`corvene_core::pdf::MAX_SCANNED_PAGES`] pages are scanned; once the
-//! scan is done a view still on page 1 moves to the first changed one). A file
-//! that does not open (encrypted, broken) reports [`PdfDiff::failed`] and the
-//! diff view shows the binary panel.
+//! number until [`corvene_core::pdf::match_pages`] has paired them as a
+//! line diff pairs lines (documents of up to
+//! [`corvene_core::pdf::MAX_SCANNED_PAGES`] pages), so an inserted page shows
+//! as added; a page only one version has shows alone. A toolbar above steps
+//! through the pairs and jumps to the next changed one; once the pages are
+//! matched a view still on the first pair moves to the first changed one.
+//! A file that does not open (encrypted, broken) reports
+//! [`PdfDiff::failed`] and the diff view shows the binary panel.
+//!
+//! `1359-page-strip`: a resizable strip of thumbnails beside the page
+//! (`page_strip`), one row per pair with its old → new page numbers and
+//! its mark; thumbnails are drawn in the background as their rows scroll
+//! into view and a bounded number are kept.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
-use corvene_core::pdf::{PdfDocument, PdfError};
+use corvene_core::pdf::{PagePair, PageStatus, PdfDocument, PdfError};
 use corvene_core::{FileStatusKind, ImageBlob};
+use gpui_kit::component::resizable::ResizableState;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+use crate::actions::{SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile};
 use crate::format::format_bytes;
 use crate::image_diff::ImageDiff;
+use crate::page_strip::{self, RowLook};
+use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{GhdTooltip, IconButtonA11y};
@@ -32,6 +43,15 @@ use crate::widgets::{GhdTooltip, IconButtonA11y};
 const PAGE_PX: u32 = 2000;
 /// Drawn page pairs kept (their image diffs keep their sliders).
 const KEPT_PAGES: usize = 6;
+/// Strip thumbnails kept.
+const KEPT_THUMBS: usize = 240;
+/// Thumbnails drawn per background batch.
+const THUMB_BATCH: usize = 6;
+
+/// A drawn pair's pages (old, new).
+type PairKey = (Option<usize>, Option<usize>);
+/// A thumbnail: (new version, page).
+type ThumbKey = (bool, usize);
 
 enum Docs {
     Loading,
@@ -39,7 +59,18 @@ enum Docs {
     Ready {
         previous: Option<PdfDocument>,
         current: Option<PdfDocument>,
+        /// Page sizes in points of (previous, current).
+        sizes: Arc<[Vec<(f32, f32)>; 2]>,
     },
+}
+
+/// Where pairing the pages stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Matching {
+    Running,
+    Done,
+    /// Too many pages: pairs stay by number, not compared.
+    Skipped,
 }
 
 pub struct PdfDiff {
@@ -47,15 +78,28 @@ pub struct PdfDiff {
     /// The file sizes of (previous, current), for the footers.
     bytes: (Option<usize>, Option<usize>),
     docs: Docs,
-    /// The shown page (0-based).
-    page: usize,
-    /// Whether each page pair differs, once scanned (`None` while scanning
-    /// or for long documents).
-    changed: Option<Vec<bool>>,
+    /// The page pairs, in order.
+    pairs: Vec<PagePair>,
+    /// The shown pair (index into `pairs`).
+    row: usize,
+    /// The user picked a page.
+    moved: bool,
+    matching: Matching,
     /// Drawn page pairs, most recent last.
-    drawn: VecDeque<(usize, Entity<ImageDiff>)>,
-    /// The page being drawn.
-    drawing: Option<usize>,
+    drawn: VecDeque<(PairKey, Entity<ImageDiff>)>,
+    /// The pair being drawn.
+    drawing: Option<PairKey>,
+    strip_focus: FocusHandle,
+    strip_scroll: UniformListScrollHandle,
+    strip_split: Entity<ResizableState>,
+    /// The row last scrolled into view.
+    scrolled_to: Option<usize>,
+    /// Drawn thumbnails (`None`: could not be drawn), oldest first in
+    /// `thumb_order`.
+    thumbs: HashMap<ThumbKey, Option<Arc<RenderImage>>>,
+    thumb_order: VecDeque<ThumbKey>,
+    drawing_thumbs: bool,
+    _thumb_task: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -76,16 +120,31 @@ impl PdfDiff {
         );
         let open = cx.background_executor().spawn(async move {
             let open = |bytes: Option<Vec<u8>>| bytes.map(PdfDocument::open).transpose();
-            Ok::<_, PdfError>((open(old)?, open(new)?))
+            let (previous, current) = (open(old)?, open(new)?);
+            let sizes = |doc: &Option<PdfDocument>| {
+                doc.as_ref().map_or_else(Vec::new, |d| {
+                    (0..d.page_count())
+                        .map(|i| d.page_size(i).unwrap_or((612., 792.)))
+                        .collect()
+                })
+            };
+            let sizes = Arc::new([sizes(&previous), sizes(&current)]);
+            Ok::<_, PdfError>((previous, current, sizes))
         });
         let task = cx.spawn(async move |this, cx| {
             let docs = open.await;
             this.update(cx, |this, cx| {
                 this.docs = match docs {
-                    Ok((previous, current)) => Docs::Ready { previous, current },
+                    Ok((previous, current, sizes)) => Docs::Ready {
+                        previous,
+                        current,
+                        sizes,
+                    },
                     Err(e) => Docs::Failed(e),
                 };
-                this.scan(cx);
+                let (old, new) = this.page_counts();
+                this.pairs = corvene_core::pdf::pairs_by_number(old, new);
+                this.match_pages(cx);
                 cx.notify();
             })
             .ok();
@@ -94,10 +153,20 @@ impl PdfDiff {
             status,
             bytes,
             docs: Docs::Loading,
-            page: 0,
-            changed: None,
+            pairs: Vec::new(),
+            row: 0,
+            moved: false,
+            matching: Matching::Running,
             drawn: VecDeque::new(),
             drawing: None,
+            strip_focus: cx.focus_handle(),
+            strip_scroll: UniformListScrollHandle::new(),
+            strip_split: page_strip::split_state(cx),
+            scrolled_to: None,
+            thumbs: HashMap::new(),
+            thumb_order: VecDeque::new(),
+            drawing_thumbs: false,
+            _thumb_task: None,
             _tasks: vec![task],
         }
     }
@@ -110,88 +179,115 @@ impl PdfDiff {
         }
     }
 
-    fn page_count(&self) -> usize {
+    /// The page counts of (previous, current).
+    fn page_counts(&self) -> (usize, usize) {
         match &self.docs {
-            Docs::Ready { previous, current } => {
+            Docs::Ready {
+                previous, current, ..
+            } => {
                 let count = |d: &Option<PdfDocument>| d.as_ref().map_or(0, PdfDocument::page_count);
-                count(previous).max(count(current))
+                (count(previous), count(current))
             }
-            _ => 0,
+            _ => (0, 0),
         }
     }
 
-    /// Finds the changed pages in the background.
-    fn scan(&mut self, cx: &mut Context<Self>) {
-        let Docs::Ready { previous, current } = &self.docs else {
+    /// Pairs the pages in the background.
+    fn match_pages(&mut self, cx: &mut Context<Self>) {
+        let Docs::Ready {
+            previous, current, ..
+        } = &self.docs
+        else {
             return;
         };
         // one side only: every page is added or deleted
         if previous.is_none() || current.is_none() {
-            self.changed = Some(vec![true; self.page_count()]);
+            self.matching = Matching::Done;
             return;
         }
         let (previous, current) = (previous.clone(), current.clone());
         let scan = cx.background_executor().spawn(async move {
-            corvene_core::pdf::changed_pages(previous.as_ref(), current.as_ref())
+            corvene_core::pdf::match_pages(previous.as_ref(), current.as_ref())
         });
         self._tasks.push(cx.spawn(async move |this, cx| {
-            let changed = scan.await;
+            let pairs = scan.await;
             this.update(cx, |this, cx| {
-                // still on the first page: open at the first changed one
-                if this.page == 0
-                    && let Some(first) = changed.as_deref().and_then(|c| c.iter().position(|&p| p))
-                {
-                    this.page = first;
+                match pairs {
+                    Some(pairs) => {
+                        let shown = this.pairs.get(this.row).copied();
+                        this.row = if this.moved {
+                            // keep the shown page
+                            shown
+                                .and_then(|s| {
+                                    pairs.iter().position(|p| {
+                                        (s.current.is_some() && p.current == s.current)
+                                            || (s.current.is_none() && p.previous == s.previous)
+                                    })
+                                })
+                                .unwrap_or(0)
+                        } else {
+                            // open at the first changed page
+                            pairs.iter().position(PagePair::is_change).unwrap_or(0)
+                        };
+                        this.pairs = pairs;
+                        this.matching = Matching::Done;
+                    }
+                    None => this.matching = Matching::Skipped,
                 }
-                this.changed = changed;
                 cx.notify();
             })
             .ok();
         }));
     }
 
-    fn go_to(&mut self, page: usize, cx: &mut Context<Self>) {
-        let page = page.min(self.page_count().saturating_sub(1));
-        if page != self.page {
-            self.page = page;
+    fn go_to(&mut self, row: usize, cx: &mut Context<Self>) {
+        let row = row.min(self.pairs.len().saturating_sub(1));
+        self.moved = true;
+        if row != self.row {
+            self.row = row;
             cx.notify();
         }
     }
 
     fn next_changed(&self) -> Option<usize> {
-        next_changed(self.page, self.changed.as_deref()?)
+        let changed: Vec<bool> = self.pairs.iter().map(PagePair::is_change).collect();
+        next_changed(self.row, &changed)
     }
 
-    /// The image diff of the shown page, drawing it when needed.
+    /// The image diff of the shown pair, drawing it when needed.
     fn page_diff(&mut self, cx: &mut Context<Self>) -> Option<Entity<ImageDiff>> {
-        let page = self.page;
-        if let Some(ix) = self.drawn.iter().position(|(p, _)| *p == page) {
+        let pair = self.pairs.get(self.row)?;
+        let key = (pair.previous, pair.current);
+        if let Some(ix) = self.drawn.iter().position(|(k, _)| *k == key) {
             let entry = self.drawn.remove(ix)?;
             let diff = entry.1.clone();
             self.drawn.push_back(entry);
             return Some(diff);
         }
-        if self.drawing == Some(page) {
+        if self.drawing == Some(key) {
             return None;
         }
-        let Docs::Ready { previous, current } = &self.docs else {
+        let Docs::Ready {
+            previous, current, ..
+        } = &self.docs
+        else {
             return None;
         };
-        self.drawing = Some(page);
+        self.drawing = Some(key);
         let (previous, current) = (previous.clone(), current.clone());
         let draw = cx.background_executor().spawn(async move {
-            let draw = |doc: &Option<PdfDocument>| {
-                let doc = doc.as_ref()?;
+            let draw = |doc: &Option<PdfDocument>, page: Option<usize>| {
+                let (doc, page) = (doc.as_ref()?, page?);
                 let size = doc.page_size(page)?;
                 let image = doc.render(page, PAGE_PX)?;
                 Some((image, size))
             };
-            (draw(&previous), draw(&current))
+            (draw(&previous, key.0), draw(&current, key.1))
         });
         self._tasks.push(cx.spawn(async move |this, cx| {
             let (previous, current) = draw.await;
             this.update(cx, |this, cx| {
-                if this.drawing == Some(page) {
+                if this.drawing == Some(key) {
                     this.drawing = None;
                 }
                 let blob = |side: &Option<(corvene_core::pdf::PageImage, (f32, f32))>| {
@@ -222,7 +318,7 @@ impl PdfDiff {
                     ImageDiff::new(old.as_ref(), new.as_ref(), status, cx)
                         .with_page_footers(footers.0, footers.1)
                 });
-                this.drawn.push_back((page, diff));
+                this.drawn.push_back((key, diff));
                 while this.drawn.len() > KEPT_PAGES {
                     this.drawn.pop_front();
                 }
@@ -235,29 +331,29 @@ impl PdfDiff {
 
     fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.ghd().clone();
-        let pages = self.page_count();
+        let rows = self.pairs.len();
+        let (old_pages, new_pages) = self.page_counts();
         let counts = match &self.docs {
             Docs::Ready {
-                previous: Some(p),
-                current: Some(c),
-            } if p.page_count() != c.page_count() => {
-                Some(format!("{} → {} pages", p.page_count(), c.page_count()))
-            }
+                previous: Some(_),
+                current: Some(_),
+                ..
+            } if old_pages != new_pages => Some(format!("{old_pages} → {new_pages} pages")),
             _ => None,
         };
-        let summary = match &self.changed {
-            Some(changed) => match changed.iter().filter(|c| **c).count() {
+        let summary = match self.matching {
+            Matching::Done => match self.pairs.iter().filter(|p| p.is_change()).count() {
                 0 => "No visible changes".to_string(),
                 1 => "1 page changed".to_string(),
                 n => format!("{n} pages changed"),
             },
-            None if pages > corvene_core::pdf::MAX_SCANNED_PAGES => String::new(),
-            None => "Comparing pages…".to_string(),
+            Matching::Skipped => String::new(),
+            Matching::Running => "Comparing pages…".to_string(),
         };
-        let page_changed = self
-            .changed
-            .as_ref()
-            .and_then(|c| c.get(self.page).copied());
+        let pair = self.pairs.get(self.row).copied();
+        let page_changed = pair
+            .filter(|p| p.status != PageStatus::Unknown)
+            .map(|p| p.is_change());
         let next_changed = self.next_changed();
         let button = |id: &'static str, label: &'static str, enabled: bool| {
             div()
@@ -279,7 +375,7 @@ impl PdfDiff {
                 })
                 .child(label)
         };
-        let page = self.page;
+        let row = self.row;
         div()
             .id("pdf-diff-toolbar")
             .flex_none()
@@ -293,8 +389,8 @@ impl PdfDiff {
             .text_size(FONT_SIZE())
             .text_color(t.text_secondary)
             .child(
-                button("pdf-diff-previous", "Previous", page > 0).when(page > 0, |d| {
-                    d.on_click(cx.listener(move |this, _, _, cx| this.go_to(page - 1, cx)))
+                button("pdf-diff-previous", "Previous", row > 0).when(row > 0, |d| {
+                    d.on_click(cx.listener(move |this, _, _, cx| this.go_to(row - 1, cx)))
                 }),
             )
             .child(
@@ -310,14 +406,14 @@ impl PdfDiff {
                     .when(page_changed == Some(true), |d| {
                         d.font_weight(FontWeight::SEMIBOLD)
                     })
-                    .child(format!("Page {} of {}", page + 1, pages.max(1)))
+                    .child(page_title(pair.as_ref(), old_pages.max(new_pages)))
                     .when(page_changed == Some(false), |d| {
                         d.ghd_tooltip("This page looks the same in both versions")
                     }),
             )
             .child(
-                button("pdf-diff-next", "Next", page + 1 < pages).when(page + 1 < pages, |d| {
-                    d.on_click(cx.listener(move |this, _, _, cx| this.go_to(page + 1, cx)))
+                button("pdf-diff-next", "Next", row + 1 < rows).when(row + 1 < rows, |d| {
+                    d.on_click(cx.listener(move |this, _, _, cx| this.go_to(row + 1, cx)))
                 }),
             )
             .child(
@@ -334,18 +430,190 @@ impl PdfDiff {
             .when(!summary.is_empty(), |d| d.child(summary))
             .into_any_element()
     }
+
+    /// `1359-page-strip`: the rows the strip lists.
+    fn strip_rows(&self, cx: &App) -> Vec<usize> {
+        page_strip::visible_rows(
+            self.pairs.iter().map(|p| p.status),
+            page_strip::changed_only(cx),
+        )
+    }
+
+    /// `1359-page-strip`: steps the shown page through the strip's rows.
+    fn strip_step(&mut self, step: isize, cx: &mut Context<Self>) {
+        let rows = self.strip_rows(cx);
+        if let Some(row) = page_strip::step_row(&rows, self.row, step) {
+            self.go_to(row, cx);
+        }
+    }
+
+    fn strip_edge(&mut self, last: bool, cx: &mut Context<Self>) {
+        let rows = self.strip_rows(cx);
+        if let Some(&row) = if last { rows.last() } else { rows.first() } {
+            self.go_to(row, cx);
+        }
+    }
+
+    /// The thumbnail a row shows: its new page, or its old one when removed.
+    fn thumb_key(pair: &PagePair) -> Option<ThumbKey> {
+        match (pair.previous, pair.current) {
+            (_, Some(page)) => Some((true, page)),
+            (Some(page), None) => Some((false, page)),
+            _ => None,
+        }
+    }
+
+    /// Draws the missing thumbnails among `keys` in the background, a
+    /// batch at a time.
+    fn request_thumbs(&mut self, keys: Vec<ThumbKey>, cx: &mut Context<Self>) {
+        if self.drawing_thumbs {
+            return;
+        }
+        let Docs::Ready {
+            previous, current, ..
+        } = &self.docs
+        else {
+            return;
+        };
+        let wanted: Vec<ThumbKey> = keys
+            .into_iter()
+            .filter(|k| !self.thumbs.contains_key(k))
+            .take(THUMB_BATCH)
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        self.drawing_thumbs = true;
+        let (previous, current) = (previous.clone(), current.clone());
+        let draw = cx.background_executor().spawn(async move {
+            wanted
+                .into_iter()
+                .map(|key| {
+                    let doc = if key.0 { &current } else { &previous };
+                    let image = doc
+                        .as_ref()
+                        .and_then(|d| d.render_pixels(key.1, page_strip::THUMB_PX))
+                        .and_then(|(w, h, rgba)| page_strip::render_image(w, h, rgba));
+                    (key, image)
+                })
+                .collect::<Vec<_>>()
+        });
+        self._thumb_task = Some(cx.spawn(async move |this, cx| {
+            let drawn = draw.await;
+            this.update(cx, |this, cx| {
+                this.drawing_thumbs = false;
+                for (key, image) in drawn {
+                    if this.thumbs.insert(key, image).is_none() {
+                        this.thumb_order.push_back(key);
+                    }
+                }
+                while this.thumb_order.len() > KEPT_THUMBS {
+                    if let Some(old) = this.thumb_order.pop_front() {
+                        this.thumbs.remove(&old);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// `1359-page-strip`: the thumbnail strip.
+    fn strip(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        let rows = Arc::new(self.strip_rows(cx));
+        if self.scrolled_to != Some(self.row) {
+            self.scrolled_to = Some(self.row);
+            if let Some(ix) = rows.iter().position(|&r| r == self.row) {
+                self.strip_scroll
+                    .scroll_to_item(ix, ScrollStrategy::Nearest);
+            }
+        }
+        let focused = self.strip_focus.contains_focused(window, cx);
+        let list = if rows.is_empty() {
+            page_strip::empty_note("No pages changed.", &t)
+        } else {
+            let count = rows.len();
+            uniform_list(
+                "pdf-page-strip-rows",
+                count,
+                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                    let t = cx.ghd().clone();
+                    let keys: Vec<ThumbKey> = range
+                        .clone()
+                        .filter_map(|ix| Self::thumb_key(this.pairs.get(rows[ix])?))
+                        .collect();
+                    this.request_thumbs(keys, cx);
+                    let sizes = match &this.docs {
+                        Docs::Ready { sizes, .. } => Some(sizes.clone()),
+                        _ => None,
+                    };
+                    range
+                        .map(|ix| {
+                            let row = rows[ix];
+                            let pair = this.pairs[row];
+                            let key = Self::thumb_key(&pair);
+                            let thumb = key.and_then(|k| this.thumbs.get(&k).cloned().flatten());
+                            let aspect = key
+                                .and_then(|(new, page)| {
+                                    sizes.as_ref()?[usize::from(new)].get(page).copied()
+                                })
+                                .map_or(612. / 792., |(w, h)| w / h.max(1.));
+                            page_strip::thumb_row(
+                                ("pdf-page-strip-row", row).into(),
+                                &pair,
+                                RowLook {
+                                    selected: row == this.row,
+                                    focused,
+                                },
+                                thumb,
+                                aspect,
+                                &t,
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                window.focus(&this.strip_focus, cx);
+                                this.go_to(row, cx);
+                            }))
+                            .into_any_element()
+                        })
+                        .collect()
+                }),
+            )
+            .flex_1()
+            .min_h_0()
+            .with_scrollbar_handle(&self.strip_scroll)
+            .into_any_element()
+        };
+        page_strip::frame("pdf-page-strip", "Pages", &self.strip_focus, list, cx)
+            .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| this.strip_step(1, cx)))
+            .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| this.strip_step(-1, cx)))
+            .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| this.strip_edge(false, cx)))
+            .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| this.strip_edge(true, cx)))
+            .into_any_element()
+    }
 }
 
-/// The first changed page after `page` (wrapping around), not `page`.
-fn next_changed(page: usize, changed: &[bool]) -> Option<usize> {
+/// The toolbar's name of the shown pair.
+fn page_title(pair: Option<&PagePair>, pages: usize) -> String {
+    match pair.map(|p| (p.previous, p.current)) {
+        Some((Some(a), Some(b))) if a == b => format!("Page {} of {}", a + 1, pages.max(1)),
+        Some((Some(a), Some(b))) => format!("Page {} → {}", a + 1, b + 1),
+        Some((None, Some(b))) => format!("Page {} (added)", b + 1),
+        Some((Some(a), None)) => format!("Page {} (removed)", a + 1),
+        _ => format!("Page 1 of {}", pages.max(1)),
+    }
+}
+
+/// The first changed row after `row` (wrapping around), not `row`.
+fn next_changed(row: usize, changed: &[bool]) -> Option<usize> {
     let n = changed.len();
     (1..=n)
-        .map(|k| (page + k) % n)
-        .find(|&i| changed[i] && i != page)
+        .map(|k| (row + k) % n)
+        .find(|&i| changed[i] && i != row)
 }
 
 impl Render for PdfDiff {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.ghd().clone();
         let message = |text: &str| {
             div()
@@ -369,14 +637,21 @@ impl Render for PdfDiff {
                     Some(diff) => diff.into_any_element(),
                     None => message("Drawing the page…"),
                 };
-                div()
+                let main = div()
                     .size_full()
                     .flex()
                     .flex_col()
                     .min_h_0()
+                    .min_w_0()
                     .child(self.toolbar(cx))
                     .child(div().flex_1().min_h_0().flex().child(page))
-                    .into_any_element()
+                    .into_any_element();
+                if page_strip::enabled(cx) && self.pairs.len() > 1 {
+                    let strip = self.strip(window, cx);
+                    page_strip::split("pdf-page-split", &self.strip_split, strip, main, cx)
+                } else {
+                    main
+                }
             }
         };
         div()
@@ -393,7 +668,8 @@ impl Render for PdfDiff {
 
 #[cfg(test)]
 mod tests {
-    use super::next_changed;
+    use super::{next_changed, page_title};
+    use corvene_core::pdf::{PagePair, PageStatus};
 
     #[test]
     fn next_change_wraps_and_skips_the_shown_page() {
@@ -401,5 +677,21 @@ mod tests {
         assert_eq!(next_changed(2, &[true, false, true]), Some(0));
         assert_eq!(next_changed(1, &[false, true, false]), None);
         assert_eq!(next_changed(0, &[]), None);
+    }
+
+    #[test]
+    fn titles_name_both_page_numbers() {
+        let pair = |previous, current| PagePair {
+            previous,
+            current,
+            status: PageStatus::Changed,
+        };
+        assert_eq!(page_title(Some(&pair(Some(1), Some(1))), 5), "Page 2 of 5");
+        assert_eq!(page_title(Some(&pair(Some(2), Some(3))), 5), "Page 3 → 4");
+        assert_eq!(page_title(Some(&pair(None, Some(2))), 5), "Page 3 (added)");
+        assert_eq!(
+            page_title(Some(&pair(Some(4), None)), 5),
+            "Page 5 (removed)"
+        );
     }
 }
