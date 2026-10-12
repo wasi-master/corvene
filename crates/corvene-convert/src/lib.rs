@@ -191,7 +191,8 @@ pub fn format_by_name(path: &str) -> Option<Format> {
         "pyc" | "pyo" => PythonBytecode,
         "wasm" => WebAssembly,
         "o" | "obj" | "a" | "lib" | "so" | "dylib" | "dll" | "exe" | "sys" | "ko" | "elf"
-        | "bundle" | "node" | "efi" | "axf" | "out" | "prx" | "mexa64" | "mexmaci64" => Native,
+        | "bundle" | "node" | "efi" | "axf" | "out" | "prx" | "mexa64" | "mexmaci64" | "mexw64"
+        | "pyd" | "ocx" | "cpl" => Native,
         "bplist" => BinaryPlist,
         "msgpack" | "mpk" | "msgpk" => MessagePack,
         "cbor" => Cbor,
