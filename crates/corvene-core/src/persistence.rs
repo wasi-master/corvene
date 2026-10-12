@@ -230,8 +230,9 @@ pub struct Settings {
     /// Corvene `1338-lockfile-diff`: Dependencies or Source.
     #[serde(default)]
     pub lockfile_diff_view: InspectDiffView,
-    /// Corvene `1339-pretty-diff`: Formatted or Source.
-    #[serde(default)]
+    /// Corvene `1339-pretty-diff`: Source (the default) or Formatted.
+    /// Stored under a new key so the earlier Formatted default is dropped.
+    #[serde(rename = "pretty_diff_view_source_first", default = "inspect_source")]
     pub pretty_diff_view: InspectDiffView,
     /// Corvene `1341-signing-material-diff`: Fields or Source (text files).
     #[serde(default)]
@@ -604,6 +605,10 @@ pub enum InspectDiffView {
     Source,
 }
 
+fn inspect_source() -> InspectDiffView {
+    InspectDiffView::Source
+}
+
 /// Which switch [`InspectDiffView`] is stored for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectKind {
@@ -701,7 +706,7 @@ impl Default for Settings {
             markdown_diff_view: MarkdownDiffView::Source,
             converted_source: Vec::new(),
             lockfile_diff_view: InspectDiffView::Read,
-            pretty_diff_view: InspectDiffView::Read,
+            pretty_diff_view: InspectDiffView::Source,
             signing_diff_view: InspectDiffView::Read,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),

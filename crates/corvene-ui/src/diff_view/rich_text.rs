@@ -390,7 +390,11 @@ fn inspect_switch(
     read: &'static str,
     cx: &App,
 ) -> Stateful<Div> {
-    let values = [InspectView::Read, InspectView::Source];
+    // The pretty printed view is derived text, so Source leads there.
+    let values = match kind {
+        InspectKind::Pretty => [InspectView::Source, InspectView::Read],
+        _ => [InspectView::Read, InspectView::Source],
+    };
     let selected = values.iter().position(|v| *v == current).unwrap_or(0);
     let (switch, ids): (&str, [&str; 2]) = match kind {
         InspectKind::Lockfile => (
@@ -399,17 +403,21 @@ fn inspect_switch(
         ),
         InspectKind::Pretty => (
             "pretty-view-switch",
-            ["pretty-view-formatted", "pretty-view-source"],
+            ["pretty-view-source", "pretty-view-formatted"],
         ),
         InspectKind::Signing => (
             "signing-view-switch",
             ["signing-view-fields", "signing-view-source"],
         ),
     };
+    let labels = match kind {
+        InspectKind::Pretty => ["Source", read],
+        _ => [read, "Source"],
+    };
     view_switch_n(
         switch,
         &ids,
-        &[read, "Source"],
+        &labels,
         selected,
         move |ix, cx| Dispatcher::set_inspect_diff_view(kind, values[ix], cx),
         cx,
