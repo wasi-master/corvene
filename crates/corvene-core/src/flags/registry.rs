@@ -8711,6 +8711,7 @@ registry! {
         upstream: &[Upstream::issue(5009), Upstream::issue(15875)],
         code: &["crates/corvene-core/src/pdf.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/diff.rs"],
     },
+
     /// Archives diffed as folders of entries.
     ARCHIVE_DIFF = 1323 "archive-diff" {
         title: "Archive diffs as folders",
@@ -8730,94 +8731,6 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvene-git/src/archive/mod.rs", "crates/corvene-core/src/archive_browse.rs", "crates/corvene-ui/src/archive_diff_view.rs"],
-    },
-    /// Archive entries listed under their archive in the file lists.
-    ARCHIVE_ENTRIES_IN_FILE_LIST = 1328 "archive-entries-in-file-list" {
-        title: "Archive entries in file lists",
-        summary: "With archive diffs on, a changed archive in the Changes, History and stash \
-                  file lists gets a small pill with its number of changed entries that lists \
-                  them under it, like a folder. Clicking an entry shows the archive with that \
-                  entry's diff.",
-        ghd_behaviour: "An archive is one row like any other file.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[],
-        code: &["crates/corvene-ui/src/archive_list_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/stash_view.rs"],
-    },
-
-    /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
-    MORE_IMAGE_FORMATS = 1326 "more-image-formats" {
-        title: "More image formats in the image diff",
-        summary: "Changed TIFF, PSD, ICNS, QOI, Netpbm, OpenEXR, Radiance HDR, DDS, farbfeld \
-                  and gzipped SVG (.svgz) files show in the image diff (2-up, Swipe, Onion Skin, \
-                  Difference) on every platform; HEIC/HEIF, AVIF, JPEG XL, JPEG 2000 and \
-                  camera RAW files too where the system decodes them (macOS ImageIO, Windows \
-                  WIC codecs). A file nothing decodes stays binary.",
-        ghd_behaviour: "Only PNG, JPEG, GIF, ICO, WebP, BMP and AVIF files show as images; \
-                        others show \"This binary file has changed.\"",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[],
-        code: &["crates/corvene-platform/src/image_decode.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-models/src/lib.rs", "crates/corvene-ui/src/image_diff.rs"],
-    },
-
-    /// Zoom and pan in the image diff.
-    IMAGE_DIFF_ZOOM = 1327 "image-diff-zoom" {
-        title: "Zoom in image diffs",
-        summary: "The image diff has zoom buttons (out, fit, actual pixels, in); pinching, \
-                  ⌘-scrolling or double-clicking zooms at the pointer and dragging or \
-                  scrolling pans. Both sides of 2-up and the overlay modes zoom and pan \
-                  together, and SVG drawings are redrawn sharp at every zoom level.",
-        ghd_behaviour: "Images are always fitted to the diff area.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: ON, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[],
-        code: &["crates/corvene-ui/src/image_diff.rs"],
-    },
-
-    /// Font files open in a font viewer instead of "Binary file not shown".
-    FONT_DIFF = 1329 "font-diff" {
-        title: "Font file diffs",
-        summary: "A changed TrueType, OpenType, WOFF, WOFF2 or collection (.ttc) font opens \
-                  in a font viewer instead of \"Binary file not shown\". Overview compares \
-                  names, metrics and formats; Specimen sets sample text in both versions \
-                  with 2-up, Swipe, Onion Skin and Difference, axis sliders for variable \
-                  fonts; Glyphs lists every glyph with added, removed and changed ones \
-                  marked and an inspector that overlays old and new outlines with their \
-                  points; Tables compares every table field by field; Features compares \
-                  scripts, OpenType features, substitutions and kerning pairs, with a \
-                  playground that turns features on and off. A collection has a tab per \
-                  face. Files over 64 MB stay binary.",
-        ghd_behaviour: "Font files show \"Binary file not shown\".",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[],
-        code: &["crates/corvene-fonts/src/lib.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/mod.rs"],
-    },
-    /// UFO glyphs, Glyphs files and designspaces can be shown as glyphs.
-    FONT_SOURCE_PREVIEW = 1330 "font-source-preview" {
-        title: "Font sources as glyphs",
-        summary: "A changed UFO glyph (.glif), Glyphs file (.glyphs) or designspace gets a \
-                  Text / Glyphs switch in the diff header (remembered for every such file). Glyphs draws \
-                  the old and new outlines over each other with their points, anchors and \
-                  components; a Glyphs file lists its changed glyphs per master with its \
-                  font info, masters and kerning; a designspace compares its axes, sources, \
-                  instances and rules.",
-        ghd_behaviour: "Font sources only have the text diff.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[],
-        code: &["crates/corvene-fonts/src/sources/mod.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/source.rs"],
     },
 
     /// Word, PowerPoint, OpenDocument, EPUB and RTF files diffed as
@@ -8858,6 +8771,96 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvene-core/src/document_pages.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
+    /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
+    MORE_IMAGE_FORMATS = 1326 "more-image-formats" {
+        title: "More image formats in the image diff",
+        summary: "Changed TIFF, PSD, ICNS, QOI, Netpbm, OpenEXR, Radiance HDR, DDS, farbfeld \
+                  and gzipped SVG (.svgz) files show in the image diff (2-up, Swipe, Onion Skin, \
+                  Difference) on every platform; HEIC/HEIF, AVIF, JPEG XL, JPEG 2000 and \
+                  camera RAW files too where the system decodes them (macOS ImageIO, Windows \
+                  WIC codecs). A file nothing decodes stays binary.",
+        ghd_behaviour: "Only PNG, JPEG, GIF, ICO, WebP, BMP and AVIF files show as images; \
+                        others show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-platform/src/image_decode.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-models/src/lib.rs", "crates/corvene-ui/src/image_diff.rs"],
+    },
+
+    /// Zoom and pan in the image diff.
+    IMAGE_DIFF_ZOOM = 1327 "image-diff-zoom" {
+        title: "Zoom in image diffs",
+        summary: "The image diff has zoom buttons (out, fit, actual pixels, in); pinching, \
+                  ⌘-scrolling or double-clicking zooms at the pointer and dragging or \
+                  scrolling pans. Both sides of 2-up and the overlay modes zoom and pan \
+                  together, and SVG drawings are redrawn sharp at every zoom level.",
+        ghd_behaviour: "Images are always fitted to the diff area.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/image_diff.rs"],
+    },
+
+    /// Archive entries listed under their archive in the file lists.
+    ARCHIVE_ENTRIES_IN_FILE_LIST = 1328 "archive-entries-in-file-list" {
+        title: "Archive entries in file lists",
+        summary: "With archive diffs on, a changed archive in the Changes, History and stash \
+                  file lists gets a small pill with its number of changed entries that lists \
+                  them under it, like a folder. Clicking an entry shows the archive with that \
+                  entry's diff.",
+        ghd_behaviour: "An archive is one row like any other file.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/archive_list_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/stash_view.rs"],
+    },
+
+    /// Font files open in a font viewer instead of "Binary file not shown".
+    FONT_DIFF = 1329 "font-diff" {
+        title: "Font file diffs",
+        summary: "A changed TrueType, OpenType, WOFF, WOFF2 or collection (.ttc) font opens \
+                  in a font viewer instead of \"Binary file not shown\". Overview compares \
+                  names, metrics and formats; Specimen sets sample text in both versions \
+                  with 2-up, Swipe, Onion Skin and Difference, axis sliders for variable \
+                  fonts; Glyphs lists every glyph with added, removed and changed ones \
+                  marked and an inspector that overlays old and new outlines with their \
+                  points; Tables compares every table field by field; Features compares \
+                  scripts, OpenType features, substitutions and kerning pairs, with a \
+                  playground that turns features on and off. A collection has a tab per \
+                  face. Files over 64 MB stay binary.",
+        ghd_behaviour: "Font files show \"Binary file not shown\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-fonts/src/lib.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/mod.rs"],
+    },
+
+    /// UFO glyphs, Glyphs files and designspaces can be shown as glyphs.
+    FONT_SOURCE_PREVIEW = 1330 "font-source-preview" {
+        title: "Font sources as glyphs",
+        summary: "A changed UFO glyph (.glif), Glyphs file (.glyphs) or designspace gets a \
+                  Text / Glyphs switch in the diff header (remembered for every such file). Glyphs draws \
+                  the old and new outlines over each other with their points, anchors and \
+                  components; a Glyphs file lists its changed glyphs per master with its \
+                  font info, masters and kerning; a designspace compares its axes, sources, \
+                  instances and rules.",
+        ghd_behaviour: "Font sources only have the text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-fonts/src/sources/mod.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/source.rs"],
     },
 
 }
