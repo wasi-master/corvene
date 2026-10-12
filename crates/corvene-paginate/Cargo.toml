@@ -1,0 +1,21 @@
+[package]
+name = "corvene-paginate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Document models laid out on pages and written as PDF (the Pages view without LibreOffice)"
+
+[dependencies]
+corvene-models.workspace = true
+# PDF writing with subset embedded fonts (pure Rust; its shaper is
+# rustybuzz 0.20, pinned below to the same version)
+krilla = { version = "=0.8.2", default-features = false, features = ["raster-images"] }
+rustybuzz = "=0.20.1"
+# system fonts (the version usvg already brings)
+fontdb = "=0.23.0"
+unicode-linebreak = "=0.1.5"
+# BMP pictures (krilla reads PNG, JPEG, GIF and WebP itself)
+image = { version = "0.25", default-features = false, features = ["bmp"] }
+
+[dev-dependencies]
+hayro.workspace = true

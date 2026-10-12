@@ -1,0 +1,25 @@
+# The Pages view of document diffs without LibreOffice
+# (1358-document-own-pages, with 1322-pdf-diff, 1324-document-diff and
+# 1325-document-pages; off in the GitHub Desktop preset; deviations.md ›
+# Diff viewer). CORVENE_SOFFICE points at a missing file so LibreOffice is
+# never used: Corvene lays out its own reading of the Word file on A4 pages
+# and of the deck on 16:9 slides, and the page diff shows them side by side
+# with the changed pages marked. GHD shows "This binary file has changed."
+name: document-own-pages
+description: Word and PowerPoint versions laid out on pages by Corvene and compared page by page (Corvene only)
+setup: repo-documents
+corvene_flags: 1322-pdf-diff=on,1324-document-diff=on,1325-document-pages=on,1358-document-own-pages=on
+corvene_env: {CORVENE_SOFFICE: /nonexistent/soffice}
+steps:
+  - click: [125, 214]
+    wait: 1200
+  - ghd: {skip: true}
+    corvene: {click: [1225, 97]}
+    wait: 3000
+  - snap: {name: docx-pages, corvene_only: true, note: "the Rendered / Pages / Text switch on Pages (1358-document-own-pages)"}
+  - click: [125, 243]
+    wait: 3000
+  - snap: {name: pptx-pages, corvene_only: true, note: "slides laid out by Corvene (1358-document-own-pages)"}
+  - ghd: {skip: true}
+    corvene: {click: [1170, 97]}
+    wait: 800

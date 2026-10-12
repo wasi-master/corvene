@@ -293,6 +293,7 @@ mod tests {
                 .collect(),
             images: Vec::new(),
             truncated: false,
+            page: None,
             file: Default::default(),
         }
     }

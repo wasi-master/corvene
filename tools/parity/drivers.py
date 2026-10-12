@@ -716,6 +716,8 @@ class Corvene:
         self.theme = theme
         # a scenario's `corvene_flags`, after the preset
         self.flags = flags
+        # a scenario's `corvene_env`, set on every start
+        self.env: dict = {}
         self.port = free_port()
         self.proc: subprocess.Popen | None = None
         self.sock = None
@@ -748,6 +750,7 @@ class Corvene:
             for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
                 env[key] = DEAD_PROXY
             env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
+        env.update(self.env)
         env.update(extra_env or {})
         with open(self.log, "ab") as log:
             self.proc = _spawn([str(self.binary)], log, env)

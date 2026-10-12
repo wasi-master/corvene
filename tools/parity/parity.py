@@ -242,6 +242,9 @@ class Run:
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))
+        # `corvene_env`: extra environment for Corvene (e.g. CORVENE_SOFFICE)
+        if not isinstance(cv, Absent):
+            cv.env = {k: str(v) for k, v in (sc.get("corvene_env") or {}).items()}
         # `ssh_key: true`: a fixed public key in Corvene's private SSH dir
         # (`CORVENE_SSH_DIR`, flag 350); no private half is needed to show it
         if sc.get("ssh_key"):

@@ -5,7 +5,7 @@
 
 use corvene_models::{DocBlob, DocBlock, DocKind, DocRun, ListMark, RunStyle};
 
-use super::{Builder, push_run, trim_runs};
+use super::{Builder, push_run, trim_runs, twips_cpt};
 
 /// Group nesting deeper than this is not read.
 const MAX_DEPTH: usize = 512;
@@ -105,6 +105,9 @@ struct Rtf {
     /// The last list number per level (`\ilvl`).
     counters: [u32; 9],
     level: u8,
+    /// `\paperw`, `\paperh`, `\margt`, `\margr`, `\margb`, `\margl`
+    /// (twips; `1358-document-own-pages`).
+    page: [Option<i64>; 6],
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<DocBlob, String> {
@@ -124,10 +127,23 @@ pub(super) fn read(bytes: &[u8]) -> Result<DocBlob, String> {
         encoding: encoding_rs::WINDOWS_1252,
         counters: [0; 9],
         level: 0,
+        page: [None; 6],
     };
     rtf.parse(bytes)?;
     rtf.end_paragraph();
     rtf.end_table();
+    // RTF's defaults: Letter with 1.25 inch side margins
+    let [w, h, t, r, b, l] = rtf.page;
+    rtf.out.set_page(corvene_models::DocPage {
+        width: twips_cpt(w.unwrap_or(12_240)),
+        height: twips_cpt(h.unwrap_or(15_840)),
+        margins: [
+            twips_cpt(t.unwrap_or(1440)),
+            twips_cpt(r.unwrap_or(1800)),
+            twips_cpt(b.unwrap_or(1440)),
+            twips_cpt(l.unwrap_or(1800)),
+        ],
+    });
     Ok(rtf.out.finish())
 }
 
@@ -312,6 +328,13 @@ impl Rtf {
             "jpegblip" => self.pict_png = true,
             // a picture's size and other words before its data
             _ if state.pict => {}
+            "paperw" | "paperh" | "margt" | "margr" | "margb" | "margl" if param.is_some() => {
+                let i = ["paperw", "paperh", "margt", "margr", "margb", "margl"]
+                    .iter()
+                    .position(|w| *w == word)
+                    .unwrap_or(0);
+                self.page[i] = param;
+            }
             "listtext" | "pntext" => state.list_text = true,
             "b" => state.style.bold = flag,
             "i" => state.style.italic = flag,

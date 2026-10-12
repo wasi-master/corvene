@@ -3,11 +3,12 @@
 
 use std::collections::HashMap;
 
-use corvene_models::{DocBlob, DocBlock, DocKind, DocRun, ListMark, RunStyle};
+use corvene_models::{DocBlob, DocBlock, DocKind, DocPage, DocRect, DocRun, ListMark, RunStyle};
 use roxmltree::{Document, Node};
 
 use super::{
-    Builder, Package, attr, child, collapse_ws, name, parse_xml, push_run, trim_runs, xml_text,
+    Builder, Package, attr, child, collapse_ws, length_cpt, name, parse_xml, push_run, trim_runs,
+    xml_text,
 };
 
 pub(super) fn read_package(bytes: &[u8]) -> Result<DocBlob, String> {
@@ -75,6 +76,12 @@ fn read_doc(
         out: Builder::new(kind),
         notes: false,
     };
+    if let Some(page) = styles
+        .and_then(page_layout)
+        .or_else(|| page_layout(content))
+    {
+        odf.out.set_page(page);
+    }
     match kind {
         DocKind::Presentation => {
             for page in top.children().filter(|n| name(*n) == "page") {
@@ -84,6 +91,47 @@ fn read_doc(
         _ => odf.blocks(top, None),
     }
     Ok(odf.out.finish())
+}
+
+/// The page layout of the document's first master page ("Standard" for
+/// text), from `style:page-layout-properties` (`1358-document-own-pages`).
+fn page_layout(doc: &Document) -> Option<DocPage> {
+    let masters: Vec<Node> = doc
+        .descendants()
+        .filter(|n| name(*n) == "master-page")
+        .collect();
+    let master = masters
+        .iter()
+        .find(|m| attr(**m, "name") == Some("Standard"))
+        .or(masters.first())?;
+    let layout_name = attr(*master, "page-layout-name")?;
+    let layout = doc
+        .descendants()
+        .find(|n| name(*n) == "page-layout" && attr(*n, "name") == Some(layout_name))?;
+    let props = child(layout, "page-layout-properties")?;
+    let len = |local: &str| attr(props, local).and_then(length_cpt);
+    let margin = |side: &str| len(&format!("margin-{side}")).or_else(|| len("margin"));
+    Some(DocPage {
+        width: len("page-width")?,
+        height: len("page-height")?,
+        margins: [
+            margin("top").unwrap_or(0),
+            margin("right").unwrap_or(0),
+            margin("bottom").unwrap_or(0),
+            margin("left").unwrap_or(0),
+        ],
+    })
+}
+
+/// A drawing shape's `svg:x`, `svg:y`, `svg:width`, `svg:height`.
+fn shape_rect(shape: Node) -> Option<DocRect> {
+    let len = |local: &str| attr(shape, local).and_then(length_cpt);
+    Some(DocRect {
+        x: len("x").unwrap_or(0),
+        y: len("y").unwrap_or(0),
+        w: len("width")?,
+        h: len("height")?,
+    })
 }
 
 fn collect_styles(
@@ -472,7 +520,21 @@ impl Odf<'_, '_> {
         }
     }
 
+    /// One shape's blocks, with where it sits (`1358-document-own-pages`).
     fn shape(&mut self, shape: Node) {
+        let start = self.out.mark();
+        let rect = if self.notes || name(shape) == "g" {
+            None
+        } else {
+            shape_rect(shape)
+        };
+        self.shape_blocks(shape);
+        if let Some(rect) = rect {
+            self.out.frame(start, rect);
+        }
+    }
+
+    fn shape_blocks(&mut self, shape: Node) {
         match name(shape) {
             "frame" => match attr(shape, "class") {
                 Some("title") | Some("subtitle") => {

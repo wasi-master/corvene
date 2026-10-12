@@ -9244,6 +9244,28 @@ registry! {
         code: &["crates/corvene-git/src/archive/more.rs"],
     },
 
+    /// Pages of document diffs laid out by Corvene when LibreOffice is
+    /// missing or fails.
+    DOCUMENT_OWN_PAGES = 1358 "document-own-pages" {
+        title: "Pages view of document diffs without LibreOffice",
+        summary: "When LibreOffice is not installed, or cannot convert a version, the Pages \
+                  view of a Word, PowerPoint, OpenDocument, EPUB or RTF diff lays out the \
+                  document itself: the headings, paragraphs, lists, tables and pictures the \
+                  Rendered view shows, set in the system font on pages of the file's own \
+                  size and margins (A4 or US Letter by region when it sets none), a page per \
+                  slide with each shape where the slide puts it, a new page per chapter. The \
+                  PDFs are compared like a PDF file's. Page breaks are Corvene's, not \
+                  Word's or LibreOffice's: the file's fonts, sizes, spacing, headers and \
+                  footers are not read. Needs 1325-document-pages.",
+        ghd_behaviour: "These files show \"This binary file has changed.\"",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-paginate/src/lib.rs", "crates/corvene-core/src/document_pages.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -22,7 +22,8 @@ use std::io::{Cursor, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use corvene_models::{
-    Diff, DocBlob, DocBlock, DocKind, DocRun, DocSection, FileStatusKind, ImageBlob, RunStyle,
+    Diff, DocBlob, DocBlock, DocFrame, DocKind, DocPage, DocRect, DocRun, DocSection,
+    FileStatusKind, ImageBlob, RunStyle,
 };
 
 /// Set by the dispatcher from the flag.
@@ -310,6 +311,7 @@ pub(crate) struct Builder {
     image_bytes: usize,
     blocks: usize,
     truncated: bool,
+    page: Option<DocPage>,
 }
 
 impl Builder {
@@ -321,6 +323,31 @@ impl Builder {
             image_bytes: 0,
             blocks: 0,
             truncated: false,
+            page: None,
+        }
+    }
+
+    /// The page or slide size the file sets (`1358-document-own-pages`).
+    pub(crate) fn set_page(&mut self, page: DocPage) {
+        if page.width > 0 && page.height > 0 {
+            self.page = Some(page);
+        }
+    }
+
+    /// The number of blocks of the current section so far (where a
+    /// shape's blocks start).
+    pub(crate) fn mark(&self) -> u32 {
+        self.sections
+            .last()
+            .map_or(0, |s| u32::try_from(s.blocks.len()).unwrap_or(u32::MAX))
+    }
+
+    /// The blocks added since `start` sit in `rect` on the slide
+    /// (`1358-document-own-pages`).
+    pub(crate) fn frame(&mut self, start: u32, rect: DocRect) {
+        let end = self.mark();
+        if end > start && rect.w > 0 && rect.h > 0 {
+            self.current().frames.push(DocFrame { start, end, rect });
         }
     }
 
@@ -404,6 +431,7 @@ impl Builder {
             sections: self.sections,
             images: self.images,
             truncated: self.truncated,
+            page: self.page,
             file: Default::default(),
         }
     }
@@ -496,4 +524,37 @@ pub(crate) fn collapse_ws(text: &str, after_space: &mut bool) -> String {
         }
     }
     out
+}
+
+/// A length with a unit (`2.54cm`, `1in`, `72pt`, `10mm`, `12px`) in
+/// hundredths of a point.
+pub(crate) fn length_cpt(text: &str) -> Option<i32> {
+    let text = text.trim();
+    let split = text
+        .find(|c: char| c.is_ascii_alphabetic() || c == '%')
+        .unwrap_or(text.len());
+    let (num, unit) = text.split_at(split);
+    let n: f64 = num.trim().parse().ok()?;
+    let pt = match unit {
+        "cm" => n * 72.0 / 2.54,
+        "mm" => n * 72.0 / 25.4,
+        "in" | "inch" => n * 72.0,
+        "pt" | "" => n,
+        "pc" => n * 12.0,
+        "px" => n * 0.75,
+        _ => return None,
+    };
+    let cpt = (pt * 100.0).round();
+    (cpt.is_finite() && cpt.abs() < f64::from(i32::MAX)).then_some(cpt as i32)
+}
+
+/// Twentieths of a point (Word, RTF) in hundredths.
+pub(crate) fn twips_cpt(twips: i64) -> i32 {
+    i32::try_from(twips.saturating_mul(5)).unwrap_or(0)
+}
+
+/// English Metric Units (OOXML drawings: 12 700 per point) in hundredths
+/// of a point.
+pub(crate) fn emu_cpt(emu: i64) -> i32 {
+    i32::try_from(emu / 127).unwrap_or(0)
 }

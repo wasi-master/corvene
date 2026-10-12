@@ -139,14 +139,14 @@ use crate::diff_view_rows::{
     unified_to_split,
 };
 use crate::document_diff::DocumentDiff;
-/// Corvene `1338-lockfile-diff` / `1340-tensor-diff` /
-/// `1341-signing-material-diff`: where a lockfile, model file or key is
-/// shown (the repository, the file, and whether it is the Changes tab).
-pub use crate::notebook_diff::NotebookContext as InspectContext;
 use crate::font_diff::FontDiffView;
 use crate::font_diff::source::FontSourceView;
 use crate::icons::{Octicon, octicon};
 use crate::image_diff::ImageDiff;
+/// Corvene `1338-lockfile-diff` / `1340-tensor-diff` /
+/// `1341-signing-material-diff`: where a lockfile, model file or key is
+/// shown (the repository, the file, and whether it is the Changes tab).
+pub use crate::notebook_diff::NotebookContext as InspectContext;
 use crate::pdf_diff::PdfDiff;
 use crate::scrollbar::{ScrollbarExt, gutter, scrollbar};
 use crate::theme::sizes::*;
@@ -414,7 +414,7 @@ pub(crate) fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Optio
     ))
 }
 
-/// `1324-document-diff`: the Rendered / Text (/ Pages) switch of a
+/// `1324-document-diff`: the Rendered (/ Pages) / Text switch of a
 /// document file's header (one setting for every document), while its diff
 /// is a document diff.
 pub(crate) fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
@@ -426,10 +426,10 @@ pub(crate) fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl 
     }
     let pages = document_pages_available(s);
     let mut views = vec![(V::Rendered, "Rendered", "document-view-rendered")];
-    views.push((V::Text, "Text", "document-view-text"));
     if pages {
         views.push((V::Pages, "Pages", "document-view-pages"));
     }
+    views.push((V::Text, "Text", "document-view-text"));
     let current = effective_document_view(s);
     let selected = views
         .iter()
@@ -449,11 +449,14 @@ pub(crate) fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl 
 }
 
 /// `1325-document-pages`: the flag, the PDF page view it shows the pages
-/// with, and LibreOffice to draw them.
+/// with, and LibreOffice to draw them (or `1358-document-own-pages`
+/// Corvene).
 fn document_pages_available(s: &AppState) -> bool {
     s.flags.bool(corvene_core::flags::ids::DOCUMENT_PAGES)
         && s.flags.bool(corvene_core::flags::ids::PDF_DIFF)
-        && corvene_core::document_pages::soffice().is_some()
+        && corvene_core::document_pages::available(
+            s.flags.bool(corvene_core::flags::ids::DOCUMENT_OWN_PAGES),
+        )
 }
 
 /// `1324-document-diff`: the document view to show (Pages falls back to
@@ -695,9 +698,11 @@ const PDF_TEXT_GENERATION: u64 = 1 << 63;
 const DOCUMENT_TEXT_GENERATION: u64 = 1 << 62;
 const DOCUMENT_PAGES_GENERATION: u64 = 1 << 61;
 
-/// `1325-document-pages`: a document's pages as drawn by LibreOffice.
+/// `1325-document-pages`: a document's pages as drawn by LibreOffice (or
+/// `1358-document-own-pages` by Corvene).
 enum DocumentPages {
-    Converting,
+    /// With the fraction done, in thousandths.
+    Converting(Arc<std::sync::atomic::AtomicU32>),
     Ready(Arc<Diff>),
     Failed(String),
 }
@@ -898,6 +903,8 @@ pub struct DiffView {
     _document_text_task: Option<Task<()>>,
     document_pages: Option<(Arc<Diff>, DocumentPages)>,
     _document_pages_task: Option<Task<()>>,
+    /// Redraws the progress while pages are drawn.
+    _document_pages_ticker: Option<Task<()>>,
     /// `1331-notebook-diff` / `1332-latex-diff`
     rich: rich_text::RichPane,
     context_menu: Option<Entity<ContextMenu>>,
@@ -1033,6 +1040,7 @@ impl DiffView {
             _document_text_task: None,
             document_pages: None,
             _document_pages_task: None,
+            _document_pages_ticker: None,
             rich: rich_text::RichPane::default(),
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
@@ -4065,9 +4073,43 @@ impl DiffView {
                     let reason = reason.clone();
                     self.panel(reason, cx)
                 }
-                _ => self.panel("Drawing the pages with LibreOffice…", cx),
+                Some(DocumentPages::Converting(done)) => {
+                    let fraction = done.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+                    self.pages_progress(fraction, cx)
+                }
+                _ => self.pages_progress(0.0, cx),
             },
         }
+    }
+
+    /// `1325-document-pages`: where drawing the pages stands, with a
+    /// progress bar.
+    fn pages_progress(&self, fraction: f32, cx: &App) -> AnyElement {
+        let t = cx.ghd();
+        let message = if corvene_core::document_pages::soffice().is_some() {
+            "Drawing the pages with LibreOffice…"
+        } else {
+            "Laying out the pages…"
+        };
+        div()
+            .id("document-pages-progress")
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(SPACING())
+            .p(SPACING_DOUBLE())
+            .text_size(FONT_SIZE())
+            .text_color(t.text_secondary)
+            .child(message)
+            .child(crate::progress_bar::progress_bar(
+                "document-pages",
+                fraction,
+                t.link,
+                zpx(160.),
+            ))
+            .into_any_element()
     }
 
     /// `1324-document-diff`: the Text or Pages view of the document diff
@@ -4152,8 +4194,37 @@ impl DiffView {
                 }));
             }
             V::Pages if !fresh(self.document_pages.as_ref().map(|(s, _)| s)) => {
-                self.document_pages = Some((source.clone(), DocumentPages::Converting));
+                let done = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                crate::progress_bar::reset("document-pages");
+                self.document_pages =
+                    Some((source.clone(), DocumentPages::Converting(done.clone())));
+                let own = self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::DOCUMENT_OWN_PAGES);
                 let (job, path, kind) = (source.clone(), snap.path.clone(), snap.kind);
+                let ticking = source.clone();
+                self._document_pages_ticker = Some(cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(120))
+                            .await;
+                        let busy = this.update(cx, |this, cx| {
+                            let busy = matches!(
+                                &this.document_pages,
+                                Some((s, DocumentPages::Converting(_))) if Arc::ptr_eq(s, &ticking)
+                            );
+                            if busy {
+                                cx.notify();
+                            }
+                            busy
+                        });
+                        if !matches!(busy, Ok(true)) {
+                            break;
+                        }
+                    }
+                }));
                 let draw = cx.background_executor().spawn(async move {
                     let Diff::Document {
                         previous, current, ..
@@ -4166,6 +4237,13 @@ impl DiffView {
                         kind,
                         previous.as_ref(),
                         current.as_ref(),
+                        own,
+                        &|f| {
+                            done.store(
+                                (f.clamp(0.0, 1.0) * 1000.0) as u32,
+                                std::sync::atomic::Ordering::Relaxed,
+                            )
+                        },
                     )
                 });
                 self._document_pages_task = Some(cx.spawn(async move |this, cx| {

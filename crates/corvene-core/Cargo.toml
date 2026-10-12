@@ -32,6 +32,8 @@ hayro.workspace = true
 kurbo.workspace = true
 pulldown-cmark.workspace = true
 imagesize = "0.14"
+# `1358-document-own-pages`: pages laid out without LibreOffice
+corvene-paginate.workspace = true
 # `1325-document-pages`: LibreOffice converts in a folder of its own
 tempfile = "3"
 async-channel = "2"

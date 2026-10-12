@@ -3,10 +3,13 @@
 
 use std::collections::HashMap;
 
-use corvene_models::{DocBlock, DocKind, DocRun, ListMark, RunStyle};
+use corvene_models::{DocBlock, DocKind, DocPage, DocRect, DocRun, ListMark, RunStyle};
 use roxmltree::Node;
 
-use super::{Builder, Package, attr, child, name, parse_xml, push_run, resolve, trim_runs};
+use super::{
+    Builder, Package, attr, child, emu_cpt, name, parse_xml, push_run, resolve, trim_runs,
+    twips_cpt,
+};
 
 /// A part's relationships: id → (resolved target, external).
 type Rels = HashMap<String, (String, bool)>;
@@ -126,6 +129,10 @@ pub(super) fn read_word(bytes: &[u8]) -> Result<corvene_models::DocBlob, String>
         .find(|n| name(*n) == "body")
         .ok_or("no body")?;
     word.blocks(body);
+    // the page of the last section (`1358-document-own-pages`)
+    if let Some(sect) = body.children().rfind(|n| name(*n) == "sectPr") {
+        word.out.set_page(word_page(sect));
+    }
     // footnotes, after the body
     if let Some(text) = word.pkg.xml(&format!("{dir}/footnotes.xml"))
         && let Ok(notes) = parse_xml(&text)
@@ -155,6 +162,29 @@ pub(super) fn read_word(bytes: &[u8]) -> Result<corvene_models::DocBlob, String>
         }
     }
     Ok(out.finish())
+}
+
+/// `w:sectPr`'s `w:pgSz` and `w:pgMar` (twips); A4 / 1 inch when missing.
+fn word_page(sect: Node) -> DocPage {
+    let twips = |node: Option<Node>, local: &str, default: i64| {
+        twips_cpt(
+            node.and_then(|n| attr(n, local))
+                .and_then(|v| v.parse::<f64>().ok())
+                .map_or(default, |v| v as i64),
+        )
+    };
+    let size = child(sect, "pgSz");
+    let mar = child(sect, "pgMar");
+    DocPage {
+        width: twips(size, "w", 11_906),
+        height: twips(size, "h", 16_838),
+        margins: [
+            twips(mar, "top", 1440).abs(),
+            twips(mar, "right", 1440),
+            twips(mar, "bottom", 1440).abs(),
+            twips(mar, "left", 1440),
+        ],
+    }
 }
 
 fn word_styles(pkg: &mut Package, part: &str) -> HashMap<String, ParaStyle> {
@@ -587,13 +617,115 @@ pub(super) fn read_presentation(bytes: &[u8]) -> Result<corvene_models::DocBlob,
         .filter_map(|id| rels.get(id).map(|(t, _)| t.clone()))
         .collect();
     let mut out = Builder::new(DocKind::Presentation);
+    // `1358-document-own-pages`: the slide size (EMU), 16:9 when missing
+    let size = doc.descendants().find(|n| name(*n) == "sldSz");
+    let emu = |local: &str, default: i64| {
+        emu_cpt(
+            size.and_then(|n| attr(n, local))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default),
+        )
+    };
+    out.set_page(DocPage {
+        width: emu("cx", 12_192_000),
+        height: emu("cy", 6_858_000),
+        margins: [0; 4],
+    });
+    let mut layouts = HashMap::new();
     for slide in slides {
-        read_slide(&mut pkg, &slide, &mut out);
+        read_slide(&mut pkg, &slide, &mut out, &mut layouts);
     }
     Ok(out.finish())
 }
 
-fn read_slide(pkg: &mut Package, part: &str, out: &mut Builder) {
+/// Where the placeholders of a slide layout (and its master) sit, in EMU:
+/// by `idx`, and by type.
+#[derive(Clone, Default)]
+struct Placeholders {
+    by_idx: HashMap<String, [i64; 4]>,
+    by_type: HashMap<String, [i64; 4]>,
+    master: Option<Box<Placeholders>>,
+}
+
+impl Placeholders {
+    fn read(pkg: &mut Package, part: &str, depth: u8) -> Placeholders {
+        let mut out = Placeholders::default();
+        let Some(text) = pkg.xml(part) else {
+            return out;
+        };
+        let Ok(doc) = parse_xml(&text) else {
+            return out;
+        };
+        for shape in doc.descendants().filter(|n| name(*n) == "sp") {
+            let Some((kind, idx)) = placeholder_key(shape) else {
+                continue;
+            };
+            let Some(rect) = child(shape, "spPr")
+                .and_then(|p| child(p, "xfrm"))
+                .and_then(xfrm_rect)
+            else {
+                continue;
+            };
+            if let Some(idx) = idx {
+                out.by_idx.entry(idx.to_string()).or_insert(rect);
+            }
+            out.by_type.entry(kind.to_string()).or_insert(rect);
+        }
+        if depth == 0 {
+            let master = rels(pkg, part)
+                .into_values()
+                .find(|(t, ext)| !ext && t.contains("slideMaster"))
+                .map(|(t, _)| t);
+            if let Some(master) = master {
+                out.master = Some(Box::new(Placeholders::read(pkg, &master, 1)));
+            }
+        }
+        out
+    }
+
+    /// The rectangle a slide's placeholder inherits.
+    fn find(&self, kind: &str, idx: Option<&str>) -> Option<[i64; 4]> {
+        let generic = match kind {
+            "ctrTitle" | "title" => "title",
+            "subTitle" | "body" | "obj" | "" => "body",
+            other => other,
+        };
+        idx.and_then(|i| self.by_idx.get(i))
+            .or_else(|| self.by_type.get(kind))
+            .or_else(|| self.by_type.get(generic))
+            .copied()
+            .or_else(|| self.master.as_ref()?.find(generic, None))
+    }
+}
+
+/// `p:ph`'s type (`body` when untyped) and `idx`.
+fn placeholder_key<'a>(shape: Node<'a, '_>) -> Option<(&'a str, Option<&'a str>)> {
+    let nv = shape.children().find(|n| name(*n).starts_with("nv"))?;
+    let ph = child(child(nv, "nvPr")?, "ph")?;
+    Some((attr(ph, "type").unwrap_or("body"), attr(ph, "idx")))
+}
+
+/// `a:xfrm`'s `a:off` and `a:ext`: x, y, width, height in EMU.
+fn xfrm_rect(xfrm: Node) -> Option<[i64; 4]> {
+    let num = |node: Option<Node>, local: &str| -> Option<i64> {
+        node.and_then(|n| attr(n, local))?.parse().ok()
+    };
+    let off = child(xfrm, "off");
+    let ext = child(xfrm, "ext");
+    Some([
+        num(off, "x").unwrap_or(0),
+        num(off, "y").unwrap_or(0),
+        num(ext, "cx")?,
+        num(ext, "cy")?,
+    ])
+}
+
+fn read_slide(
+    pkg: &mut Package,
+    part: &str,
+    out: &mut Builder,
+    layouts: &mut HashMap<String, Placeholders>,
+) {
     let Some(text) = pkg.xml(part) else {
         out.section(String::new(), false);
         return;
@@ -605,11 +737,24 @@ fn read_slide(pkg: &mut Package, part: &str, out: &mut Builder) {
     let root = doc.root_element();
     out.section(String::new(), attr(root, "show") == Some("0"));
     let rels = rels(pkg, part);
+    let layout = rels
+        .values()
+        .find(|(t, ext)| !ext && t.contains("slideLayout"))
+        .map(|(t, _)| t.clone());
+    let placeholders = match layout {
+        Some(layout) => layouts
+            .entry(layout.clone())
+            .or_insert_with(|| Placeholders::read(pkg, &layout, 0))
+            .clone(),
+        None => Placeholders::default(),
+    };
     let mut slide = Slide {
         pkg,
         rels: &rels,
         out,
         notes: false,
+        placeholders,
+        group: [1.0, 1.0, 0.0, 0.0],
     };
     if let Some(tree) = root.descendants().find(|n| name(*n) == "spTree") {
         // the title first, then the rest in drawing order
@@ -653,6 +798,11 @@ struct Slide<'a, 'b, 'r> {
     rels: &'r Rels,
     out: &'a mut Builder,
     notes: bool,
+    /// The layout's placeholder rectangles (`1358-document-own-pages`).
+    placeholders: Placeholders,
+    /// The group transform a shape's EMU go through: x scale, y scale, x
+    /// offset, y offset.
+    group: [f64; 4],
 }
 
 impl Slide<'_, '_, '_> {
@@ -664,7 +814,39 @@ impl Slide<'_, '_, '_> {
         }
     }
 
+    /// One shape's blocks, with where the shape sits on the slide.
     fn shape(&mut self, shape: Node) {
+        let start = self.out.mark();
+        let rect = if self.notes { None } else { self.rect(shape) };
+        self.shape_blocks(shape);
+        if let Some(rect) = rect {
+            self.out.frame(start, rect);
+        }
+    }
+
+    /// Where a shape sits (its own `xfrm`, else its placeholder's on the
+    /// layout or master), through the group transforms.
+    fn rect(&self, shape: Node) -> Option<DocRect> {
+        let xfrm = match name(shape) {
+            "sp" | "cxnSp" | "pic" => child(shape, "spPr").and_then(|p| child(p, "xfrm")),
+            "graphicFrame" => child(shape, "xfrm"),
+            _ => return None,
+        };
+        let [x, y, w, h] = xfrm.and_then(xfrm_rect).or_else(|| {
+            let (kind, idx) = placeholder_key(shape)?;
+            self.placeholders.find(kind, idx)
+        })?;
+        let [sx, sy, tx, ty] = self.group;
+        let emu = |v: f64| emu_cpt(v.round() as i64);
+        Some(DocRect {
+            x: emu(x as f64 * sx + tx),
+            y: emu(y as f64 * sy + ty),
+            w: emu(w as f64 * sx),
+            h: emu(h as f64 * sy),
+        })
+    }
+
+    fn shape_blocks(&mut self, shape: Node) {
         match name(shape) {
             "sp" | "cxnSp" => {
                 let ph = placeholder(shape);
@@ -691,9 +873,31 @@ impl Slide<'_, '_, '_> {
                 }
             }
             "grpSp" => {
+                let outer = self.group;
+                if let Some(xfrm) = child(shape, "grpSpPr").and_then(|p| child(p, "xfrm"))
+                    && let Some([x, y, w, h]) = xfrm_rect(xfrm)
+                {
+                    let num = |local: &str, key: &str| -> Option<f64> {
+                        attr(child(xfrm, local)?, key)?.parse().ok()
+                    };
+                    let (cx, cy) = (num("chOff", "x"), num("chOff", "y"));
+                    let (cw, ch) = (num("chExt", "cx"), num("chExt", "cy"));
+                    let sx = cw.filter(|c| *c > 0.0).map_or(1.0, |c| w as f64 / c);
+                    let sy = ch.filter(|c| *c > 0.0).map_or(1.0, |c| h as f64 / c);
+                    // child → group space → the outer group's space
+                    let tx = x as f64 - cx.unwrap_or(0.0) * sx;
+                    let ty = y as f64 - cy.unwrap_or(0.0) * sy;
+                    self.group = [
+                        outer[0] * sx,
+                        outer[1] * sy,
+                        outer[0] * tx + outer[2],
+                        outer[1] * ty + outer[3],
+                    ];
+                }
                 for s in shape.children().filter(|n| n.is_element()) {
                     self.shape(s);
                 }
+                self.group = outer;
             }
             "graphicFrame" => {
                 if let Some(tbl) = shape.descendants().find(|n| name(*n) == "tbl") {

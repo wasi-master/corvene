@@ -26,6 +26,7 @@ corvene-lockfiles = { path = "crates/corvene-lockfiles" }
 corvene-pretty = { path = "crates/corvene-pretty" }
 corvene-tensors = { path = "crates/corvene-tensors" }
 corvene-media = { path = "crates/corvene-media" }
+corvene-paginate = { path = "crates/corvene-paginate" }
 corvene-git = { path = "crates/corvene-git" }
 corvene-github = { path = "crates/corvene-github" }
 corvene-grammars = { path = "crates/corvene-grammars" }

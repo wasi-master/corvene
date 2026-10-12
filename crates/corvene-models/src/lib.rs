@@ -2503,6 +2503,39 @@ pub struct DocSection {
     pub blocks: Vec<DocBlock>,
     /// A slide's speaker notes.
     pub notes: Vec<DocBlock>,
+    /// Corvene `1358-document-own-pages`: where a slide's shapes sit, for
+    /// the pages Corvene draws itself (blocks outside every frame flow).
+    #[serde(default)]
+    pub frames: Vec<DocFrame>,
+}
+
+/// Corvene `1358-document-own-pages`: a rectangle on a page or slide, in
+/// hundredths of a point from the top left corner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocRect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// Corvene `1358-document-own-pages`: the blocks `start..end` of a slide
+/// (one shape) and where the shape sits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocFrame {
+    pub start: u32,
+    pub end: u32,
+    pub rect: DocRect,
+}
+
+/// Corvene `1358-document-own-pages`: the page (or slide) size and margins
+/// a document file asks for, in hundredths of a point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocPage {
+    pub width: i32,
+    pub height: i32,
+    /// Top, right, bottom, left.
+    pub margins: [i32; 4],
 }
 
 /// Corvene `1324-document-diff`: one side of a document diff, read from a
@@ -2515,6 +2548,11 @@ pub struct DocBlob {
     pub images: Vec<ImageBlob>,
     /// Reading stopped at the block limit.
     pub truncated: bool,
+    /// Corvene `1358-document-own-pages`: the page or slide size the file
+    /// sets (Word `w:pgSz`/`w:pgMar`, OpenDocument page layout, PowerPoint
+    /// `p:sldSz`, RTF `\paperw`); `None` for EPUB and files without one.
+    #[serde(default)]
+    pub page: Option<DocPage>,
     /// The file's bytes, for a page view drawn by another program.
     #[serde(skip)]
     pub file: std::sync::Arc<Vec<u8>>,
