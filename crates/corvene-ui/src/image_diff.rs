@@ -915,9 +915,10 @@ impl ImageDiff {
                             .size_full()
                             .object_fit(ObjectFit::Contain)
                             .into_any_element(),
-                        None if side.rendering() => {
-                            rendering_placeholder(Some(cx.ghd().text_secondary), cx.ghd().link)
-                        }
+                        None if side.rendering() => rendering_placeholder(
+                            Some((cx.ghd().text_secondary, cx.ghd().background)),
+                            cx.ghd().link,
+                        ),
                         None => div().into_any_element(),
                     },
                     cx,
@@ -1701,23 +1702,31 @@ fn blend_difference(backdrop: [u8; 4], source: [u8; 4]) -> [u8; 4] {
 }
 
 /// `794-svg-image-diff`: what a drawing's box shows until its first
-/// rendering arrives: a sweeping bar under "Drawing…" (`label` colour; no
-/// label in the overlaid modes).
-fn rendering_placeholder(label: Option<Hsla>, bar: Hsla) -> AnyElement {
-    div()
-        .size_full()
+/// rendering arrives: a sweeping bar under "Drawing…" on a card (`label`
+/// text and card colours; no label in the overlaid modes).
+fn rendering_placeholder(label: Option<(Hsla, Hsla)>, bar: Hsla) -> AnyElement {
+    let card = div()
         .flex()
         .flex_col()
         .items_center()
-        .justify_center()
         .gap(SPACING_HALF())
-        .children(label.map(|color| {
+        .p(SPACING())
+        .rounded(zpx(6.));
+    let card = match label {
+        Some((color, background)) => card.bg(background).child(
             div()
                 .text_size(FONT_SIZE_SM())
                 .text_color(color)
-                .child("Drawing\u{2026}")
-        }))
-        .child(crate::progress_bar::indeterminate_bar(bar, zpx(120.)))
+                .child("Drawing\u{2026}"),
+        ),
+        None => card,
+    };
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(card.child(crate::progress_bar::indeterminate_bar(bar, zpx(120.))))
         .into_any_element()
 }
 
