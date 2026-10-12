@@ -221,15 +221,16 @@ pub(super) fn stage(
                 .flex()
                 .flex_col()
                 .items_center()
+                .justify_center()
                 .gap(zpx(4.))
                 .child(label(title, color))
                 .child(
                     div()
-                        .w(room.width)
-                        .h(room.height)
+                        .w(fit(view.aspect(side), room).width)
+                        .h(fit(view.aspect(side), room).height)
                         .border_1()
                         .border_color(color)
-                        .child(view.picture(side, room, cx)),
+                        .child(view.picture(side, fit(view.aspect(side), room), cx)),
                 )
                 .child(
                     div()

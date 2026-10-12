@@ -9,7 +9,7 @@ corvene_flags: 1335-video-diff=on, 1336-audio-diff=on
 steps:
   - click: [125, 243]
     wait: 3000
-  - snap: {name: binary, note: "GHD: binary file; Corvene: stacked waveforms, 1-1.5 s shaded"}
+  - snap: {name: stacked, corvene_only: true, note: "stacked waveforms, 1-1.5 s shaded (GHD: binary file)"}
   - ghd: {skip: true}
     corvene: {click: [900, 300]}
     wait: 300

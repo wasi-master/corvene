@@ -228,6 +228,8 @@ impl MediaDiffView {
         this.start_sound_analysis(old.clone(), new.clone(), cx);
         if this.kind() == MediaKind::Video {
             this.start_video_sampling(old, new, cx);
+        } else {
+            this.samples_done = true;
         }
         this
     }
@@ -664,6 +666,32 @@ impl MediaDiffView {
             Mode::Video(_) => Mode::Video(VideoDiffMode::TwoUp),
             m => m,
         }
+    }
+
+    /// Whether a side's picture for the clock's time is still being decoded
+    /// (after a seek or a step while paused, or when the view opens).
+    fn waiting_for_frames(&self) -> bool {
+        if self.kind() != MediaKind::Video {
+            return false;
+        }
+        let t = self.player.position();
+        [Side::Old, Side::New].into_iter().any(|side| {
+            let Some(source) = self.player.source(side).filter(|s| s.has_video()) else {
+                return false;
+            };
+            if self.player.ended(side) {
+                return false;
+            }
+            let frame = source
+                .info
+                .video
+                .as_ref()
+                .and_then(|v| v.fps())
+                .map_or(0.04, |fps| 1. / fps);
+            self.shown[side as usize]
+                .as_ref()
+                .is_none_or(|s| (s.time - t).abs() > frame + 0.01)
+        })
     }
 
     /// Takes the players' current pictures; starts the difference blend.
@@ -1209,7 +1237,7 @@ impl Render for MediaDiffView {
         if self.kind() == MediaKind::Video {
             self.update_frames(mode, cx);
         }
-        if self.player.is_playing() || self.scrub.is_some() {
+        if self.player.is_playing() || self.scrub.is_some() || self.waiting_for_frames() {
             window.request_animation_frame();
         }
         let stage = match mode {

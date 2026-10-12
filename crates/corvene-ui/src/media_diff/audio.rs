@@ -46,19 +46,14 @@ fn tick_step(span: f64, width: f32, px_per_tick: f32) -> f64 {
 fn tick_label(t: f64, step: f64) -> String {
     if step >= 1. {
         let s = t.round() as u64;
-        format!("{}:{:02}", s / 60, s % 60)
-    } else {
-        let text = format_time(t);
-        // drop the milliseconds the step does not need
-        let keep = if step >= 0.1 {
-            2
-        } else if step >= 0.01 {
-            1
-        } else {
-            0
-        };
-        text[..text.len() - keep].to_string()
+        return format!("{}:{:02}", s / 60, s % 60);
     }
+    // as many decimals as the step has
+    let digits = (1..3)
+        .find(|d| ((step * 10f64.powi(*d)).fract()).abs() < 1e-6)
+        .unwrap_or(3);
+    let text = format_time(t);
+    text[..text.len() - (3 - digits as usize)].to_string()
 }
 
 /// The y of `hz` in a spectrogram lane `b` of a sound at `rate`.

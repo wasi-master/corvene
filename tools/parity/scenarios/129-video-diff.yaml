@@ -9,7 +9,7 @@ corvene_flags: 1335-video-diff=on, 1336-audio-diff=on, 1337-media-ffmpeg=on
 steps:
   - click: [125, 185]
     wait: 4000
-  - snap: {name: binary, note: "GHD: binary file; Corvene: 2-up with the change strip under it"}
+  - snap: {name: two-up, corvene_only: true, note: "2-up with the change strip under it (GHD: binary file)"}
   - ghd: {skip: true}
     corvene: {click: [900, 400]}
     wait: 300

@@ -107,7 +107,15 @@ fn rows(side: &MediaSide) -> Vec<(String, String)> {
             ("Audio decoder".into(), decoder(i.audio_decoder).into()),
         ]);
     }
-    for (k, v) in &i.tags {
+    // encoder bookkeeping (iTunes gapless and loudness data) is noise
+    let noise = |k: &str, v: &str| {
+        let k = k.to_ascii_lowercase();
+        k.contains("itunsmpb")
+            || k.contains("itunnorm")
+            || k.contains("itunes_cddb")
+            || v.len() > 160
+    };
+    for (k, v) in i.tags.iter().filter(|(k, v)| !noise(k, v)) {
         let mut label = k.replace('_', " ");
         if let Some(first) = label.get_mut(0..1) {
             first.make_ascii_uppercase();
