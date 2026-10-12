@@ -228,6 +228,17 @@ fn block_key(block: &DocBlock, images: &[ImageBlob]) -> u64 {
                 .map(|i| &i.bytes)
                 .hash(&mut h);
         }
+        // a list item renumbered by an item added or removed above it is
+        // the same item
+        DocBlock::Paragraph {
+            runs,
+            list: Some(mark),
+            quote,
+        } => {
+            "item".hash(&mut h);
+            runs.hash(&mut h);
+            (mark.level, mark.ordered, quote).hash(&mut h);
+        }
         other => other.hash(&mut h),
     }
     h.finish()
@@ -308,6 +319,23 @@ mod tests {
         assert_eq!(statuses(&rows), [Added, Modified, Deleted, Same, Added]);
         assert_eq!(rows[1].previous, Some(0));
         assert_eq!(rows[1].current, Some(1));
+    }
+
+    #[test]
+    fn renumbered_list_items_stay_the_same() {
+        let item = |text: &str, number| DocBlock::Paragraph {
+            runs: vec![DocRun::plain(text)],
+            list: Some(corvene_models::ListMark {
+                level: 0,
+                ordered: true,
+                number,
+            }),
+            quote: false,
+        };
+        let old = [item("a", 1), item("b", 2), item("c", 3)];
+        let new = [item("a", 1), item("c", 2)];
+        use Status::*;
+        assert_eq!(statuses(&block_rows((&old, &[]), (&new, &[]))), [Same, Deleted, Same]);
     }
 
     #[test]
