@@ -110,8 +110,14 @@ fn clip(mut text: String) -> String {
 
 fn read_spreadsheet(bytes: &[u8]) -> Result<TableBlob, String> {
     use calamine::Reader;
-    let mut book = calamine::open_workbook_auto_from_rs(std::io::Cursor::new(bytes.to_vec()))
-        .map_err(|e| e.to_string())?;
+    let mut book = match calamine::open_workbook_auto_from_rs(std::io::Cursor::new(bytes.to_vec()))
+    {
+        Ok(book) => book,
+        // an OpenDocument file calamine refuses (a value it cannot parse,
+        // such as `office:value="None"` on a text cell from some writers):
+        // the cells' shown text
+        Err(e) => return read_ods_text(bytes).ok_or_else(|| e.to_string()),
+    };
     let mut sheets = Vec::new();
     for name in book.sheet_names() {
         let range = book.worksheet_range(&name).map_err(|e| e.to_string())?;
@@ -305,6 +311,117 @@ fn read_dbase(bytes: &[u8]) -> Result<TableBlob, String> {
     })
 }
 
+/// Rows and columns repeated more often than this are cut (OpenDocument
+/// writers pad sheets with repeated empty rows and cells).
+const ODS_MAX_REPEAT: usize = 1000;
+
+/// An OpenDocument spreadsheet read from `content.xml` directly: each
+/// cell's shown text (its `text:p` paragraphs), trailing empty rows and
+/// columns left out. `None` when the file is not one.
+fn read_ods_text(bytes: &[u8]) -> Option<TableBlob> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut xml = String::new();
+    zip.by_name("content.xml")
+        .ok()?
+        .take(64 << 20)
+        .read_to_string(&mut xml)
+        .ok()?;
+    let doc = roxmltree::Document::parse_with_options(
+        &xml,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    const TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+    const TEXT: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+    let repeat = |n: roxmltree::Node, attr: &str| {
+        n.attribute((TABLE, attr))
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, ODS_MAX_REPEAT)
+    };
+    let cell_text = |cell: roxmltree::Node| {
+        cell.children()
+            .filter(|n| n.has_tag_name((TEXT, "p")))
+            .map(|p| {
+                p.descendants()
+                    .filter_map(|n| match n.tag_name().name() {
+                        _ if n.is_text() => n.text().map(str::to_string),
+                        "s" => Some(
+                            " ".repeat(
+                                n.attribute((TEXT, "c"))
+                                    .and_then(|c| c.parse().ok())
+                                    .unwrap_or(1usize)
+                                    .min(64),
+                            ),
+                        ),
+                        "tab" => Some("\t".into()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut sheets = Vec::new();
+    for table in doc
+        .descendants()
+        .filter(|n| n.has_tag_name((TABLE, "table")))
+    {
+        let name = table
+            .attribute((TABLE, "name"))
+            .unwrap_or("Sheet")
+            .to_string();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let row_nodes = table.descendants().filter(|n| {
+            n.has_tag_name((TABLE, "table-row"))
+                && n.ancestors()
+                    .skip(1)
+                    .find(|a| a.has_tag_name((TABLE, "table")))
+                    == Some(table)
+        });
+        'rows: for row in row_nodes {
+            let mut cells = Vec::new();
+            for cell in row.children().filter(|n| {
+                n.has_tag_name((TABLE, "table-cell"))
+                    || n.has_tag_name((TABLE, "covered-table-cell"))
+            }) {
+                let text = clip(cell_text(cell));
+                let times = repeat(cell, "number-columns-repeated");
+                cells.extend(std::iter::repeat_n(text, times));
+            }
+            while cells.last().is_some_and(String::is_empty) {
+                cells.pop();
+            }
+            for _ in 0..repeat(row, "number-rows-repeated") {
+                if rows.len() > MAX_ROWS + 1 {
+                    break 'rows;
+                }
+                rows.push(cells.clone());
+            }
+        }
+        while rows.last().is_some_and(|r| r.is_empty()) {
+            rows.pop();
+        }
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        for row in &mut rows {
+            row.resize(width, String::new());
+        }
+        let truncated = rows.len() > MAX_ROWS + 1;
+        rows.truncate(MAX_ROWS + 1);
+        sheets.push(TableSheet {
+            name,
+            first_line: 1,
+            rows,
+            truncated,
+        });
+    }
+    (!sheets.is_empty()).then_some(TableBlob { sheets })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +433,31 @@ mod tests {
         assert_eq!(table_format("x.dbf"), Some(TableFormat::Dbase));
         assert_eq!(table_format("x.csv"), None);
         assert_eq!(table_format("Makefile"), None);
+    }
+
+    #[test]
+    fn reads_opendocument_calamine_refuses() {
+        use std::io::Write;
+        let content = r#"<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:spreadsheet><table:table table:name="Inventory"><table:table-row><table:table-cell office:value-type="string" office:value="None"><text:p>item</text:p></table:table-cell><table:table-cell office:value-type="string" office:value="None"><text:p>qty</text:p></table:table-cell><table:table-cell table:number-columns-repeated="1020"/></table:table-row><table:table-row><table:table-cell office:value-type="string" office:value="None"><text:p>a<text:s text:c="2"/>b</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="5"><text:p>5</text:p></table:table-cell></table:table-row><table:table-row table:number-rows-repeated="1048000"><table:table-cell/></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>"#;
+        let mut out = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(&mut out);
+        let opts = zip::write::SimpleFileOptions::default();
+        zip.start_file("mimetype", opts).unwrap();
+        zip.write_all(b"application/vnd.oasis.opendocument.spreadsheet")
+            .unwrap();
+        zip.start_file("content.xml", opts).unwrap();
+        zip.write_all(content.as_bytes()).unwrap();
+        zip.finish().unwrap();
+        let blob = read(TableFormat::Spreadsheet, out.get_ref()).unwrap();
+        assert_eq!(blob.sheets.len(), 1);
+        assert_eq!(blob.sheets[0].name, "Inventory");
+        assert_eq!(
+            blob.sheets[0].rows,
+            vec![
+                vec!["item".to_string(), "qty".into()],
+                vec!["a  b".into(), "5".into()]
+            ]
+        );
     }
 
     fn sqlite_bytes(sql: &str) -> Vec<u8> {
