@@ -187,6 +187,18 @@ pub struct BlockTint {
     pub marks: Vec<MarkLayer>,
     /// A table's body rows ([`MarkdownOptions::table_rows`]).
     pub table_rows: Option<Rc<[TableRowTint]>>,
+    /// A code block's lines, by line.
+    pub code_lines: Option<Rc<[CodeLineTint]>>,
+}
+
+/// How one line of a code block in a rendered diff is tinted.
+#[derive(Clone, Debug, Default)]
+pub struct CodeLineTint {
+    /// The line's background (`None`: unchanged).
+    pub bg: Option<Hsla>,
+    /// Its changed words, with their stronger background (struck through
+    /// when `strike`).
+    pub marks: Option<MarkLayer>,
 }
 
 /// Ranges of a text marked with a background (and struck through).
@@ -325,6 +337,7 @@ pub fn markdown_with(
         font_size: size,
         references: options.references.clone().map(Rc::new),
         table_rows: RefCell::new(options.table_rows.clone()),
+        code_lines: RefCell::new(None),
         tints: options.tints.clone(),
     };
     div()
@@ -368,6 +381,7 @@ pub fn rich_text_with_issue_titles(
         font_size: 12.,
         references: None,
         table_rows: RefCell::new(None),
+        code_lines: RefCell::new(None),
         tints: None,
     }
     .rich(text)
@@ -518,6 +532,8 @@ struct Renderer<'a> {
     references: Option<Rc<ReferenceRepository>>,
     /// The body row tints of the table being drawn.
     table_rows: RefCell<Option<Rc<[TableRowTint]>>>,
+    /// The line tints of the code block being drawn.
+    code_lines: RefCell<Option<Rc<[CodeLineTint]>>>,
     /// [`MarkdownOptions::tints`]
     tints: Option<Rc<BlockTints>>,
 }
@@ -578,9 +594,13 @@ impl Renderer<'_> {
                     let rows = self
                         .table_rows
                         .replace(tint.and_then(|t| t.table_rows.clone()));
+                    let lines = self
+                        .code_lines
+                        .replace(tint.and_then(|t| t.code_lines.clone()));
                     let element = self.block(block, list_depth);
                     self.marks.replace(marks);
                     self.table_rows.replace(rows);
+                    self.code_lines.replace(lines);
                     tinted(element, tint)
                 }
                 None => self.block(block, list_depth),
@@ -617,6 +637,14 @@ impl Renderer<'_> {
                     })
                     .child(self.paragraph(text))
                     .into_any_element()
+            }
+            Block::CodeBlock { code, language } if self.code_lines.borrow().is_some() => {
+                let lines = self
+                    .code_lines
+                    .borrow()
+                    .clone()
+                    .unwrap_or_else(|| Rc::from([]));
+                self.diff_code(code, language.as_deref(), &lines)
             }
             Block::CodeBlock { code, language } if self.highlight_code => {
                 self.highlighted_code(code, language.as_deref())
@@ -952,6 +980,85 @@ impl Renderer<'_> {
             .child(
                 StyledText::new(SharedString::from(code.to_string())).with_highlights(highlights),
             )
+            .into_any_element()
+    }
+
+    /// A code block of a rendered diff drawn once: a row per line, changed
+    /// lines tinted and their changed words marked.
+    fn diff_code(&self, code: &str, language: Option<&str>, tints: &[CodeLineTint]) -> AnyElement {
+        let t = self.t;
+        let lines: Vec<&str> = code.split('\n').collect();
+        let path = format!("code.{}", extension_for(language.unwrap_or("")));
+        let spans = (self.highlight_code && lines.len() <= 4_000)
+            .then(|| corvene_highlight::highlight_lines(&path, lines.iter().copied()))
+            .flatten();
+        let size = self.font_size * 0.85;
+        let mut col = div().flex().flex_col().min_w_full().py(zpx(12.));
+        for (k, line) in lines.iter().enumerate() {
+            let tint = tints.get(k);
+            let highlights: Vec<(Range<usize>, HighlightStyle)> = spans
+                .as_ref()
+                .and_then(|s| s.get(k))
+                .map(|spans| {
+                    spans
+                        .iter()
+                        .filter(|s| {
+                            s.range.end <= line.len()
+                                && line.is_char_boundary(s.range.start)
+                                && line.is_char_boundary(s.range.end)
+                        })
+                        .map(|s| {
+                            (
+                                s.range.clone(),
+                                HighlightStyle {
+                                    color: Some(crate::diff_view_rows::token_color(s.class, t)),
+                                    ..HighlightStyle::default()
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let marks: Vec<Mark> = tint
+                .and_then(|t| t.marks.as_ref())
+                .map(|layer| {
+                    layer
+                        .ranges
+                        .iter()
+                        .filter(|r| r.end <= line.len())
+                        .map(|r| Mark {
+                            range: r.clone(),
+                            bg: layer.bg,
+                            strike: layer.strike,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let highlights = overlay_marks(line, highlights, &marks);
+            col = col.child(
+                div()
+                    .px(zpx(12.))
+                    .min_w_full()
+                    .h(zpx(size * 1.45))
+                    .when_some(tint.and_then(|t| t.bg), |d, bg| d.bg(bg))
+                    .child(
+                        StyledText::new(SharedString::from(line.to_string()))
+                            .with_highlights(highlights),
+                    ),
+            );
+        }
+        div()
+            .id(self.element_id())
+            .w_full()
+            .overflow_x_scroll()
+            .rounded(zpx(6.))
+            .bg(t.md_canvas_subtle)
+            .font_family(mono_font())
+            .text_size(zpx(size))
+            .line_height(zpx(size * 1.45))
+            .whitespace_nowrap()
+            .text_align(TextAlign::Left)
+            .child(col)
             .into_any_element()
     }
 

@@ -40,7 +40,8 @@ use gpui_kit::*;
 
 use crate::icons::{Octicon, octicon};
 use crate::markdown::{
-    BlockTint, BlockTints, ImageResolver, MarkLayer, MarkdownOptions, TableRowTint, markdown_with,
+    BlockTint, BlockTints, CodeLineTint, ImageResolver, MarkLayer, MarkdownOptions, TableRowTint,
+    markdown_with,
 };
 use crate::math::SharedMacros;
 use crate::scrollbar::{gutter, scrollbar};
@@ -547,6 +548,31 @@ fn merged_tints(merged: &Merged, side: Side, t: &GhdTheme) -> BlockTints {
                     layer(deleted, t.diff_delete_inner_background, side == Side::Both),
                     layer(added, t.diff_add_inner_background, false),
                 ],
+                ..BlockTint::default()
+            },
+            Change::Lines(lines) => BlockTint {
+                code_lines: Some(
+                    lines
+                        .iter()
+                        .map(|(status, words)| {
+                            let (bg, mark, strike) = match status {
+                                BlockStatus::Added => {
+                                    (t.diff_add_background, t.diff_add_inner_background, false)
+                                }
+                                BlockStatus::Deleted => (
+                                    t.diff_delete_background,
+                                    t.diff_delete_inner_background,
+                                    side == Side::Both,
+                                ),
+                                _ => return CodeLineTint::default(),
+                            };
+                            CodeLineTint {
+                                bg: Some(bg),
+                                marks: (!words.is_empty()).then(|| layer(words, mark, strike)),
+                            }
+                        })
+                        .collect(),
+                ),
                 ..BlockTint::default()
             },
             Change::Table(rows) => BlockTint {

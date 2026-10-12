@@ -10,7 +10,8 @@
 //! with its rows tinted, and a container (block quote, alert, `<details>`,
 //! list item, aligned block) as one container whose own blocks are aligned
 //! the same way, so an edit inside a note marks only the words that
-//! changed. Word diffs run under a deadline, so a long paragraph stays fast.
+//! changed, and a code block (front matter too) of the same language as
+//! one block with its changed lines tinted and their changed words marked. Word diffs run under a deadline, so a long paragraph stays fast.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
@@ -56,7 +57,14 @@ pub enum Change {
     /// An edited table: how each drawn body row changed (`Same`, `Added`
     /// or `Deleted`) and its changed cells, by column.
     Table(Vec<(BlockStatus, Vec<bool>)>),
+    /// An edited code block: how each drawn line changed (`Same`, `Added`
+    /// or `Deleted`) and the byte ranges of its changed words.
+    Lines(CodeLines),
 }
+
+/// How each drawn line of an edited code block changed, and its changed
+/// words.
+pub type CodeLines = Vec<(BlockStatus, Vec<Range<usize>>)>;
 
 /// An edited block drawn once: the block, and the blocks in it that
 /// changed, each by its path from it (an index into a container's blocks,
@@ -458,6 +466,20 @@ fn merge_block(
                 text,
             })
         }
+        (
+            Block::CodeBlock { language, code: a },
+            Block::CodeBlock {
+                language: lb,
+                code: b,
+            },
+        ) if language == lb && a != b => {
+            let (code, lines) = merge_code(a, b, side);
+            out.push((path.clone(), Change::Lines(lines)));
+            Some(Block::CodeBlock {
+                language: language.clone(),
+                code,
+            })
+        }
         (Block::Table { .. }, Block::Table { .. }) => {
             let (block, rows) = merge_table(old, new, side)?;
             out.push((path.clone(), Change::Table(rows)));
@@ -635,6 +657,56 @@ fn merge_items(
     }
     out.append(&mut inner);
     items
+}
+
+/// Code blocks with more lines than this are compared line by line
+/// without word marks.
+const MAX_MARKED_LINES: usize = 2_000;
+
+/// An edited code block drawn once: the lines of `side` (both: each
+/// changed stretch's old lines before its new ones), and how each line
+/// changed with its changed words (old and new lines paired in order).
+fn merge_code(a: &str, b: &str, side: Side) -> (String, CodeLines) {
+    let (la, lb): (Vec<&str>, Vec<&str>) = (a.split('\n').collect(), b.split('\n').collect());
+    let ops = similar::capture_diff_slices_deadline(
+        similar::Algorithm::Myers,
+        &la,
+        &lb,
+        Some(Instant::now() + WORD_DIFF_DEADLINE * 5),
+    );
+    let mark = la.len().max(lb.len()) <= MAX_MARKED_LINES;
+    let mut code: Vec<&str> = Vec::new();
+    let mut lines = Vec::new();
+    for op in &ops {
+        let (tag, o, n) = op.as_tag_tuple();
+        if tag == similar::DiffTag::Equal {
+            for (i, j) in o.zip(n) {
+                code.push(*pick(side, &la[i], &lb[j]));
+                lines.push((BlockStatus::Same, Vec::new()));
+            }
+            continue;
+        }
+        let (olds, news): (Vec<usize>, Vec<usize>) = (o.collect(), n.collect());
+        let words = |k: usize| -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+            match (olds.get(k), news.get(k)) {
+                (Some(&i), Some(&j)) if mark => word_marks(la[i], lb[j]),
+                _ => (Vec::new(), Vec::new()),
+            }
+        };
+        if side != Side::New {
+            for (k, &i) in olds.iter().enumerate() {
+                code.push(la[i]);
+                lines.push((BlockStatus::Deleted, words(k).0));
+            }
+        }
+        if side != Side::Old {
+            for (k, &j) in news.iter().enumerate() {
+                code.push(lb[j]);
+                lines.push((BlockStatus::Added, words(k).1));
+            }
+        }
+    }
+    (code.join("\n"), lines)
 }
 
 /// An edited text drawn once, with its change.
@@ -896,6 +968,50 @@ mod tests {
         let (block, deleted, added) = words_of(&views.new);
         assert_eq!((deleted.len(), added), (0, vec!["red".to_string()]));
         assert_eq!(block, &new[0]);
+    }
+
+    #[test]
+    fn code_blocks_mark_changed_lines() {
+        let code = |c: &str| Block::CodeBlock {
+            language: Some("rust".into()),
+            code: c.into(),
+        };
+        let old = code("fn main() {\n    println!(\"hello\");\n}");
+        let new = code("fn main() {\n    println!(\"hello, sink\");\n    run();\n}");
+        let both = merge(&old, &new, Side::Both).unwrap();
+        let Block::CodeBlock { code: drawn, .. } = &both.block else {
+            panic!("a code block");
+        };
+        assert_eq!(
+            drawn,
+            "fn main() {\n    println!(\"hello\");\n    println!(\"hello, sink\");\n    run();\n}"
+        );
+        let [(path, Change::Lines(lines))] = both.changes.as_slice() else {
+            panic!("{:?}", both.changes);
+        };
+        assert!(path.is_empty());
+        let status: Vec<BlockStatus> = lines.iter().map(|(s, _)| *s).collect();
+        use BlockStatus::*;
+        assert_eq!(status, [Same, Deleted, Added, Added, Same]);
+        // the paired lines mark only what changed
+        let added = &lines[2].1;
+        assert_eq!(added.len(), 1);
+        assert!("    println!(\"hello, sink\");"[added[0].clone()].contains("sink"));
+        assert!(lines[3].1.is_empty());
+        let new_side = merge(&old, &new, Side::New).unwrap();
+        let Block::CodeBlock { code: drawn, .. } = &new_side.block else {
+            panic!("a code block");
+        };
+        assert_eq!(
+            drawn,
+            "fn main() {\n    println!(\"hello, sink\");\n    run();\n}"
+        );
+        // another language is two blocks
+        let other = Block::CodeBlock {
+            language: Some("python".into()),
+            code: "x".into(),
+        };
+        assert!(merge(&old, &other, Side::Both).is_none());
     }
 
     #[test]
