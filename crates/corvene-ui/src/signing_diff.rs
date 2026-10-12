@@ -895,7 +895,7 @@ impl Rows {
             let value = copy_value.clone();
             div()
                 .id(ElementId::Name(format!("signing-copy-{ix}-{fx}").into()))
-                .icon_button_label(if copied { "Copied!" } else { "Copy value" })
+                .a11y_button(if copied { "Copied!" } else { "Copy value" })
                 .flex_none()
                 .size(zpx(20.))
                 .flex()

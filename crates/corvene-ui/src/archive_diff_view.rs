@@ -582,7 +582,7 @@ fn toggle_button(
     let t = cx.ghd();
     div()
         .id(id)
-        .icon_button_label(tooltip)
+        .a11y_button(tooltip)
         .flex_none()
         .ml(SPACING_HALF())
         .size(zpx(22.))
@@ -1431,7 +1431,7 @@ fn entry_menu_button(
     let nested = opens_as_archive(&change, b);
     div()
         .id("archive-entry-menu")
-        .icon_button_label("Entry actions")
+        .a11y_button("Entry actions")
         .flex_none()
         .ml(SPACING_HALF())
         .px(zpx(3.))

@@ -222,7 +222,7 @@ pub fn toggle(
     Some(
         div()
             .id(SharedString::from(format!("archive-toggle-{path}")))
-            .icon_button_label(if expanded {
+            .a11y_button(if expanded {
                 "Hide the archive's entries"
             } else {
                 "Show the archive's entries"
