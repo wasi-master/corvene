@@ -15,15 +15,15 @@ steps:
     wait: 3500
   - snap: {name: pdf-strip, corvene_only: true, note: "GHD shows the binary panel (1359-page-strip)"}
   - ghd: {skip: true}
-    corvene: {click: [330, 444]}
+    corvene: {click: [322, 588]}
     wait: 2000
   - snap: {name: pdf-strip-click, corvene_only: true, note: "a clicked thumbnail shows its page"}
   - ghd: {skip: true}
-    corvene: {click: [275, 104]}
+    corvene: {click: [267, 127]}
     wait: 1500
   - snap: {name: pdf-strip-changed-only, corvene_only: true, note: "Changed only hides unchanged pages"}
   - ghd: {skip: true}
-    corvene: {click: [275, 104]}
+    corvene: {click: [267, 127]}
     wait: 500
   - click: [125, 214]
     wait: 1500
