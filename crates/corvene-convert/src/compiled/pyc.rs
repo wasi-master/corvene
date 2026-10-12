@@ -216,11 +216,12 @@ impl<'a> Reader<'a> {
                 self.refs.get(ix).cloned().unwrap_or(Value::None)
             }
             b'(' => {
-                let n = self.u8()? as usize;
+                let n = self.len()?;
                 Value::Tuple(self.items(n)?)
             }
             b')' => {
-                let n = self.len()?;
+                // a small tuple: a one-byte length
+                let n = self.u8()? as usize;
                 Value::Tuple(self.items(n)?)
             }
             b'[' => {
@@ -633,19 +634,19 @@ mod tests {
         b.extend(4i32.to_le_bytes());
         b.extend([0x97, 0x00, 0x64, 0x00]);
         // consts (1, None)
-        b.push(b'(');
+        b.push(b')');
         b.push(2);
         b.push(b'i');
         b.extend(1i32.to_le_bytes());
         b.push(b'N');
         // names ('x',)
-        b.push(b'(');
+        b.push(b')');
         b.push(1);
         b.push(b'Z');
         b.push(1);
         b.push(b'x');
         // localsplusnames () kinds b''
-        b.push(b'(');
+        b.push(b')');
         b.push(0);
         b.push(b's');
         b.extend(0i32.to_le_bytes());
