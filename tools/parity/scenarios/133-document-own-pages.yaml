@@ -15,10 +15,10 @@ steps:
     wait: 1200
   - ghd: {skip: true}
     corvene: {click: [1225, 97]}
-    wait: 3000
+    wait: 8000
   - snap: {name: docx-pages, corvene_only: true, note: "the Rendered / Pages / Text switch on Pages (1358-document-own-pages)"}
   - click: [125, 243]
-    wait: 3000
+    wait: 8000
   - snap: {name: pptx-pages, corvene_only: true, note: "slides laid out by Corvene (1358-document-own-pages)"}
   - ghd: {skip: true}
     corvene: {click: [1170, 97]}

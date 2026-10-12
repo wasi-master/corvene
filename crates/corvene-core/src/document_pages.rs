@@ -302,6 +302,7 @@ mod tests {
         if pdf.text().is_some_and(|t| !t.trim().is_empty()) {
             assert!(pdf.text().unwrap_or_default().contains("New title"));
         }
+        assert!(pdf.render(0, 800).is_some(), "the page draws");
         assert!(crate::pdf::PdfDocument::open(previous.bytes).is_ok());
     }
 
