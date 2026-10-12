@@ -1,0 +1,43 @@
+# Files read into another form (flags 1350-1357, all off in the GitHub
+# Desktop preset; deviations.md › Diff viewer): a binary property list
+# decoded, a Mermaid flowchart drawn, a gettext catalog as a table, an
+# email decoded, a GeoJSON map, a Debian package opened as an archive and
+# Python bytecode decoded. GHD shows text diffs and binary panels.
+# Rows (GHD's case-insensitive order): config/Info.plist, docs/flow.mmd,
+# locales/de.po, mail/welcome.eml, maps/parks.geojson, pkg/hello.deb,
+# tool/greet.pyc.
+# Coordinates: the switch clicks follow 131-inspect-diffs; calibrate on
+# the first run.
+name: converted-diffs
+description: A plist, diagram, string table, email, map, package and bytecode file shown as what they hold (Corvene only)
+setup: repo-converted
+corvene_flags: 1323-archive-diff=on,1350-compiled-code-diff=on,1351-serialized-data-diff=on,1352-translation-diff=on,1353-diagram-diff=on,1354-map-diff=on,1355-email-diff=on,1356-package-archive-diff=on
+steps:
+  - click: [125, 185]
+    wait: 1500
+  - snap: {name: plist, corvene_only: true, note: "the binary plist as XML, a version and a key added (1351-serialized-data-diff)"}
+  - click: [125, 214]
+    wait: 6000
+  - snap: {name: diagram, corvene_only: true, note: "both flowcharts drawn, a Review step added (1353-diagram-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [1262, 97]}
+    wait: 1200
+  - snap: {name: diagram-source, corvene_only: true, note: "the Picture / Source switch: Source"}
+  - ghd: {skip: true}
+    corvene: {click: [1180, 97]}
+    wait: 800
+  - click: [125, 243]
+    wait: 1500
+  - snap: {name: translations, corvene_only: true, note: "a changed and an added message (1352-translation-diff)"}
+  - click: [125, 272]
+    wait: 1500
+  - snap: {name: email, corvene_only: true, note: "the subject and quoted-printable body decoded (1355-email-diff)"}
+  - click: [125, 301]
+    wait: 2000
+  - snap: {name: map, corvene_only: true, note: "an added park and a longer trail in green (1354-map-diff)"}
+  - click: [125, 330]
+    wait: 1500
+  - snap: {name: deb, corvene_only: true, note: "the package's control file and payload as entries (1356-package-archive-diff)"}
+  - click: [125, 359]
+    wait: 1500
+  - snap: {name: pyc, corvene_only: true, note: "the bytecode's arguments and constants (1350-compiled-code-diff)"}

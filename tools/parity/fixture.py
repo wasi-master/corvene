@@ -1423,6 +1423,126 @@ def _inspect(repo: Path) -> None:
     (repo / "authorized_keys").write_text(_KEYS_NEW)
 
 
+# `repo-converted` (flags 1350-1357): a changed binary property list,
+# Mermaid flowchart, gettext catalog, email, GeoJSON map, Debian package
+# and Python bytecode file in the working copy
+_CONVERTED_MMD = """flowchart LR
+    A[Commit] --> B{Tests pass?}
+    B -->|Yes| C([Release])
+    B -- No --> D[Fix it]
+    D --> A
+"""
+_CONVERTED_MMD_EDITED = """flowchart LR
+    A[Commit] --> B{Tests pass?}
+    B -->|Yes| R[Review]
+    R --> C([Release])
+    B -- No --> D[Fix it]
+    D --> A
+"""
+_CONVERTED_PO = """msgid ""
+msgstr ""
+"Language: de\\n"
+
+msgid "Open"
+msgstr "Öffnen"
+
+msgid "Save"
+msgstr "Sichern"
+
+msgid "Quit"
+msgstr "Beenden"
+"""
+_CONVERTED_PO_EDITED = _CONVERTED_PO.replace('"Sichern"', '"Speichern"') + """
+msgid "Undo"
+msgstr "Rückgängig"
+"""
+_CONVERTED_EML = """From: Alice Example <alice@example.test>
+To: team@example.test
+Subject: =?UTF-8?Q?Caf=C3=A9_on_Friday?=
+Date: Mon, 28 Sep 2026 09:00:00 +0000
+Message-ID: <welcome@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi all,
+
+Coffee at the caf=C3=A9 on Friday at 10.
+
+Alice
+"""
+_CONVERTED_EML_EDITED = _CONVERTED_EML.replace("at 10.", "at 11, see you there.")
+
+
+def _converted_geojson(edited: bool) -> str:
+    import json
+    parks = [("Riverside", [13.40, 52.52]), ("Hilltop", [13.45, 52.50])]
+    if edited:
+        parks.append(("Lakeside", [13.38, 52.48]))
+    features = [{"type": "Feature", "properties": {"name": n}, "geometry": {"type": "Point", "coordinates": c}} for n, c in parks]
+    path = [[13.37, 52.51], [13.41, 52.53], [13.46, 52.51]] + ([[13.47, 52.49]] if edited else [])
+    features.append({"type": "Feature", "properties": {"name": "Trail"}, "geometry": {"type": "LineString", "coordinates": path}})
+    return json.dumps({"type": "FeatureCollection", "features": features}, indent=1) + "\n"
+
+
+def _converted_deb(version: str, script: str) -> bytes:
+    import io
+    import tarfile
+
+    def tgz(files):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode="w:gz", format=tarfile.USTAR_FORMAT) as t:
+            for name, data in files:
+                info = tarfile.TarInfo(name)
+                info.size, info.mtime, info.mode = len(data), 1_790_000_000, 0o755 if name.endswith("hello") else 0o644
+                t.addfile(info, io.BytesIO(data))
+        return raw.getvalue()
+
+    control = tgz([("./control", f"Package: hello\nVersion: {version}\nArchitecture: all\nMaintainer: Alice <alice@example.test>\nDescription: Says hello\n".encode())])
+    data = tgz([("./usr/bin/hello", script.encode()), ("./usr/share/doc/hello/copyright", b"MIT\n")])
+    out = b"!<arch>\n"
+    for name, body in (("debian-binary", b"2.0\n"), ("control.tar.gz", control), ("data.tar.gz", data)):
+        out += f"{name + '/':<16}{1790000000:<12}{0:<6}{0:<6}{'100644':<8}{len(body):<10}`\n".encode() + body
+        if len(body) % 2:
+            out += b"\n"
+    return out
+
+
+def _converted_pyc(repo: Path, source: str) -> None:
+    import py_compile
+    src = repo / "tool" / "greet.py"
+    src.write_text(source)
+    py_compile.compile(str(src), cfile=str(repo / "tool" / "greet.pyc"),
+                       invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH, doraise=True)
+    src.unlink()
+
+
+def _converted(repo: Path) -> None:
+    import plistlib
+    for d in ("config", "docs", "locales", "mail", "maps", "pkg", "tool"):
+        (repo / d).mkdir(exist_ok=True)
+
+    def write(edited: bool) -> None:
+        info = {"CFBundleName": "Corvene", "CFBundleShortVersionString": "0.2.0" if edited else "0.1.0",
+                "LSMinimumSystemVersion": "13.0"}
+        if edited:
+            info["NSHumanReadableCopyright"] = "© 2026"
+        (repo / "config" / "Info.plist").write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+        (repo / "docs" / "flow.mmd").write_text(_CONVERTED_MMD_EDITED if edited else _CONVERTED_MMD)
+        (repo / "locales" / "de.po").write_text(_CONVERTED_PO_EDITED if edited else _CONVERTED_PO)
+        (repo / "mail" / "welcome.eml").write_text(_CONVERTED_EML_EDITED if edited else _CONVERTED_EML)
+        (repo / "maps" / "parks.geojson").write_text(_converted_geojson(edited))
+        (repo / "pkg" / "hello.deb").write_bytes(
+            _converted_deb("1.1-1" if edited else "1.0-1", "#!/bin/sh\necho hello\n" + ("echo again\n" if edited else "")))
+        _converted_pyc(repo, "def greet(name):\n    return 'Hello, ' + name\n" if not edited
+                       else "def greet(name, punctuation='!'):\n    return 'Hello, ' + name + punctuation\n")
+
+    write(False)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the release kit", date="2026-09-28T09:00:00+00:00")
+    write(True)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
@@ -1430,7 +1550,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
           documents: bool = False, notebooks: bool = False, markdown: bool = False,
-          media: bool = False, inspect: bool = False) -> Path:
+          media: bool = False, inspect: bool = False, converted: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1606,6 +1726,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if inspect:
         _inspect(repo)
+        return repo
+    if converted:
+        _converted(repo)
         return repo
     if notebooks:
         _notebooks(repo)
