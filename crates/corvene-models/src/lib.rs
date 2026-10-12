@@ -1905,6 +1905,105 @@ pub struct ImageOriginal {
     pub height: u32,
 }
 
+/// Corvene `1335-video-diff` / `1336-audio-diff`: a video or sound file
+/// that changed. The sides are files on disk (the working tree's own file,
+/// or a blob written to the media cache) because they can be large and the
+/// platform decoders read files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaDiff {
+    pub kind: MediaKind,
+    /// Missing for new files.
+    pub previous: Option<MediaSide>,
+    /// Missing for deleted files.
+    pub current: Option<MediaSide>,
+}
+
+/// One side of a [`MediaDiff`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaSide {
+    pub file: std::path::PathBuf,
+    /// The file's size in bytes.
+    pub bytes: u64,
+    /// What the side was read from (a blob id, or the working tree file's
+    /// modification time), so analyses can be cached across reloads.
+    pub key: String,
+    pub info: MediaInfo,
+}
+
+/// Which decoder reads a stream of a [`MediaSide`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MediaDecoder {
+    /// Nothing on this system reads it.
+    #[default]
+    None,
+    /// AVFoundation on macOS, Media Foundation on Windows.
+    System,
+    /// Symphonia (sound only).
+    Symphonia,
+    /// The `ffmpeg` found on this system.
+    Ffmpeg,
+}
+
+/// What a probe found out about a video or sound file. Times are in
+/// microseconds, so the type stays `Eq`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaInfo {
+    /// The container's name ("MPEG-4", "Matroska", "WAVE", …).
+    pub container: String,
+    pub duration_us: Option<u64>,
+    /// The whole file's bit rate in bits per second.
+    pub bit_rate: Option<u64>,
+    pub video: Option<VideoStreamInfo>,
+    pub audio: Option<AudioStreamInfo>,
+    /// Title, artist, album, … as the file names them.
+    pub tags: Vec<(String, String)>,
+    /// Embedded cover art (ID3 `APIC`, MP4 `covr`, FLAC picture).
+    pub cover: Option<ImageBlob>,
+    pub video_decoder: MediaDecoder,
+    pub audio_decoder: MediaDecoder,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoStreamInfo {
+    pub codec: String,
+    /// Pixels as stored (before `rotation`).
+    pub width: u32,
+    pub height: u32,
+    /// Frames per second as a fraction (`30000/1001`).
+    pub frame_rate: Option<(u32, u32)>,
+    pub frames: Option<u64>,
+    /// Clockwise degrees the picture is turned when shown (0, 90, 180, 270).
+    pub rotation: u32,
+    pub pixel_format: Option<String>,
+    pub bit_rate: Option<u64>,
+}
+
+impl VideoStreamInfo {
+    /// The picture's size as shown (turned by `rotation`).
+    pub fn display_size(&self) -> (u32, u32) {
+        if self.rotation % 180 == 90 {
+            (self.height, self.width)
+        } else {
+            (self.width, self.height)
+        }
+    }
+
+    pub fn fps(&self) -> Option<f64> {
+        let (n, d) = self.frame_rate?;
+        (n > 0 && d > 0).then(|| n as f64 / d as f64)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioStreamInfo {
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: Option<u32>,
+    pub bit_rate: Option<u64>,
+}
+
 /// Corvene `1321-table-file-diff`: one side of a spreadsheet or database
 /// file read as tables (a workbook's sheets, a database's tables).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2670,6 +2769,40 @@ pub enum ImageDiffType {
     Difference,
 }
 
+/// Corvene `1335-video-diff` / `1336-audio-diff`: whether a media file is a
+/// video or a sound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MediaKind {
+    Video,
+    Audio,
+}
+
+/// Corvene `1335-video-diff`: the tabs of a modified-video diff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum VideoDiffMode {
+    #[default]
+    TwoUp,
+    Swipe,
+    OnionSkin,
+    Difference,
+    Info,
+}
+
+/// Corvene `1336-audio-diff`: the tabs of a modified-sound diff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AudioDiffMode {
+    /// Old and new waveforms in two lanes.
+    #[default]
+    Stacked,
+    /// Both waveforms in one lane, with their difference under them.
+    Overlay,
+    Spectrogram,
+    Info,
+}
+
 /// Corvene `1329-font-diff`: the tabs of the font viewer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -2740,6 +2873,20 @@ pub fn is_font_file(path: &str) -> bool {
         ext.as_str(),
         "ttf" | "otf" | "woff" | "woff2" | "ttc" | "otc"
     )
+}
+
+/// Corvene `1335-video-diff` / `1336-audio-diff`: whether `path` names a
+/// video or sound file (decoded by `corvene_media`; whether one plays
+/// depends on the platform and on an installed `ffmpeg`).
+pub fn media_kind(path: &str) -> Option<MediaKind> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "mp4" | "m4v" | "mov" | "qt" | "webm" | "mkv" | "avi" | "ogv" | "3gp" | "3g2" | "mpg"
+        | "mpeg" | "m2ts" | "mts" | "wmv" | "flv" => MediaKind::Video,
+        "mp3" | "wav" | "wave" | "flac" | "ogg" | "oga" | "opus" | "m4a" | "m4b" | "aac"
+        | "aif" | "aiff" | "aifc" | "caf" | "wma" | "mka" => MediaKind::Audio,
+        _ => return None,
+    })
 }
 
 /// Corvene `1330-font-source-preview`: the font source kind of `path`.
@@ -2884,6 +3031,8 @@ pub enum Diff {
         previous: Option<FontSourceBlob>,
         current: Option<FontSourceBlob>,
     },
+    /// Corvene `1335-video-diff` / `1336-audio-diff`: a video or sound file.
+    Media(Box<MediaDiff>),
     /// Nothing to show (e.g. empty file, mode-only change).
     Empty,
     /// `Unrenderable`: beyond what git would even hand over.

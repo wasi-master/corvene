@@ -1,0 +1,40 @@
+[package]
+name = "corvene-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Video and audio files read for diffs: probing, frames, sound, waveforms, playback"
+
+[dependencies]
+thiserror.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+corvene-models.workspace = true
+# audio in every container it knows (MPL-2.0, file-level copyleft only)
+symphonia = { version = "=0.5.5", default-features = false, features = ["aac", "adpcm", "alac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff", "caf"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+cpal = "=0.18.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSArray", "NSDictionary", "NSValue", "NSError", "NSObject", "NSData", "NSEnumerator"] }
+objc2-av-foundation = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "objc2-core-foundation", "objc2-core-graphics", "AVAsset", "AVAssetTrack", "AVAssetReader", "AVAssetReaderOutput", "AVAssetImageGenerator", "AVMediaFormat", "AVMetadataItem", "AVMetadataFormat", "AVVideoSettings", "AVMediaSelectionGroup", "AVAsynchronousKeyValueLoading", "AVAudioMix"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime", "CMSampleBuffer", "CMBlockBuffer", "CMFormatDescription", "CMTimeRange", "objc2-core-video"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVPixelBufferIOSurface"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFString", "CFNumber", "CFDictionary", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGColorSpace", "CGBitmapContext", "CGContext"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+tempfile = "3"
