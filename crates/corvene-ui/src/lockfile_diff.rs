@@ -197,15 +197,20 @@ impl LockfileDiffView {
         let any_direct = data.changes.iter().any(|c| c.direct.is_some());
         let list = ListState::new(0, ListAlignment::Top, zpx(400.));
         let weak = cx.weak_entity();
+        // The list calls this while its state is borrowed, so reading the
+        // scroll position here would panic: look once the scroll is done.
         list.set_scroll_handler(move |_, _, cx| {
-            weak.update(cx, |this, cx| {
-                let sticky = this.sticky_kind();
-                if sticky != this.sticky {
-                    this.sticky = sticky;
-                    cx.notify();
-                }
-            })
-            .ok();
+            let weak = weak.clone();
+            cx.defer(move |cx| {
+                weak.update(cx, |this, cx| {
+                    let sticky = this.sticky_kind();
+                    if sticky != this.sticky {
+                        this.sticky = sticky;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
         });
         let mut this = Self {
             diff,
