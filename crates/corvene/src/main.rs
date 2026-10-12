@@ -67,7 +67,7 @@ pub(crate) fn main() {
     // URL handler, the command line tool) hands its URLs to the running
     // Corvene and exits before touching the store it holds. Android keeps a
     // single activity itself (`launchMode="singleTask"`).
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let launch_urls = corvene_platform::single_instance::url_arguments(std::env::args().skip(1));
     // Windows: what the command line tool asks for (`corvene.bat`) is one more URL
     #[cfg(windows)]
@@ -76,7 +76,7 @@ pub(crate) fn main() {
         urls.extend(cli_windows::url(std::env::args().skip(1)));
         urls
     };
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let instance = match corvene_platform::single_instance::claim(&launch_urls) {
         corvene_platform::single_instance::Claim::Forwarded => return,
         corvene_platform::single_instance::Claim::First(listener) => listener,
@@ -128,7 +128,7 @@ pub(crate) fn main() {
     // in Corvene", links) may arrive before launch has finished: queue them
     let url_inbox = corvene_core::app_url::AppUrlInbox::default();
     let url_sender = url_inbox.sender();
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         for url in launch_urls {
             url_sender.send(url);
@@ -138,7 +138,9 @@ pub(crate) fn main() {
             corvene_platform::single_instance::Message::Url(url) => from_later_launches.send(url),
             corvene_platform::single_instance::Message::Focus => from_later_launches.focus(),
         });
-        // GHD `setAsDefaultProtocolClient` on every launch
+        // GHD `setAsDefaultProtocolClient` on every launch (macOS: the
+        // bundle's Info.plist)
+        #[cfg(not(target_os = "macos"))]
         std::thread::spawn(corvene_platform::url_schemes::register);
     }
     // Windows: what the installer relies on (packaging/windows/corvene.iss).

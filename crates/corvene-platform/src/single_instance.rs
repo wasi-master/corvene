@@ -1,6 +1,9 @@
-//! One Corvene per data folder on Linux - GHD's `app.requestSingleInstanceLock()`
-//! and `second-instance` event (`main-process/main.ts`). macOS gets this
-//! from LaunchServices, which hands URLs to the running app itself.
+//! One Corvene per data folder on Linux and macOS - GHD's
+//! `app.requestSingleInstanceLock()` and `second-instance` event
+//! (`main-process/main.ts`). On macOS LaunchServices already hands a second
+//! launch of the same app bundle to the running one; the socket covers
+//! another copy of the app or the bare binary, which would otherwise find
+//! the store locked and run on a temporary one.
 //!
 //! The first instance listens on a Unix socket in `$XDG_RUNTIME_DIR`
 //! named after the data folder, so harness instances with their own
