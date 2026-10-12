@@ -49,6 +49,7 @@ pub mod file_icons;
 pub mod file_tree;
 pub mod filter;
 pub mod flags;
+pub mod fold;
 pub mod fork_checkout;
 pub mod forks;
 pub mod ghd_import;

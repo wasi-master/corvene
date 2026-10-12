@@ -409,6 +409,18 @@ impl SigningDiffView {
         self.open_runs.clear();
         self.copied = None;
         self.build_entries();
+        // open at the first change (a fold or row above kept in view)
+        let rows = &self.prepared.rows;
+        let first = self
+            .entries
+            .iter()
+            .position(|e| matches!(e, Entry::Item(i) if rows[*i].status != RowStatus::Unchanged));
+        if let Some(ix) = first {
+            self.list.scroll_to(ListOffset {
+                item_ix: ix.saturating_sub(1),
+                offset_in_item: px(0.),
+            });
+        }
     }
 
     fn build_entries(&mut self) {

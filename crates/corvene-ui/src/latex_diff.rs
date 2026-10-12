@@ -12,14 +12,20 @@
 //!
 //! Corvene `1334-markdown-preview-diff`: a Markdown file's Preview is the
 //! same view over `corvene_core::markdown_doc` blocks (math typeset with
-//! `1333-markdown-math`). It opens scrolled to the first change, or to
-//! the block the Source view's top line is in when switched from there.
+//! `1333-markdown-math`).
+//!
+//! Both open scrolled to the first change (a Markdown preview switched to
+//! from a scrolled Source view: to the block holding its top line), and
+//! runs of unchanged blocks fold as the text diff's context does
+//! (`corvene_core::fold`).
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::collections::HashSet;
 
 use corvene_core::bibtex::{self, BibChange, BibEntry};
 use corvene_core::block_diff::{BlockRow, BlockStatus, block_diff};
+use corvene_core::fold::{FoldRow, FoldRule, fold};
 use corvene_core::markdown::Block;
 use corvene_core::{Diff, LatexBlob, LatexKind};
 use gpui_kit::prelude::*;
@@ -66,6 +72,11 @@ pub struct LatexDiff {
     reveal: Option<Option<u32>>,
 }
 
+    /// The list's rows: blocks (or entries) and folds of unchanged ones.
+    view: Rc<Vec<FoldRow>>,
+    /// The `start` of folds the user opened.
+    expanded: HashSet<usize>,
+    weak: WeakEntity<Self>,
 fn sides(diff: &Diff) -> (Option<&LatexBlob>, Option<&LatexBlob>) {
     match diff {
         Diff::Latex {
@@ -204,33 +215,58 @@ impl LatexDiff {
                         changes: Rc::new(changes),
                     },
                 };
-                let count = match &content {
-                    Content::Document { rows, .. } => rows.len(),
-                    Content::Bibliography { changes, .. } => changes.len(),
-                };
-                this.list.reset(count);
                 this.content = Some(Rc::new(content));
                 this.apply_reveal();
                 cx.notify();
+                this.refold();
             })
             .ok();
         }));
         let (previous, current) = sides(&diff);
         let images = [resolver(previous), resolver(current)];
-        let markdown = matches!(*diff, Diff::Markdown { .. });
         Self {
             diff,
             content: None,
             _task,
             list: ListState::new(0, ListAlignment::Top, zpx(600.)),
             images,
-            // a Markdown preview opens at its first change
-            reveal: markdown.then_some(None),
+            reveal: Some(None),
+            view: Rc::new(Vec::new()),
+            expanded: HashSet::new(),
+            weak: cx.weak_entity(),
         }
     }
 
     /// Scroll to the block holding `line` of the new file (`None`: to the
     /// first change), now or once read.
+    /// Rebuild the list's rows from the content and the opened folds.
+    fn refold(&mut self) {
+        let changed: Vec<bool> = (0..self.count()).map(|i| self.changed(i)).collect();
+        self.view = Rc::new(fold(&changed, FoldRule::BLOCKS, &self.expanded));
+        self.list.reset(self.view.len());
+    }
+
+    fn expand_fold(&mut self, start: usize, cx: &mut Context<Self>) {
+        let top = self.list.logical_scroll_top();
+        self.expanded.insert(start);
+        self.refold();
+        self.list.scroll_to(top);
+        cx.notify();
+    }
+
+    /// The list row showing item `item` (the fold holding it, if folded).
+    fn row_of(&self, item: usize) -> Option<usize> {
+        self.view.iter().position(|r| match r {
+            FoldRow::Item(i) => *i == item,
+            FoldRow::Folded { start, end } => (*start..*end).contains(&item),
+        })
+    }
+
+    /// Whether list row `ix` is a changed item.
+    fn row_changed(&self, ix: usize) -> bool {
+        matches!(self.view.get(ix), Some(FoldRow::Item(i)) if self.changed(*i))
+    }
+
     pub fn reveal(&mut self, line: Option<u32>, cx: &mut Context<Self>) {
         self.reveal = Some(line);
         self.apply_reveal();
@@ -257,7 +293,16 @@ impl LatexDiff {
             }),
             _ => None,
         };
-        let Some(ix) = at_line.or_else(|| (0..self.count()).find(|&i| self.changed(i))) else {
+        let at_line = at_line.and_then(|item| self.row_of(item));
+        let first = || {
+            let ix = (0..self.view.len()).find(|&i| self.row_changed(i))?;
+            // the block of context above stays in view
+            Some(match ix.checked_sub(1).map(|p| &self.view[p]) {
+                Some(FoldRow::Item(_)) => ix - 1,
+                _ => ix,
+            })
+        };
+        let Some(ix) = at_line.or_else(first) else {
             return;
         };
         self.list.scroll_to(ListOffset {
@@ -293,11 +338,11 @@ impl LatexDiff {
 
     fn step_change(&mut self, forward: bool, cx: &mut Context<Self>) {
         let top = self.list.logical_scroll_top().item_ix;
-        let n = self.count();
+        let n = self.view.len();
         let found = if forward {
-            (top + 1..n).find(|&i| self.changed(i))
+            (top + 1..n).find(|&i| self.row_changed(i))
         } else {
-            (0..top).rev().find(|&i| self.changed(i))
+            (0..top).rev().find(|&i| self.row_changed(i))
         };
         if let Some(ix) = found {
             self.list.scroll_to(ListOffset {
@@ -538,9 +583,35 @@ impl Rows {
                     }
                     (BlockStatus::Same, true) => div()
                         .w_full()
+    view: Rc<Vec<FoldRow>>,
+    this: WeakEntity<LatexDiff>,
                         .flex()
                         .flex_row()
                         .child(column(old_el(BlockStatus::Same)))
+    fn list_row(&self, ix: usize, cx: &App) -> AnyElement {
+        match self.view.get(ix) {
+            Some(FoldRow::Item(i)) => self.row(*i, cx),
+            Some(FoldRow::Folded { start, end }) => {
+                let (start, this) = (*start, self.this.clone());
+                let noun = match &*self.content {
+                    Content::Document { .. } => ("block", "blocks"),
+                    Content::Bibliography { .. } => ("entry", "entries"),
+                };
+                crate::unchanged_fold::fold_row(
+                    ("latex-fold", start),
+                    end - start,
+                    noun,
+                    false,
+                    move |_, cx| {
+                        this.update(cx, |v, cx| v.expand_fold(start, cx)).ok();
+                    },
+                    cx,
+                )
+            }
+            None => div().into_any_element(),
+        }
+    }
+
                         .child(column(new_el(BlockStatus::Same))),
                     (_, true) => div()
                         .w_full()
@@ -700,13 +771,15 @@ impl Render for LatexDiff {
                     .flex()
                     .flex_col()
                     .child(
-                        list(self.list.clone(), move |ix, _window, cx| shared.row(ix, cx))
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .pt(SPACING_HALF())
-                            .pb(SPACING())
-                            .pr(gutter(&self.list)),
+                        list(self.list.clone(), move |ix, _window, cx| {
+                            shared.list_row(ix, cx)
+                        })
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .pt(SPACING_HALF())
+                        .pb(SPACING())
+                        .pr(gutter(&self.list)),
                     )
                     .child(scrollbar("latex-scrollbar", self.list.clone()))
                     .into_any_element()
@@ -726,3 +799,5 @@ impl Render for LatexDiff {
             .child(body)
     }
 }
+                    view: self.view.clone(),
+                    this: self.weak.clone(),

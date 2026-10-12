@@ -9,7 +9,8 @@
 //! number; a page only one version has shows as added or deleted. A
 //! toolbar above steps through the pages and jumps to the next page whose
 //! thumbnail differs (documents of up to
-//! [`corvene_core::pdf::MAX_SCANNED_PAGES`] pages are scanned). A file
+//! [`corvene_core::pdf::MAX_SCANNED_PAGES`] pages are scanned; once the
+//! scan is done a view still on page 1 moves to the first changed one). A file
 //! that does not open (encrypted, broken) reports [`PdfDiff::failed`] and the
 //! diff view shows the binary panel.
 
@@ -136,6 +137,12 @@ impl PdfDiff {
         self._tasks.push(cx.spawn(async move |this, cx| {
             let changed = scan.await;
             this.update(cx, |this, cx| {
+                // still on the first page: open at the first changed one
+                if this.page == 0
+                    && let Some(first) = changed.as_deref().and_then(|c| c.iter().position(|&p| p))
+                {
+                    this.page = first;
+                }
                 this.changed = changed;
                 cx.notify();
             })

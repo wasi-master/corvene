@@ -229,11 +229,6 @@ pub enum Row {
     },
 }
 
-/// Unchanged cells kept around a change when folding.
-const FOLD_CONTEXT: usize = 1;
-/// Fewer unchanged cells than this are not folded.
-const FOLD_MIN: usize = 3;
-
 /// The rows to draw: `expanded` holds the `start` of folds the user opened.
 pub fn rows(diff: &NotebookDiff, filters: &NotebookFilters, expanded: &HashSet<usize>) -> Vec<Row> {
     let mut out = Vec::with_capacity(diff.pairs.len() + 1);
@@ -249,45 +244,20 @@ pub fn rows(diff: &NotebookDiff, filters: &NotebookFilters, expanded: &HashSet<u
         return out;
     }
     let change: Vec<bool> = diff.pairs.iter().map(|p| p.is_change(filters)).collect();
-    let any_change = change.iter().any(|c| *c);
-    let mut i = 0;
-    while i < diff.pairs.len() {
-        if change[i] {
-            out.push(Row::Cell(i));
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < diff.pairs.len() && !change[i] {
-            i += 1;
-        }
-        let end = i;
-        // keep a cell of context next to each change
-        let lead = if start > 0 { FOLD_CONTEXT } else { 0 };
-        let trail = if end < diff.pairs.len() {
-            FOLD_CONTEXT
-        } else {
-            0
-        };
-        let (fold_start, fold_end) = if any_change {
-            (start + lead, end.saturating_sub(trail))
-        } else {
-            (start, end)
-        };
-        if fold_end <= fold_start
-            || fold_end - fold_start < FOLD_MIN
-            || expanded.contains(&fold_start)
-        {
-            out.extend((start..end).map(Row::Cell));
-            continue;
-        }
-        out.extend((start..fold_start).map(Row::Cell));
-        out.push(Row::Folded {
-            start: fold_start,
-            end: fold_end,
-        });
-        out.extend((fold_end..end).map(Row::Cell));
+    let n = change.len();
+    if !change.contains(&true) && n >= crate::fold::FoldRule::BLOCKS.min && !expanded.contains(&0) {
+        // only the notebook's own fields changed: every cell folds
+        out.push(Row::Folded { start: 0, end: n });
+        return out;
     }
+    out.extend(
+        crate::fold::fold(&change, crate::fold::FoldRule::BLOCKS, expanded)
+            .into_iter()
+            .map(|r| match r {
+                crate::fold::FoldRow::Item(i) => Row::Cell(i),
+                crate::fold::FoldRow::Folded { start, end } => Row::Folded { start, end },
+            }),
+    );
     out
 }
 

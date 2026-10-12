@@ -93,6 +93,8 @@ pub struct NotebookDiffView {
     /// The filters and folds `rows` were built for.
     rows_for: Option<(NotebookFilters, usize)>,
     expanded: HashSet<usize>,
+    /// The next rows built scroll to the first change (a new notebook).
+    reveal_first: bool,
     list: ListState,
     ui: Rc<RefCell<UiState>>,
     macros: SharedMacros,
@@ -131,6 +133,7 @@ impl NotebookDiffView {
             rows: Rc::new(Vec::new()),
             rows_for: None,
             expanded: HashSet::new(),
+            reveal_first: false,
             list: ListState::new(0, ListAlignment::Top, zpx(600.)),
             ui: Rc::new(RefCell::new(UiState::default())),
             macros: SharedMacros::default(),
@@ -181,6 +184,7 @@ impl NotebookDiffView {
                     this.rebuild_stage();
                     if first {
                         this.list.scroll_to(ListOffset::default());
+                        this.reveal_first = true;
                     }
                     cx.notify();
                 }
@@ -262,6 +266,24 @@ impl NotebookDiffView {
         self.rows_for = Some(key);
         let rows = nd::rows(&aligned, &filters, &self.expanded);
         self.list.reset(rows.len());
+        if std::mem::take(&mut self.reveal_first) {
+            // the first change, with the cell of context above it
+            let first = rows.iter().position(|r| match r {
+                NbRow::Cell(i) => aligned.pairs[*i].is_change(&filters),
+                NbRow::Header => true,
+                NbRow::Folded { .. } => false,
+            });
+            if let Some(ix) = first {
+                let ix = match ix.checked_sub(1).map(|p| &rows[p]) {
+                    Some(NbRow::Cell(_)) => ix - 1,
+                    _ => ix,
+                };
+                self.list.scroll_to(ListOffset {
+                    item_ix: ix,
+                    offset_in_item: px(0.),
+                });
+            }
+        }
         self.rows = Rc::new(rows);
         if self.stage.is_none() {
             self.rebuild_stage();
@@ -706,41 +728,17 @@ impl Shared {
     }
 
     fn folded_row(&self, start: usize, end: usize, cx: &App) -> AnyElement {
-        let t = cx.ghd();
         let weak = self.weak.clone();
-        let hover = t.box_hover_background;
-        let n = end - start;
-        div()
-            .w_full()
-            .px(SPACING())
-            .py(zpx(3.))
-            .child(
-                div()
-                    .id(("notebook-fold", start))
-                    .a11y_button(format!("Show {n} unchanged cells"))
-                    .w_full()
-                    .h(zpx(22.))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_center()
-                    .gap(SPACING_HALF())
-                    .rounded(BORDER_RADIUS())
-                    .bg(t.diff_hunk_background)
-                    .text_size(FONT_SIZE_SM())
-                    .text_color(t.text_secondary)
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(hover))
-                    .child(octicon(Octicon::Unfold, t.text_secondary))
-                    .child(format!(
-                        "{n} unchanged {}",
-                        if n == 1 { "cell" } else { "cells" }
-                    ))
-                    .on_click(move |_, _, cx| {
-                        weak.update(cx, |this, cx| this.expand_fold(start, cx)).ok();
-                    }),
-            )
-            .into_any_element()
+        crate::unchanged_fold::fold_row(
+            ("notebook-fold", start),
+            end - start,
+            ("cell", "cells"),
+            false,
+            move |_, cx| {
+                weak.update(cx, |this, cx| this.expand_fold(start, cx)).ok();
+            },
+            cx,
+        )
     }
 
     fn header_row(&self, cx: &mut App) -> AnyElement {

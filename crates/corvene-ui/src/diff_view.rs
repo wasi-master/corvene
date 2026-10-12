@@ -115,6 +115,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use corvene_core::fold::FoldRow;
 use corvene_core::{
     AppState, Diff, DiffLineKind, DiffSelection, DiffSelectionType, Dispatcher, FileStatusKind,
     SubmoduleDiff,
@@ -835,6 +836,10 @@ pub struct DiffView {
     csv_sheets: Option<(Arc<Diff>, Rc<Vec<SheetEntry>>)>,
     csv_list: ListState,
     csv_h_scroll: HScroll,
+    /// The table list's rows: data rows and folds of unchanged ones.
+    csv_fold: Rc<Vec<FoldRow>>,
+    /// The `start` of table folds the user opened.
+    csv_expanded: HashSet<usize>,
     /// Whether the list currently shows `split_rows`.
     split_mode: bool,
     /// `1304-diff-no-wrap`: lines stay on one row (as last rendered).
@@ -993,6 +998,8 @@ impl DiffView {
             csv_sheets: None,
             csv_list: ListState::new(0, ListAlignment::Top, zpx(200.)),
             csv_h_scroll: HScroll::default(),
+            csv_fold: Rc::new(Vec::new()),
+            csv_expanded: HashSet::new(),
             split_mode: false,
             no_wrap: false,
             h_scroll: HScroll::default(),
@@ -4863,9 +4870,19 @@ impl DiffView {
             });
             if !same_file {
                 self.csv_h_scroll.reset();
+                self.csv_expanded.clear();
             }
-            self.csv_list
-                .reset_with_uniform_height(table.diff.rows.len(), DIFF_LINE_HEIGHT());
+            self.csv_refold(&table);
+            if !same_file {
+                // a new table opens at its first change
+                let changed = csv_changed(&table);
+                if let Some(ix) = corvene_core::fold::first_change(&self.csv_fold, &changed, 1) {
+                    self.csv_list.scroll_to(ListOffset {
+                        item_ix: ix,
+                        offset_in_item: px(0.),
+                    });
+                }
+            }
             self.csv_h_scroll.reset_width(table.width());
             table
         });
@@ -4880,6 +4897,30 @@ impl DiffView {
             table.clone(),
         ));
         Some(table)
+    }
+
+    /// Fold `table`'s runs of unchanged rows into the list's rows.
+    fn csv_refold(&mut self, table: &CsvTable) {
+        let changed = csv_changed(table);
+        self.csv_fold = Rc::new(corvene_core::fold::fold(
+            &changed,
+            corvene_core::fold::FoldRule::ROWS,
+            &self.csv_expanded,
+        ));
+        self.csv_list
+            .reset_with_uniform_height(self.csv_fold.len(), DIFF_LINE_HEIGHT());
+    }
+
+    /// Open the table fold starting at row `start`.
+    fn csv_expand(&mut self, start: usize, cx: &mut Context<Self>) {
+        let Some((_, Ok(table))) = self.csv.clone() else {
+            return;
+        };
+        let top = self.csv_list.logical_scroll_top();
+        self.csv_expanded.insert(start);
+        self.csv_refold(&table);
+        self.csv_list.scroll_to(top);
+        cx.notify();
     }
 
     /// `1321-table-file-diff`: the sheets of a table file's diff, worked
@@ -5011,6 +5052,8 @@ impl DiffView {
         });
         let rows_table = table.clone();
         let rows_h = h.clone();
+        let rows_fold = self.csv_fold.clone();
+        let view = cx.entity().downgrade();
         div()
             .id("csv-table")
             .relative()
@@ -5029,9 +5072,25 @@ impl DiffView {
             .child(
                 list(
                     self.csv_list.clone(),
-                    move |ix, _window, cx| match rows_table.diff.rows.get(ix) {
-                        Some(row) => {
-                            crate::csv_table_diff::table_row(&rows_table, ix, row, &rows_h, cx)
+                    move |ix, _window, cx| match rows_fold.get(ix) {
+                        Some(FoldRow::Item(i)) => match rows_table.diff.rows.get(*i) {
+                            Some(row) => {
+                                crate::csv_table_diff::table_row(&rows_table, *i, row, &rows_h, cx)
+                            }
+                            None => div().into_any_element(),
+                        },
+                        Some(FoldRow::Folded { start, end }) => {
+                            let (start, view) = (*start, view.clone());
+                            crate::unchanged_fold::fold_row(
+                                ("csv-fold", start),
+                                end - start,
+                                ("row", "rows"),
+                                true,
+                                move |_, cx| {
+                                    view.update(cx, |this, cx| this.csv_expand(start, cx)).ok();
+                                },
+                                cx,
+                            )
                         }
                         None => div().into_any_element(),
                     },
@@ -5623,6 +5682,16 @@ fn selection_of_lines(lines: &[u32]) -> DiffSelection {
 
 /// `1331-notebook-diff` / `1332-latex-diff`
 mod rich_text;
+
+/// Which of a table diff's rows changed.
+fn csv_changed(table: &CsvTable) -> Vec<bool> {
+    table
+        .diff
+        .rows
+        .iter()
+        .map(|r| r.kind != corvene_core::csv_diff::RowKind::Same)
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {

@@ -9,12 +9,17 @@
 //! GitHub Desktop shows these files as binary (`app/src/ui/diff/
 //! binary-file.tsx`); the diff header's switch also offers their text as a
 //! line diff.
+//!
+//! A section opens scrolled to its first change, and runs of unchanged
+//! blocks fold as the text diff's context does (`corvene_core::fold`).
 
+use std::collections::HashSet;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use corvene_core::document_diff::{Pair, Status, block_rows, block_text, section_list};
+use corvene_core::fold::{FoldRow, FoldRule, fold};
 use corvene_core::{Diff, DocBlob, DocBlock, DocKind, DocRun, ImageBlob};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -48,6 +53,8 @@ enum Row {
         /// An edited block's changed word ranges (old text, new text).
         words: Rc<WordChanges>,
     },
+    /// Unchanged rows `start..end` of the section's full list, folded.
+    Folded { start: usize, end: usize },
 }
 
 pub struct DocumentDiff {
@@ -55,15 +62,21 @@ pub struct DocumentDiff {
     sections: Vec<Pair>,
     /// The shown section (index into `sections`).
     section: usize,
+    /// The shown section's rows, unfolded.
+    all: Rc<Vec<Row>>,
+    /// The list's rows: `all` with runs of unchanged blocks folded.
     rows: Rc<Vec<Row>>,
+    /// The `start` of folds the user opened in this section.
+    expanded: HashSet<usize>,
     list: ListState,
+    weak: WeakEntity<Self>,
     /// The pictures of (previous, current), ready to draw.
     images: Rc<[Vec<Option<Arc<Image>>>; 2]>,
 }
 
 impl DocumentDiff {
     /// `diff` is a `Diff::Document`.
-    pub fn new(diff: Arc<Diff>, _cx: &mut Context<Self>) -> Self {
+    pub fn new(diff: Arc<Diff>, cx: &mut Context<Self>) -> Self {
         let (previous, current) = sides(&diff);
         let sections = section_list(previous, current);
         let section = sections
@@ -78,12 +91,71 @@ impl DocumentDiff {
             diff,
             sections,
             section,
+            all: Rc::new(Vec::new()),
             rows: Rc::new(Vec::new()),
+            expanded: HashSet::new(),
             list: ListState::new(0, ListAlignment::Top, zpx(400.)),
+            weak: cx.weak_entity(),
             images,
         };
         this.build_rows();
+        this.reveal_first_change();
         this
+    }
+
+    /// Fold the section's runs of unchanged blocks (none when nothing in
+    /// it changed); labels always show.
+    fn refold(&mut self) {
+        let changed: Vec<bool> = self
+            .all
+            .iter()
+            .map(|r| match r {
+                Row::Block { pair, .. } => pair.status != Status::Same,
+                _ => true,
+            })
+            .collect();
+        let any_block = self
+            .all
+            .iter()
+            .any(|r| matches!(r, Row::Block { pair, .. } if pair.status != Status::Same));
+        let rows: Vec<Row> = if any_block {
+            fold(&changed, FoldRule::BLOCKS, &self.expanded)
+                .into_iter()
+                .map(|r| match r {
+                    FoldRow::Item(i) => self.all[i].clone(),
+                    FoldRow::Folded { start, end } => Row::Folded { start, end },
+                })
+                .collect()
+        } else {
+            self.all.to_vec()
+        };
+        self.list.reset(rows.len());
+        self.rows = Rc::new(rows);
+    }
+
+    fn expand_fold(&mut self, start: usize, cx: &mut Context<Self>) {
+        let top = self.list.logical_scroll_top();
+        self.expanded.insert(start);
+        self.refold();
+        self.list.scroll_to(top);
+        cx.notify();
+    }
+
+    /// Scroll to the section's first changed block, with a block of
+    /// context above it.
+    fn reveal_first_change(&mut self) {
+        let changed = |r: &Row| matches!(r, Row::Block { pair, .. } if pair.status != Status::Same);
+        let Some(ix) = self.rows.iter().position(changed) else {
+            return;
+        };
+        let ix = match ix.checked_sub(1).map(|p| &self.rows[p]) {
+            Some(Row::Block { .. }) => ix - 1,
+            _ => ix,
+        };
+        self.list.scroll_to(ListOffset {
+            item_ix: ix,
+            offset_in_item: px(0.),
+        });
     }
 
     /// The document diff shown.
@@ -151,14 +223,16 @@ impl DocumentDiff {
                 ),
             );
         }
-        self.list.reset(rows.len());
-        self.rows = Rc::new(rows);
+        self.all = Rc::new(rows);
+        self.expanded.clear();
+        self.refold();
     }
 
     fn select_section(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.sections.len() && ix != self.section {
             self.section = ix;
             self.build_rows();
+            self.reveal_first_change();
             cx.notify();
         }
     }
@@ -739,6 +813,7 @@ struct Rows {
     rows: Rc<Vec<Row>>,
     section: Option<Pair>,
     images: Rc<[Vec<Option<Arc<Image>>>; 2]>,
+    this: WeakEntity<DocumentDiff>,
 }
 
 impl Rows {
@@ -748,6 +823,19 @@ impl Rows {
             return div().into_any_element();
         };
         let (pair, notes, words) = match row {
+            Row::Folded { start, end } => {
+                let (start, this) = (*start, self.this.clone());
+                return crate::unchanged_fold::fold_row(
+                    ("document-fold", start),
+                    end - start,
+                    ("block", "blocks"),
+                    false,
+                    move |_, cx| {
+                        this.update(cx, |v, cx| v.expand_fold(start, cx)).ok();
+                    },
+                    cx,
+                );
+            }
             Row::Label(text) => {
                 return div()
                     .w_full()
@@ -844,6 +932,7 @@ impl DocumentDiff {
             rows: self.rows.clone(),
             section: self.sections.get(self.section).copied(),
             images: self.images.clone(),
+            this: self.weak.clone(),
         });
         let tabs = self.tabs(cx);
         let summary = self.summary(cx);
