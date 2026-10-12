@@ -198,6 +198,8 @@ impl Dispatcher {
             flags.bool(crate::flags::ids::TENSOR_DIFF),
             flags.bool(crate::flags::ids::SIGNING_MATERIAL_DIFF),
         );
+        // `1350`-`1357`: converted diffs, package and image archives
+        crate::converted::sync_flags(&flags);
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -7295,6 +7297,22 @@ impl Dispatcher {
     /// Preview switch.
     pub fn set_markdown_diff_view(view: crate::persistence::MarkdownDiffView, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.markdown_diff_view = view);
+    }
+
+    /// Corvene `1352`-`1355`: the diff header's switch between a converted
+    /// view (Table, Picture, Map, Message) and git's own diff, one setting
+    /// per kind.
+    pub fn set_converted_source(
+        kind: corvene_models::ConvertedKind,
+        source: bool,
+        cx: &mut dyn Host,
+    ) {
+        Self::update_settings(cx, |s| {
+            s.converted_source.retain(|k| *k != kind);
+            if source {
+                s.converted_source.push(kind);
+            }
+        });
     }
 
     /// Corvene `1338-lockfile-diff` / `1339-pretty-diff` /

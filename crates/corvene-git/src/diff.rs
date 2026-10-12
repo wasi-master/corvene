@@ -59,6 +59,49 @@ pub fn working_directory_diff(
     as_text: bool,
     cancel: Option<&CancelToken>,
 ) -> Result<Diff> {
+    let mut old_side = None;
+    let diff = working_directory_diff_of(
+        git.clone(),
+        workdir,
+        file,
+        hide_whitespace,
+        renamed_against_head,
+        as_text,
+        cancel,
+        &mut old_side,
+    )?;
+    // `1350`-`1355`: a file read into another form, next to git's diff
+    if as_text || file.status.submodule || !crate::converted::may_convert(&file.path) {
+        return Ok(diff);
+    }
+    let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+    let (old_rev, old_path) = match &old_side {
+        Some((rev, path)) => (rev.clone(), path.clone()),
+        None => ("HEAD".to_string(), previous_path.to_string()),
+    };
+    Ok(crate::converted::converted_diff(
+        git.clone(),
+        &file.path,
+        file.status.kind,
+        || std::fs::read(workdir.join(&file.path)).ok(),
+        || blob_bytes(git.clone(), workdir, &old_rev, &old_path).ok(),
+        diff,
+    ))
+}
+
+/// [`working_directory_diff`] before conversions; `old_out` receives the
+/// blob the old side came from.
+#[allow(clippy::too_many_arguments)]
+fn working_directory_diff_of(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &WorkingDirectoryFileChange,
+    hide_whitespace: bool,
+    renamed_against_head: bool,
+    as_text: bool,
+    cancel: Option<&CancelToken>,
+    old_out: &mut Option<(String, String)>,
+) -> Result<Diff> {
     let mut args = vec!["diff"];
     if hide_whitespace {
         args.push("-w");
@@ -166,6 +209,7 @@ pub fn working_directory_diff(
             &out.stdout,
         ));
     }
+    *old_out = old_side.clone();
     let diff = parse_raw_diff_with_warnings(&out.stdout, &out.stderr);
     // `1335-video-diff` / `1336-audio-diff`: binary, or an LFS pointer's text
     if crate::media_file::media_diff_kind(&file.path).is_some()
@@ -1202,6 +1246,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         pdf_text: false,
         document_text: false,
         derived_text: false,
+        decoded_from: None,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

@@ -236,7 +236,10 @@ impl Dispatcher {
                 ids::TENSOR_DIFF,
                 ids::SIGNING_MATERIAL_DIFF,
             ]
+            .into_iter()
+            .chain(crate::converted::FLAGS)
             .map(|id| flags.bool(id))
+            .collect::<Vec<_>>()
         };
         if reads_diffs(&now) != reads_diffs(previous) {
             corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
@@ -259,6 +262,7 @@ impl Dispatcher {
                 now.bool(ids::TENSOR_DIFF),
                 now.bool(ids::SIGNING_MATERIAL_DIFF),
             );
+            crate::converted::sync_flags(&now);
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);

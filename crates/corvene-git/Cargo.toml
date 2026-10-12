@@ -7,6 +7,9 @@ description = "Corvene git engine: gitoxide reads, git CLI writes"
 
 [dependencies]
 corvene-models.workspace = true
+# flags 1350-1355: compiled code, serialized data, translations, diagrams,
+# maps and mail read into diffable forms
+corvene-convert.workspace = true
 # flags 1329-font-diff / 1330-font-source-preview: sniffing, UFO components
 corvene-fonts.workspace = true
 gix.workspace = true
@@ -35,6 +38,10 @@ ruzstd = "0.9"
 crc32fast = "1"
 thiserror.workspace = true
 tracing.workspace = true
+# flag 1356-package-archive-diff: 7-Zip archives; flag 1357-disk-image-diff:
+# the property list of an Apple disk image
+sevenz-rust2 = { version = "0.20", default-features = false }
+plist = { version = "1", default-features = false }
 calamine = "0.36.1"
 # flags 1338-lockfile-diff, 1339-pretty-diff, 1340-tensor-diff,
 # 1341-signing-material-diff

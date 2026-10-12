@@ -16,6 +16,7 @@
 //! demand and never written anywhere.
 
 mod compare;
+mod more;
 mod read;
 
 use std::collections::VecDeque;
@@ -60,6 +61,35 @@ pub fn read_archives() -> bool {
     READ_ARCHIVES.load(Ordering::Relaxed)
 }
 
+/// Set by the dispatcher from `1356-package-archive-diff`.
+static READ_PACKAGES: AtomicBool = AtomicBool::new(false);
+/// Set by the dispatcher from `1357-disk-image-diff`.
+static READ_DISK_IMAGES: AtomicBool = AtomicBool::new(false);
+
+/// Turn the package formats (deb, rpm, ar, cpio, 7z, xar/pkg) and the disk
+/// and container images (ISO, DMG, Docker/OCI tarballs) on or off.
+pub fn set_read_more_archives(packages: bool, disk_images: bool) {
+    READ_PACKAGES.store(packages, Ordering::Relaxed);
+    READ_DISK_IMAGES.store(disk_images, Ordering::Relaxed);
+}
+
+fn read_packages() -> bool {
+    READ_PACKAGES.load(Ordering::Relaxed)
+}
+
+pub(crate) fn read_disk_images() -> bool {
+    READ_DISK_IMAGES.load(Ordering::Relaxed)
+}
+
+/// Whether a format of [`more`] is on.
+fn reads_kind(kind: more::Kind) -> bool {
+    use more::Kind::*;
+    match kind {
+        Ar | Rpm | Cpio | SevenZip | Xar | Pbzx => read_packages(),
+        Iso | Dmg => read_disk_images(),
+    }
+}
+
 /// The archive format a path's extension names.
 pub fn archive_format(path: &str) -> Option<ArchiveFormat> {
     // `1324-document-diff`: an EPUB file is shown as a book
@@ -67,11 +97,36 @@ pub fn archive_format(path: &str) -> Option<ArchiveFormat> {
         return None;
     }
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    // an installer package's payload (a compressed cpio archive)
+    if name == "payload" && read_packages() && path.ends_with("Payload") {
+        return Some(ArchiveFormat::Cpio);
+    }
     let (stem, ext) = name.rsplit_once('.')?;
     if stem.is_empty() {
         return None;
     }
     let tarred = stem.ends_with(".tar");
+    if read_packages() {
+        match ext {
+            "deb" | "udeb" | "ddeb" | "ipk" => return Some(ArchiveFormat::Deb),
+            "rpm" | "srpm" | "drpm" => return Some(ArchiveFormat::Rpm),
+            "cpio" | "cpgz" => return Some(ArchiveFormat::Cpio),
+            "7z" => return Some(ArchiveFormat::SevenZip),
+            "pkg" | "mpkg" | "xar" | "xip" | "safariextz" => return Some(ArchiveFormat::Xar),
+            "ar" => return Some(ArchiveFormat::Ar),
+            "appx" | "msix" | "appxbundle" | "msixbundle" | "snupkg" | "apks" | "xapk" | "sar"
+            | "conda" | "mar" | "jmod" => return Some(ArchiveFormat::Zip),
+            "gem" => return Some(ArchiveFormat::Tar),
+            _ => {}
+        }
+    }
+    if read_disk_images() {
+        match ext {
+            "iso" => return Some(ArchiveFormat::Iso),
+            "dmg" => return Some(ArchiveFormat::Dmg),
+            _ => {}
+        }
+    }
     Some(match ext {
         "zip" | "jar" | "war" | "ear" | "apk" | "aar" | "aab" | "whl" | "nupkg" | "vsix"
         | "xpi" | "ipa" | "crx" | "epub" | "egg" | "kmz" | "sublime-package" => ArchiveFormat::Zip,
@@ -540,6 +595,8 @@ pub fn entry_diff(
         ),
         other => other,
     };
+    // `1350`-`1355`: a class file in a jar, a property list in an app
+    let diff = crate::converted::entry_converted(git, path, old.as_deref(), new.as_deref(), diff);
     let text = matches!(diff, Diff::Text { .. } | Diff::LargeText { .. });
     Ok(EntryDiff {
         new_lines: new.filter(|_| text).map(|b| crate::diff::file_lines(&b)),

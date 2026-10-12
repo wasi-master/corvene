@@ -222,6 +222,11 @@ pub struct Settings {
     /// (the diff header's Source / Preview switch).
     #[serde(default)]
     pub markdown_diff_view: MarkdownDiffView,
+    /// Corvene `1352`-`1355`: the kinds of converted diffs shown as git's
+    /// own diff (the diff header's Source side) rather than their table,
+    /// picture, map or message.
+    #[serde(default)]
+    pub converted_source: Vec<corvene_models::ConvertedKind>,
     /// Corvene `1338-lockfile-diff`: Dependencies or Source.
     #[serde(default)]
     pub lockfile_diff_view: InspectDiffView,
@@ -694,6 +699,7 @@ impl Default for Settings {
             notebook_filters: crate::notebook_diff::NotebookFilters::default(),
             latex_diff_view: LatexDiffView::Rendered,
             markdown_diff_view: MarkdownDiffView::Source,
+            converted_source: Vec::new(),
             lockfile_diff_view: InspectDiffView::Read,
             pretty_diff_view: InspectDiffView::Read,
             signing_diff_view: InspectDiffView::Read,

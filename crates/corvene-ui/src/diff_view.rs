@@ -4027,7 +4027,8 @@ impl DiffView {
             | Diff::Lockfile { .. }
             | Diff::Pretty { .. }
             | Diff::Tensors { .. }
-            | Diff::Signing { .. } => self.rich_panel(snap, cx),
+            | Diff::Signing { .. }
+            | Diff::Converted { .. } => self.rich_panel(snap, cx),
         })
     }
 
@@ -4590,6 +4591,19 @@ impl DiffView {
                     "This is the text on the pages of the PDF file. Its lines cannot be \
                      selected one by one."
                         .into(),
+                ])
+                .into_any_element(),
+            );
+        }
+        // `1350`-`1355`: text decoded from a compiled, serialized or mail file
+        if let Some(format) = &warnings.decoded_from {
+            items.push(
+                paragraph(vec![
+                    format!(
+                        "This is the {format} decoded by Corvene. Its lines cannot be selected \
+                         one by one."
+                    )
+                    .into(),
                 ])
                 .into_any_element(),
             );

@@ -314,7 +314,8 @@ fn part_of<'a>(
         | Diff::Lockfile { source, .. }
         | Diff::Pretty { source, .. }
         | Diff::Tensors { source, .. }
-        | Diff::Signing { source, .. } => *source,
+        | Diff::Signing { source, .. }
+        | Diff::Converted { source, .. } => *source,
         diff => diff,
     };
     let (hunks, utf16) = match &diff {

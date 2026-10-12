@@ -14,6 +14,11 @@
 //! `1341-signing-material-diff`: a lockfile's dependency table, a minified
 //! file's pretty printed diff (derived text, not stageable), a model
 //! file's tensors and a key's fields, each with git's diff as Source.
+//!
+//! Corvene `1350`-`1355` (`Diff::Converted`): a converted file's view (its
+//! decoded text, translation table, diagram or map pictures, mail) takes
+//! the diff's place, so the text, table and image views draw it; a file
+//! git diffs as text gets a view / Source switch.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -38,6 +43,7 @@ const JSON_GENERATION: u64 = 1 << 60;
 const SCRIPT_GENERATION: u64 = 1 << 59;
 const LATEX_PAGES_GENERATION: u64 = 1 << 58;
 const PRETTY_GENERATION: u64 = 1 << 57;
+const CONVERTED_GENERATION: u64 = 1 << 56;
 
 /// A LaTeX diff and its pages (or why they could not be drawn).
 type PagesOf = (Arc<Diff>, Result<Arc<Diff>, String>);
@@ -54,6 +60,9 @@ pub(super) struct RichPane {
     /// A minified file's pretty printed diff as its own `Arc`, with the
     /// diff it came from.
     pretty: RefCell<Option<(Arc<Diff>, Arc<Diff>)>>,
+    /// A converted file's view as its own `Arc`, with the diff it came
+    /// from.
+    converted: RefCell<Option<(Arc<Diff>, Arc<Diff>)>>,
     /// git's diff of the shown file as its own `Arc` (for the JSON / Text
     /// view), with the diff it came from.
     text: RefCell<Option<(Arc<Diff>, Arc<Diff>)>>,
@@ -103,6 +112,7 @@ pub(super) fn is_rich(diff: &Diff) -> bool {
             | Diff::Pretty { .. }
             | Diff::Tensors { .. }
             | Diff::Signing { .. }
+            | Diff::Converted { .. }
     )
 }
 
@@ -114,7 +124,8 @@ fn source_of(diff: &Diff) -> Option<&Diff> {
         | Diff::Lockfile { source, .. }
         | Diff::Pretty { source, .. }
         | Diff::Tensors { source, .. }
-        | Diff::Signing { source, .. } => Some(source),
+        | Diff::Signing { source, .. }
+        | Diff::Converted { source, .. } => Some(source),
         _ => None,
     }
 }
@@ -196,6 +207,15 @@ fn effective(diff: &Diff, s: &corvene_core::AppState) -> Effective {
         {
             Effective::Text
         }
+        Diff::Converted { kind, .. } if !s.flags.bool(corvene_core::converted::flag_of(*kind)) => {
+            Effective::Text
+        }
+        Diff::Converted { kind, source, .. }
+            if source.hunks().is_some() && s.settings.converted_source.contains(kind) =>
+        {
+            Effective::Text
+        }
+        Diff::Converted { .. } => Effective::Converted,
         _ => Effective::Rendered,
     }
 }
@@ -208,6 +228,8 @@ enum Effective {
     Pages,
     /// `1339-pretty-diff`: the pretty printed diff.
     Pretty,
+    /// `1350`-`1355`: a converted file's view.
+    Converted,
 }
 
 /// The header's switch while the diff is a notebook or LaTeX diff.
@@ -321,8 +343,43 @@ pub(super) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl Into
                 cx,
             ))
         }
+        Diff::Converted { kind, source, .. }
+            if source.hunks().is_some()
+                && s.flags.bool(corvene_core::converted::flag_of(*kind)) =>
+        {
+            Some(converted_switch(
+                *kind,
+                s.settings.converted_source.contains(kind),
+                cx,
+            ))
+        }
         _ => None,
     }
+}
+
+/// `1352`-`1355`: the view / Source switch of a converted file git diffs
+/// as text (one setting per kind).
+fn converted_switch(kind: corvene_core::ConvertedKind, source: bool, cx: &App) -> Stateful<Div> {
+    use corvene_core::ConvertedKind as K;
+    let ids: [&'static str; 2] = match kind {
+        K::Compiled => ["converted-view-compiled", "converted-view-compiled-source"],
+        K::Serialized => [
+            "converted-view-serialized",
+            "converted-view-serialized-source",
+        ],
+        K::Translation => ["converted-view-table", "converted-view-table-source"],
+        K::Diagram => ["converted-view-picture", "converted-view-picture-source"],
+        K::Map => ["converted-view-map", "converted-view-map-source"],
+        K::Email => ["converted-view-message", "converted-view-message-source"],
+    };
+    view_switch_n(
+        "converted-view-switch",
+        &ids,
+        &[kind.view_label(), "Source"],
+        usize::from(source),
+        move |ix, cx| Dispatcher::set_converted_source(kind, ix == 1, cx),
+        cx,
+    )
 }
 
 /// A read view / Source switch (`1338-lockfile-diff`, `1339-pretty-diff`,
@@ -374,8 +431,8 @@ impl DiffView {
             return None;
         }
         let s = self.state.read(cx);
-        // a stack shows the file's own diff
-        let view = if self.stacked_path.is_some() {
+        // a stack shows the file's own diff (a converted file its view)
+        let view = if self.stacked_path.is_some() && !matches!(**diff, Diff::Converted { .. }) {
             Effective::Text
         } else {
             effective(diff, s)
@@ -421,6 +478,21 @@ impl DiffView {
                 cache
                     .as_ref()
                     .map(|(_, pretty)| (pretty.clone(), PRETTY_GENERATION, false))
+            }
+            Effective::Converted => {
+                let Diff::Converted { view, .. } = &**diff else {
+                    return None;
+                };
+                let mut cache = self.rich.converted.borrow_mut();
+                let fresh = cache
+                    .as_ref()
+                    .is_some_and(|(from, _)| Arc::ptr_eq(from, diff));
+                if !fresh {
+                    *cache = Some((diff.clone(), Arc::new((**view).clone())));
+                }
+                cache
+                    .as_ref()
+                    .map(|(_, view)| (view.clone(), CONVERTED_GENERATION, false))
             }
         }
     }
@@ -621,7 +693,9 @@ impl DiffView {
                 }
                 _ => self.panel("Compiling both versions of the document…", cx),
             },
-            Effective::Text | Effective::Pretty => self.panel("This file has changed.", cx),
+            Effective::Text | Effective::Pretty | Effective::Converted => {
+                self.panel("This file has changed.", cx)
+            }
         }
     }
 }

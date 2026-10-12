@@ -31,7 +31,16 @@ pub(crate) struct OpenArchive {
     data: Data,
 }
 
-enum Data {
+/// How an entry of an [`Data::Encoded`] archive is stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Codec {
+    Stored,
+    Zlib,
+    Bzip2,
+    Xz,
+}
+
+pub(crate) enum Data {
     Zip {
         archive: zip::ZipArchive<Cursor<Arc<[u8]>>>,
         index: HashMap<String, usize>,
@@ -44,10 +53,128 @@ enum Data {
     Single {
         contents: Option<Arc<[u8]>>,
     },
+    /// Contents unpacked while listing (`1356-package-archive-diff`,
+    /// `1357-disk-image-diff`); `why` explains a missing entry.
+    Mem {
+        files: HashMap<String, Arc<[u8]>>,
+        why: Option<String>,
+    },
+    /// Entries stored at offsets of `raw` (ar, xar, ISO 9660).
+    Encoded {
+        raw: Arc<[u8]>,
+        map: HashMap<String, (usize, usize, Codec)>,
+    },
+    /// Parts of one archive, each under a path prefix (a Debian package's
+    /// control and data archives).
+    Multi(Vec<(String, Data)>),
+}
+
+impl Data {
+    /// The contents of the file at `path` (no listing checks).
+    pub(crate) fn read_plain(&self, path: &str) -> Result<Arc<[u8]>, String> {
+        match self {
+            Data::Zip { archive, index } => {
+                let ix = *index
+                    .get(path)
+                    .ok_or_else(|| "The entry is not in the archive.".to_string())?;
+                let mut archive = archive.clone();
+                let mut file = archive.by_index(ix).map_err(|e| e.to_string())?;
+                Ok(Arc::from(read_capped(&mut file, MAX_ENTRY_BYTES)?))
+            }
+            Data::Tar {
+                raw,
+                compressor,
+                kept,
+            } => {
+                if let Some(bytes) = kept.get(path) {
+                    return Ok(bytes.clone());
+                }
+                let reader: Box<dyn Read + '_> = match compressor {
+                    Some(c) => c.decoder(raw)?,
+                    None => Box::new(&raw[..]),
+                };
+                tar_entry(reader, path)
+            }
+            Data::Single { contents } => contents.clone().ok_or_else(too_large),
+            Data::Mem { files, why } => files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| why.clone().unwrap_or_else(too_large)),
+            Data::Encoded { raw, map } => {
+                let &(start, len, codec) = map
+                    .get(path)
+                    .ok_or_else(|| "The entry is not in the archive.".to_string())?;
+                let stored = raw
+                    .get(start..start.saturating_add(len))
+                    .ok_or_else(|| "The entry lies outside the archive.".to_string())?;
+                let mut reader: Box<dyn Read + '_> = match codec {
+                    Codec::Stored => Box::new(stored),
+                    Codec::Zlib => Box::new(flate2::read::ZlibDecoder::new(stored)),
+                    Codec::Bzip2 => Box::new(bzip2::read::MultiBzDecoder::new(stored)),
+                    Codec::Xz => Box::new(lzma_rust2::XzReader::new(stored, true)),
+                };
+                Ok(Arc::from(read_capped(&mut reader, MAX_ENTRY_BYTES)?))
+            }
+            Data::Multi(parts) => {
+                let mut last = Err("The entry is not in the archive.".to_string());
+                for (prefix, data) in parts {
+                    if let Some(rest) = path.strip_prefix(prefix.as_str()) {
+                        match data.read_plain(rest) {
+                            Ok(b) => return Ok(b),
+                            Err(e) => last = Err(e),
+                        }
+                    }
+                }
+                last
+            }
+        }
+    }
+
+    fn cost(&self) -> usize {
+        match self {
+            Data::Zip { archive, .. } => archive.clone().into_inner().get_ref().len(),
+            Data::Tar { raw, kept, .. } => {
+                raw.len() + kept.values().map(|v| v.len()).sum::<usize>()
+            }
+            Data::Single { contents } => contents.as_ref().map_or(0, |c| c.len()),
+            Data::Mem { files, .. } => files.values().map(|v| v.len()).sum(),
+            Data::Encoded { raw, map } => raw.len() + map.len() * 48,
+            Data::Multi(parts) => parts.iter().map(|(_, d)| d.cost()).sum(),
+        }
+    }
+}
+
+/// A listed archive part: its entries, how to read them, whether some were
+/// left out.
+pub(crate) type Listed = (Vec<(String, ArchiveEntryMeta)>, Data, bool);
+
+/// A tar archive (compressed or not) held in memory, listed: a layer of a
+/// container image, the data archive of a Debian package.
+pub(crate) fn list_tar_member(bytes: Arc<[u8]>) -> Result<Listed, String> {
+    let compressor = Compressor::sniff(&bytes);
+    let reader: Box<dyn Read + '_> = match compressor {
+        Some(c) => c.decoder(&bytes)?,
+        None => Box::new(&bytes[..]),
+    };
+    let (entries, kept, truncated) = read_tar(reader)?;
+    Ok((
+        entries,
+        Data::Tar {
+            raw: bytes.clone(),
+            compressor,
+            kept,
+        },
+        truncated,
+    ))
+}
+
+/// Days since 1970-01-01 of a civil date.
+pub(crate) fn civil_days(y: i64, m: i64, d: i64) -> i64 {
+    days_from_civil(y, m, d)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Compressor {
+pub(crate) enum Compressor {
     Gzip,
     Bzip2,
     Xz,
@@ -261,6 +388,11 @@ impl OpenArchive {
         {
             return Self::parse_zip(bytes, size);
         }
+        // `1356-package-archive-diff` / `1357-disk-image-diff`
+        if let Some(kind) = super::more::sniff(&bytes).filter(|k| super::reads_kind(*k)) {
+            let parsed = super::more::parse(kind, bytes)?;
+            return Ok(Self::from_parsed(parsed, size));
+        }
         if let Some(compressor) = Compressor::sniff(&bytes) {
             // the first block decides between a tar archive and one file
             let tar_named = matches!(
@@ -278,9 +410,28 @@ impl OpenArchive {
             let got = read_fully(&mut *decoder, &mut head).map_err(|e| e.to_string())?;
             head.truncate(got);
             drop(decoder);
+            if super::more::is_cpio(&head) && super::reads_kind(super::more::Kind::Cpio) {
+                let mut decoded = Vec::new();
+                compressor
+                    .decoder(&bytes)?
+                    .take(MAX_UNPACKED)
+                    .read_to_end(&mut decoded)
+                    .map_err(|e| e.to_string())?;
+                let parsed = super::more::compressed_cpio(&decoded)?;
+                return Ok(Self::from_parsed(parsed, size));
+            }
             if tar_named || is_tar_header(&head) {
                 let decoder = compressor.decoder(&bytes)?;
                 let (entries, kept, truncated) = read_tar(decoder)?;
+                if super::more::is_image(&entries) && super::read_disk_images() {
+                    let data = Data::Tar {
+                        raw: bytes.clone(),
+                        compressor: Some(compressor),
+                        kept,
+                    };
+                    let parsed = super::more::image(&|p: &str| data.read_plain(p))?;
+                    return Ok(Self::from_parsed(parsed, size));
+                }
                 return Ok(OpenArchive {
                     format: compressor.tar_format(),
                     bytes: size,
@@ -299,6 +450,15 @@ impl OpenArchive {
         }
         if expected == Some(ArchiveFormat::Tar) || is_tar_header(&bytes) {
             let (entries, kept, truncated) = read_tar(&bytes[..])?;
+            if super::more::is_image(&entries) && super::read_disk_images() {
+                let data = Data::Tar {
+                    raw: bytes.clone(),
+                    compressor: None,
+                    kept,
+                };
+                let parsed = super::more::image(&|p: &str| data.read_plain(p))?;
+                return Ok(Self::from_parsed(parsed, size));
+            }
             return Ok(OpenArchive {
                 format: ArchiveFormat::Tar,
                 bytes: size,
@@ -317,6 +477,18 @@ impl OpenArchive {
             Some(format) => format!("It is not a readable {} file.", format.label()),
             None => "It is not an archive Corvene can read.".into(),
         })
+    }
+
+    fn from_parsed(parsed: super::more::Parsed, size: u64) -> OpenArchive {
+        OpenArchive {
+            format: parsed.format,
+            bytes: size,
+            entries: parsed.entries,
+            truncated: parsed.truncated,
+            comment: parsed.comment,
+            single: None,
+            data: parsed.data,
+        }
     }
 
     fn parse_zip(bytes: Arc<[u8]>, size: u64) -> Result<OpenArchive, String> {
@@ -463,15 +635,7 @@ impl OpenArchive {
 
     /// The memory this archive holds while cached.
     pub fn cost(&self) -> usize {
-        let entries = self.entries.len() * 160;
-        entries
-            + match &self.data {
-                Data::Zip { archive, .. } => archive.clone().into_inner().get_ref().len(),
-                Data::Tar { raw, kept, .. } => {
-                    raw.len() + kept.values().map(|v| v.len()).sum::<usize>()
-                }
-                Data::Single { contents } => contents.as_ref().map_or(0, |c| c.len()),
-            }
+        self.entries.len() * 160 + self.data.cost()
     }
 
     /// The listed entry at `path`.
@@ -511,21 +675,7 @@ impl OpenArchive {
                 })?;
                 Ok(Arc::from(read_capped(&mut file, MAX_ENTRY_BYTES)?))
             }
-            Data::Tar {
-                raw,
-                compressor,
-                kept,
-            } => {
-                if let Some(bytes) = kept.get(path) {
-                    return Ok(bytes.clone());
-                }
-                let reader: Box<dyn Read + '_> = match compressor {
-                    Some(c) => c.decoder(raw)?,
-                    None => Box::new(&raw[..]),
-                };
-                tar_entry(reader, path)
-            }
-            Data::Single { contents } => contents.clone().ok_or_else(too_large),
+            data => data.read_plain(path),
         }
     }
 }

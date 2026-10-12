@@ -9068,6 +9068,160 @@ registry! {
         code: &["crates/corvene-keys/src/lib.rs", "crates/corvene-git/src/inspect.rs", "crates/corvene-ui/src/signing_diff.rs"],
     },
 
+    /// Class files, Python bytecode, WebAssembly and native binaries shown
+    /// decoded.
+    COMPILED_CODE_DIFF = 1350 "compiled-code-diff" {
+        title: "Compiled code diffs",
+        summary: "A changed compiled file is decoded instead of \"This binary file has \
+                  changed.\": Java class files as a javap-like listing (members, signatures, \
+                  bytecode with resolved constants and labels instead of offsets), Python \
+                  bytecode (.pyc) as its code objects' names, constants and variables, \
+                  WebAssembly modules in the text format, and Mach-O, ELF and PE binaries, \
+                  object files and static libraries as their linked libraries, sections with \
+                  sizes and defined and imported symbols (Rust names demangled). Also inside \
+                  archives (a class file in a jar).",
+        ghd_behaviour: "Compiled files are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/compiled/mod.rs", "crates/corvene-git/src/converted.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// Binary property lists, MessagePack, CBOR, BSON, protobuf and
+    /// bencode shown decoded.
+    SERIALIZED_DATA_DIFF = 1351 "serialized-data-diff" {
+        title: "Serialized data diffs",
+        summary: "A changed binary data file is decoded into text: binary property lists \
+                  (.plist, .bplist) as XML property lists, MessagePack, CBOR and BSON as \
+                  indented JSON-like text with their extra types spelled out, bencoded files \
+                  (.torrent) the same way, and protocol buffer messages (.pb, .binpb) as \
+                  protoc --decode_raw prints them. Also inside archives (an Info.plist in an \
+                  app's zip).",
+        ghd_behaviour: "These files are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/serialized/mod.rs", "crates/corvene-git/src/converted.rs"],
+    },
+
+    /// String tables shown as a table with a row per key.
+    TRANSLATION_DIFF = 1352 "translation-diff" {
+        title: "Translation file tables",
+        summary: "A changed string table gets a Table / Source switch in the diff header. \
+                  Table shows one row per key with the changed cells marked, and a column per \
+                  language where the file holds several: gettext .po/.pot and compiled .mo, \
+                  Apple .strings (UTF-16 or binary too), .stringsdict and Xcode .xcstrings \
+                  catalogs, XLIFF 1.2 and 2.0, Android values*/strings.xml, .NET .resx, Qt \
+                  .ts and .qm, Flutter .arb, Java .properties and nested JSON message files \
+                  in a locales or i18n folder. Source is the usual line diff.",
+        ghd_behaviour: "String tables have the text diff only (compiled .mo and .qm files are \
+                        binary).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/translation/mod.rs", "crates/corvene-git/src/converted.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// draw.io, Excalidraw, Graphviz and Mermaid files drawn.
+    DIAGRAM_DIFF = 1353 "diagram-diff" {
+        title: "Diagram pictures",
+        summary: "A changed diagram gets a Picture / Source switch in the diff header. Picture \
+                  draws both versions for the image diff's 2-up, swipe and onion skin views: \
+                  draw.io files (.drawio, .dio, every page, compressed or not) and Excalidraw \
+                  drawings from their stored geometry, Graphviz graphs (.dot, .gv) and \
+                  Mermaid flowcharts, sequence, class, state and ER diagrams, pie and gantt \
+                  charts and mind maps (.mmd, .mermaid) with Corvene's own layout, so \
+                  positions differ from what dot or Mermaid draw. Source is the usual line \
+                  diff.",
+        ghd_behaviour: "Diagram files have the text diff only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/diagram/mod.rs", "crates/corvene-git/src/converted.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// GeoJSON, TopoJSON, KML, GPX, shapefiles and GeoPackages drawn as
+    /// maps.
+    MAP_DIFF = 1354 "map-diff" {
+        title: "Map pictures of geographic files",
+        summary: "A changed geographic file gets a Map / Source switch in the diff header \
+                  (binary formats show the map only). Map draws both versions on the same \
+                  projection and bounds, so the image diff's swipe and onion skin line them \
+                  up, with features found on one side only colored: added green, removed \
+                  red. Reads GeoJSON, TopoJSON, KML and KMZ, GPX tracks, shapefiles (.shp) \
+                  and GeoPackages (.gpkg). No base map is downloaded; longitude and latitude \
+                  data gets a graticule.",
+        ghd_behaviour: "Geographic files have the text diff only, or are binary files.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/geo/mod.rs", "crates/corvene-git/src/converted.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// Mail shown decoded.
+    EMAIL_DIFF = 1355 "email-diff" {
+        title: "Email message diffs",
+        summary: "A changed email file gets a Message / Source switch in the diff header \
+                  (Outlook files show the message only). Message shows the headers that \
+                  matter (sender, recipients, date, subject, thread ids) decoded, the body \
+                  decoded from base64 or quoted-printable and its charset (an HTML-only body \
+                  as text), and the attachments with their type, size and a short hash. Reads \
+                  .eml, Apple Mail .emlx, .mbox (a section per message) and Outlook .msg.",
+        ghd_behaviour: "Mail files have the text diff only (Outlook files are binary).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/email/mod.rs", "crates/corvene-git/src/converted.rs", "crates/corvene-ui/src/diff_view/rich_text.rs"],
+    },
+
+    /// More package formats in the archive diff.
+    PACKAGE_ARCHIVE_DIFF = 1356 "package-archive-diff" {
+        title: "Package archives as folders",
+        summary: "With archive diffs on, packages open as folders too: Debian packages \
+                  (.deb, control files under DEBIAN/ and the data at the root), RPM packages \
+                  (their payload plus a .rpm-header entry with the name, version, \
+                  dependencies and scripts), cpio, 7-Zip and ar archives, macOS installer \
+                  packages and other xar archives (their Payload opens as an archive of its \
+                  own) and Windows app packages (.appx, .msix).",
+        ghd_behaviour: "Packages are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/archive/more.rs"],
+    },
+
+    /// Disc, disk and container images in the archive diff.
+    DISK_IMAGE_DIFF = 1357 "disk-image-diff" {
+        title: "Disk and container images as folders",
+        summary: "With archive diffs on, ISO 9660 disc images open as folders (Rock Ridge and \
+                  Joliet names), Apple disk images (.dmg) list their partitions with sizes, \
+                  checksums and compression (the files inside HFS+ or APFS volumes are not \
+                  read), and Docker or OCI images saved as tar archives show their layers \
+                  merged into one file tree (deleted files removed) with the image \
+                  configuration as .image/config.json.",
+        ghd_behaviour: "Images are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/archive/more.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -10,6 +10,7 @@ pub mod commit;
 pub mod commit_template;
 pub mod config;
 pub mod config_lock;
+pub mod converted;
 pub mod credential;
 pub mod description;
 pub mod detect;

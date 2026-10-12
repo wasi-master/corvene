@@ -208,6 +208,10 @@ pub fn commit_detail(s: &AppState, repo: u64) -> Option<CommitDetailVm> {
         Some(Diff::Lockfile { .. } | Diff::Pretty { .. }) => DiffKindVm::Text,
         Some(Diff::Signing { source, .. }) if source.hunks().is_some() => DiffKindVm::Text,
         Some(Diff::Tensors { .. } | Diff::Signing { .. }) => DiffKindVm::Binary,
+        // `1350`-`1355`: git's own diff (the Android app has no converted
+        // views yet)
+        Some(Diff::Converted { source, .. }) if source.hunks().is_some() => DiffKindVm::Text,
+        Some(Diff::Converted { .. }) => DiffKindVm::Binary,
     };
     Some(CommitDetailVm {
         repo,

@@ -351,7 +351,8 @@ fn apply_hunks_to_index(
         | Diff::Lockfile { source, .. }
         | Diff::Pretty { source, .. }
         | Diff::Tensors { source, .. }
-        | Diff::Signing { source, .. } => {
+        | Diff::Signing { source, .. }
+        | Diff::Converted { source, .. } => {
             return apply_hunks_to_index(git, workdir, file, source, options);
         }
         Diff::Binary

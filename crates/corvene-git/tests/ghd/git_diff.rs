@@ -139,6 +139,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Pretty { .. } => "Pretty",
         Diff::Tensors { .. } => "Tensors",
         Diff::Signing { .. } => "Signing",
+        Diff::Converted { .. } => "Converted",
     }
 }
 

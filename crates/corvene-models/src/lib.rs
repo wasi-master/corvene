@@ -2043,6 +2043,25 @@ pub enum ArchiveFormat {
     Bzip2,
     Xz,
     Zstd,
+    /// Corvene `1356-package-archive-diff`: a Unix `ar` archive (static
+    /// libraries; the container of a Debian package).
+    Ar,
+    /// A Debian package: its control files and data archive, flattened.
+    Deb,
+    /// An RPM package: its header fields and payload.
+    Rpm,
+    /// A cpio archive (newc, odc or binary).
+    Cpio,
+    /// A 7-Zip archive.
+    SevenZip,
+    /// A xar archive (macOS installer packages, `.xip`).
+    Xar,
+    /// Corvene `1357-disk-image-diff`: an ISO 9660 disc image.
+    Iso,
+    /// An Apple disk image: its partitions only (no file list).
+    Dmg,
+    /// A Docker or OCI image saved as a tar archive, its layers merged.
+    OciImage,
 }
 
 impl ArchiveFormat {
@@ -2059,6 +2078,15 @@ impl ArchiveFormat {
             ArchiveFormat::Bzip2 => "BZIP2",
             ArchiveFormat::Xz => "XZ",
             ArchiveFormat::Zstd => "ZSTD",
+            ArchiveFormat::Ar => "AR",
+            ArchiveFormat::Deb => "DEB",
+            ArchiveFormat::Rpm => "RPM",
+            ArchiveFormat::Cpio => "CPIO",
+            ArchiveFormat::SevenZip => "7Z",
+            ArchiveFormat::Xar => "XAR",
+            ArchiveFormat::Iso => "ISO",
+            ArchiveFormat::Dmg => "DMG",
+            ArchiveFormat::OciImage => "CONTAINER IMAGE",
         }
     }
 
@@ -2974,6 +3002,11 @@ pub struct DiffWarnings {
     /// rendering, so its lines cannot be selected.
     #[serde(default)]
     pub derived_text: bool,
+    /// Corvene `1350`-`1355` (`Diff::Converted`): the diff compares text
+    /// Corvene decoded from this kind of file ("Java class file"), so its
+    /// lines cannot be selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded_from: Option<String>,
 }
 
 /// Corvene `1306-utf16-diffs`: how a UTF-16 text file is stored.
@@ -3109,6 +3142,71 @@ pub enum Diff {
         current: Option<std::sync::Arc<SigningFile>>,
         source: Box<Diff>,
     },
+    /// Corvene `1350-compiled-code-diff`, `1351-serialized-data-diff`,
+    /// `1352-translation-diff`, `1353-diagram-diff`, `1354-map-diff` and
+    /// `1355-email-diff`: a file read into a form that says more than its
+    /// lines or bytes. `view` is a text diff (decoded code, data or mail,
+    /// marked `derived_text`), a table (translations by key) or an image
+    /// diff of SVG pictures (diagrams, maps). `format` names what was read
+    /// ("Java class file"); `source` is git's own diff, for the Source view
+    /// and staging.
+    Converted {
+        kind: ConvertedKind,
+        format: String,
+        view: Box<Diff>,
+        source: Box<Diff>,
+    },
+}
+
+/// Corvene `1350`-`1355`: what a [`Diff::Converted`] file was read as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ConvertedKind {
+    /// Class files, Python bytecode, WebAssembly, native binaries.
+    Compiled,
+    /// Binary property lists, MessagePack, CBOR, BSON, protobuf.
+    Serialized,
+    /// Gettext, Apple, Android, XLIFF, Qt and other string tables.
+    Translation,
+    /// draw.io, Excalidraw, Graphviz and Mermaid diagrams.
+    Diagram,
+    /// GeoJSON, TopoJSON, KML, GPX, shapefiles and GeoPackages.
+    Map,
+    /// Email messages and mailboxes.
+    Email,
+}
+
+impl ConvertedKind {
+    pub const ALL: [ConvertedKind; 6] = [
+        ConvertedKind::Compiled,
+        ConvertedKind::Serialized,
+        ConvertedKind::Translation,
+        ConvertedKind::Diagram,
+        ConvertedKind::Map,
+        ConvertedKind::Email,
+    ];
+
+    /// The label of the converted view in the diff header's switch.
+    pub fn view_label(self) -> &'static str {
+        match self {
+            ConvertedKind::Compiled | ConvertedKind::Serialized => "Decoded",
+            ConvertedKind::Translation => "Table",
+            ConvertedKind::Diagram => "Picture",
+            ConvertedKind::Map => "Map",
+            ConvertedKind::Email => "Message",
+        }
+    }
+
+    /// A stable name (settings, element ids).
+    pub fn slug(self) -> &'static str {
+        match self {
+            ConvertedKind::Compiled => "compiled",
+            ConvertedKind::Serialized => "serialized",
+            ConvertedKind::Translation => "translation",
+            ConvertedKind::Diagram => "diagram",
+            ConvertedKind::Map => "map",
+            ConvertedKind::Email => "email",
+        }
+    }
 }
 
 impl Diff {
@@ -3127,7 +3225,8 @@ impl Diff {
             | Diff::Lockfile { source, .. }
             | Diff::Pretty { source, .. }
             | Diff::Tensors { source, .. }
-            | Diff::Signing { source, .. } => source.line_count(),
+            | Diff::Signing { source, .. }
+            | Diff::Converted { source, .. } => source.line_count(),
             _ => 0,
         }
     }
@@ -3147,7 +3246,8 @@ impl Diff {
             | Diff::Lockfile { source, .. }
             | Diff::Pretty { source, .. }
             | Diff::Tensors { source, .. }
-            | Diff::Signing { source, .. } => source.hunks(),
+            | Diff::Signing { source, .. }
+            | Diff::Converted { source, .. } => source.hunks(),
             _ => None,
         }
     }
@@ -3166,7 +3266,8 @@ impl Diff {
             | Diff::Lockfile { source, .. }
             | Diff::Pretty { source, .. }
             | Diff::Tensors { source, .. }
-            | Diff::Signing { source, .. } => source.warnings(),
+            | Diff::Signing { source, .. }
+            | Diff::Converted { source, .. } => source.warnings(),
             _ => None,
         }
     }

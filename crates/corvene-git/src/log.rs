@@ -1114,6 +1114,43 @@ fn finish_committed_diff(
     hide_whitespace: bool,
     utf16: bool,
 ) -> Diff {
+    let diff = finish_committed_diff_of(
+        git.clone(),
+        workdir,
+        file,
+        newest,
+        base,
+        patch,
+        hide_whitespace,
+        utf16,
+    );
+    // `1350`-`1355`: a file read into another form, next to git's diff
+    if file.status.submodule || !crate::converted::may_convert(&file.path) {
+        return diff;
+    }
+    let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+    crate::converted::converted_diff(
+        git.clone(),
+        &file.path,
+        file.status.kind,
+        || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
+        || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
+        diff,
+    )
+}
+
+/// [`finish_committed_diff`] before conversions.
+#[allow(clippy::too_many_arguments)]
+fn finish_committed_diff_of(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &CommittedFileChange,
+    newest: &str,
+    base: &str,
+    patch: &[u8],
+    hide_whitespace: bool,
+    utf16: bool,
+) -> Diff {
     if file.status.submodule {
         return crate::diff::submodule_diff(
             git,
