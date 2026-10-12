@@ -137,6 +137,8 @@ use crate::diff_view_rows::{
     max_line_number, render_row, render_split_row, search_rows, spans_for_row, unified_inner,
     unified_to_split,
 };
+use crate::font_diff::FontDiffView;
+use crate::font_diff::source::FontSourceView;
 use crate::icons::{Octicon, octicon};
 use crate::image_diff::ImageDiff;
 use crate::pdf_diff::PdfDiff;
@@ -257,6 +259,8 @@ pub fn diff_header(
         .children(csv_switch(path, cx))
         // `1322-pdf-diff`
         .children(pdf_switch(path, view, cx))
+        // `1330-font-source-preview`
+        .children(font_source_switch(path, cx))
         // `798-blame`
         .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
@@ -332,6 +336,28 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
         ["Text", "Image"],
         !s.settings.svg_text_diff,
         |image, cx| Dispatcher::set_svg_image_diff(image, cx),
+        cx,
+    ))
+}
+
+/// `1330-font-source-preview`: the Text / Glyphs switch of a font source's
+/// header (one setting for every such file, like the SVG switch).
+fn font_source_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if corvene_models::font_source_kind(path).is_none()
+        || !s.flags.bool(corvene_core::flags::ids::FONT_SOURCE_PREVIEW)
+    {
+        return None;
+    }
+    Some(view_switch(
+        [
+            "font-source-switch",
+            "font-source-text",
+            "font-source-glyphs",
+        ],
+        ["Text", "Glyphs"],
+        !s.settings.font_source_text_diff,
+        |glyphs, cx| Dispatcher::set_font_source_glyphs(glyphs, cx),
         cx,
     ))
 }
@@ -751,12 +777,31 @@ pub struct DiffView {
     _pdf_observer: Option<Subscription>,
     /// `1323-archive-diff`: the archive view of an archive's diff.
     archive: Option<Entity<crate::archive_diff_view::ArchiveDiffView>>,
+    /// `1329-font-diff` / `1330-font-source-preview`
+    font: Option<FontPane>,
     context_menu: Option<Entity<ContextMenu>>,
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
     loading_since: Option<std::time::Instant>,
     /// `348-pull-request-review`: the view-local state of the threads.
     review: ReviewLocal,
+}
+
+/// `1329-font-diff` / `1330-font-source-preview`: the view of a font or
+/// font source diff.
+#[derive(Clone)]
+enum FontPane {
+    Font(Entity<FontDiffView>),
+    Source(Entity<FontSourceView>),
+}
+
+impl FontPane {
+    fn source<'a>(&self, cx: &'a App) -> &'a Arc<Diff> {
+        match self {
+            FontPane::Font(v) => &v.read(cx).source,
+            FontPane::Source(v) => &v.read(cx).source,
+        }
+    }
 }
 
 /// The threads and their parsed bodies at one version of the state.
@@ -857,6 +902,7 @@ impl DiffView {
             _pdf_text_task: None,
             _pdf_observer: None,
             archive: None,
+            font: None,
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
@@ -1469,6 +1515,24 @@ impl DiffView {
             _ => {}
         }
         self.load_archive(snap, cx);
+        // a reload of the same bytes keeps the font view (and its state)
+        let keep = self
+            .font
+            .as_ref()
+            .is_some_and(|f| **f.source(cx) == *snap.diff);
+        if !keep {
+            self.font = match &*snap.diff {
+                Diff::Font { .. } => {
+                    let diff = snap.diff.clone();
+                    Some(FontPane::Font(cx.new(|cx| FontDiffView::new(diff, cx))))
+                }
+                Diff::FontSource { .. } => {
+                    let diff = snap.diff.clone();
+                    Some(FontPane::Source(cx.new(|cx| FontSourceView::new(diff, cx))))
+                }
+                _ => None,
+            };
+        }
         let same_file = self
             .rows_key
             .as_ref()
@@ -3714,6 +3778,21 @@ impl DiffView {
             }
             Diff::Image { .. } => match self.image.clone() {
                 Some(image) => image.into_any_element(),
+                None => self.panel("This binary file has changed.", cx),
+            },
+            // `1329-font-diff` off after the file was read: GHD's binary panel
+            Diff::Font { .. }
+                if !self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::FONT_DIFF) =>
+            {
+                self.binary_panel(snap, cx)
+            }
+            Diff::Font { .. } | Diff::FontSource { .. } => match self.font.clone() {
+                Some(FontPane::Font(v)) => v.into_any_element(),
+                Some(FontPane::Source(v)) => v.into_any_element(),
                 None => self.panel("This binary file has changed.", cx),
             },
             Diff::TooLarge => self.too_large_panel(snap, cx),

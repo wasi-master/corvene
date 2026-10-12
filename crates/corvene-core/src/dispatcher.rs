@@ -174,6 +174,8 @@ impl Dispatcher {
         );
         // `1323-archive-diff`
         corvene_git::archive::set_read_archives(flags.bool(crate::flags::ids::ARCHIVE_DIFF));
+        // `1329-font-diff`
+        corvene_git::font_file::set_read_font_files(flags.bool(crate::flags::ids::FONT_DIFF));
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -2267,6 +2269,27 @@ impl Dispatcher {
     /// Changes and History (the diff header's Text/Image switch).
     pub fn set_svg_image_diff(as_image: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.svg_text_diff = !as_image);
+        Self::reload_diffs_of(corvene_git::is_svg, cx);
+    }
+
+    /// `1330-font-source-preview`: whether `path` (a UFO glyph, Glyphs file
+    /// or designspace) shows as glyphs.
+    pub fn font_source_shown_as_glyphs(s: &AppState, path: &str) -> bool {
+        corvene_models::font_source_kind(path).is_some()
+            && !s.settings.font_source_text_diff
+            && s.flags.bool(crate::flags::ids::FONT_SOURCE_PREVIEW)
+    }
+
+    /// `1330-font-source-preview`: show font sources as glyphs, or as text,
+    /// in Changes and History (the diff header's Text / Glyphs switch).
+    pub fn set_font_source_glyphs(as_glyphs: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.font_source_text_diff = !as_glyphs);
+        Self::reload_diffs_of(|p| corvene_models::font_source_kind(p).is_some(), cx);
+    }
+
+    /// Loads again the diffs on screen of the files `kind` picks (a view
+    /// switch changed how they show).
+    fn reload_diffs_of(kind: fn(&str) -> bool, cx: &mut dyn Host) {
         let repos = Self::state(cx).read(cx).visible_repositories();
         for id in repos {
             let (working, commit) = {
@@ -2274,8 +2297,8 @@ impl Dispatcher {
                 let Some(rs) = s.repo_states.get(&id) else {
                     continue;
                 };
-                let svg = |path: &Option<String>| path.as_deref().is_some_and(corvene_git::is_svg);
-                (svg(&rs.selected_file), svg(&rs.commit_selected_file))
+                let hit = |path: &Option<String>| path.as_deref().is_some_and(kind);
+                (hit(&rs.selected_file), hit(&rs.commit_selected_file))
             };
             if working {
                 Self::load_diff(id, cx);
@@ -2449,6 +2472,12 @@ impl Dispatcher {
             // line selection made on its text
             let svg_image = corvene_git::is_svg(path)
                 && matches!(rs.diff.as_deref(), Some(corvene_models::Diff::Image { .. }));
+            // `1330-font-source-preview`: so does the glyph view of a source
+            let svg_image = svg_image
+                || matches!(
+                    rs.diff.as_deref(),
+                    Some(corvene_models::Diff::FontSource { .. })
+                );
             // `796-lfs-text-diff`: lines of the contents, not of the pointers
             // the selection is staged against
             let svg_image = svg_image
@@ -3415,15 +3444,24 @@ impl Dispatcher {
             .detach();
             return;
         }
-        // `794-svg-image-diff`: the SVG before and after, as images
-        let svg_image = {
+        // `794-svg-image-diff`: the SVG before and after, as images;
+        // `1330-font-source-preview`: a font source's, as glyphs
+        let (svg_image, font_glyphs) = {
             let s = Self::state(cx).read(cx);
-            Self::svg_shown_as_image(s, &file.path)
+            (
+                Self::svg_shown_as_image(s, &file.path),
+                Self::font_source_shown_as_glyphs(s, &file.path),
+            )
         };
+        let svg_image = svg_image || font_glyphs;
         if svg_image {
             let key = (ordered.clone(), file.path.clone());
             let task = cx.background_executor().spawn(async move {
-                crate::stacked_diff::svg_image_diff(git, &workdir, &ordered, &file)
+                if font_glyphs {
+                    crate::stacked_diff::font_source_diff(git, &workdir, &ordered, &file)
+                } else {
+                    crate::stacked_diff::svg_image_diff(git, &workdir, &ordered, &file)
+                }
             });
             cx.spawn(async move |cx: &mut AsyncCtx| {
                 let loaded = task.await;
@@ -7216,6 +7254,26 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.image_diff_type = kind);
     }
 
+    /// Corvene `1329-font-diff`: the font viewer's tab.
+    pub fn set_font_diff_view(view: corvene_models::FontDiffView, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.font_diff_view = view);
+    }
+
+    /// Corvene `1329-font-diff`: the specimen's text (empty: the preset).
+    pub fn set_font_specimen_text(text: String, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.font_specimen_text = text);
+    }
+
+    /// Corvene `1329-font-diff`: the specimen's size, points.
+    pub fn set_font_specimen_size(size: f32, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.font_specimen_size = size.clamp(6.0, 400.0));
+    }
+
+    /// Corvene `1329-font-diff`: the glyph tile size, points.
+    pub fn set_font_glyph_tile(size: f32, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.font_glyph_tile = size.clamp(32.0, 256.0));
+    }
+
     /// `onOpenSubmodule`: add the submodule as a repository of its own.
     pub fn open_submodule(path: PathBuf, cx: &mut dyn Host) {
         Self::add_repository(path, cx);
@@ -8299,6 +8357,8 @@ pub(crate) struct WorkingDiffOptions {
     as_text: bool,
     /// `794-svg-image-diff`
     svg_as_image: bool,
+    /// `1330-font-source-preview`
+    font_source_as_glyphs: bool,
     /// `795-lfs-image-previews`
     lfs_images: bool,
     /// `796-lfs-text-diff`
@@ -8314,18 +8374,20 @@ impl WorkingDiffOptions {
             as_text: rs.diff_as_text.as_deref() == Some(path)
                 && s.flags.bool(crate::flags::ids::BINARY_DIFF_AS_TEXT),
             svg_as_image: Dispatcher::svg_shown_as_image(s, path),
+            font_source_as_glyphs: Dispatcher::font_source_shown_as_glyphs(s, path),
             lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
             lfs_text: s.flags.bool(crate::flags::ids::LFS_TEXT_DIFF),
         }
     }
 
-    pub(crate) fn key(self) -> [bool; 7] {
+    pub(crate) fn key(self) -> [bool; 8] {
         [
             self.hide_whitespace,
             self.renamed_against_head,
             self.symlinks_as_links,
             self.as_text,
             self.svg_as_image,
+            self.font_source_as_glyphs,
             self.lfs_images,
             self.lfs_text,
         ]
@@ -8410,6 +8472,19 @@ pub(crate) fn compute_working_diff(
                 || std::fs::read(workdir.join(&file.path)).ok(),
                 || corvene_git::blob_bytes(git.clone(), workdir, "HEAD", previous_path).ok(),
             );
+            return (Arc::new(diff), None, None);
+        }
+        if options.font_source_as_glyphs {
+            // `1330-font-source-preview`: the committed and working sources
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            let diff = corvene_git::font_file::font_source_diff(
+                &file.path,
+                previous_path,
+                file.status.kind,
+                |p| std::fs::read(workdir.join(p)).ok(),
+                |p| corvene_git::blob_bytes(git.clone(), workdir, "HEAD", p).ok(),
+            )
+            .unwrap_or(corvene_models::Diff::Binary);
             return (Arc::new(diff), None, None);
         }
         let diff = corvene_git::working_directory_diff(

@@ -2198,6 +2198,33 @@ impl ArchiveCounts {
     }
 }
 
+/// Corvene `1329-font-diff`: one side of a font file (TrueType, OpenType,
+/// WOFF, WOFF2 or a collection), read by `corvene_fonts` on the UI side.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontBlob {
+    pub bytes: Vec<u8>,
+}
+
+/// Corvene `1330-font-source-preview`: the kind of font source file shown
+/// as glyphs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FontSourceKind {
+    /// A UFO glyph (`.glif`).
+    Glif,
+    /// A Glyphs file (`.glyphs`).
+    Glyphs,
+    /// A designspace (`.designspace`).
+    Designspace,
+}
+
+/// Corvene `1330-font-source-preview`: one side of a font source file, with
+/// the UFO glyphs its components use (by glyph name, same revision).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontSourceBlob {
+    pub bytes: Vec<u8>,
+    pub siblings: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
 /// GHD `ISubmoduleDiff`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmoduleDiff {
@@ -2219,6 +2246,18 @@ pub enum ImageDiffType {
     Swipe,
     OnionSkin,
     Difference,
+}
+
+/// Corvene `1329-font-diff`: the tabs of the font viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum FontDiffView {
+    #[default]
+    Overview,
+    Specimen,
+    Glyphs,
+    Tables,
+    Features,
 }
 
 /// GHD `imageFileExtensions` + `getMediaType`: `Some` when a binary file
@@ -2265,6 +2304,29 @@ pub fn more_image_media_type(path: &str) -> Option<&'static str> {
         | "raf" | "pef" | "srw" | "x3f" | "erf" | "3fr" | "kdc" | "dcr" | "mrw" | "rwl" | "iiq"
         | "mos" => "image/x-raw",
         "svgz" => "image/svg+xml",
+        _ => return None,
+    })
+}
+
+/// Corvene `1329-font-diff`: whether `path` names a binary font file
+/// (the bytes are sniffed too before it is read as one).
+pub fn is_font_file(path: &str) -> bool {
+    let Some(ext) = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) else {
+        return false;
+    };
+    matches!(
+        ext.as_str(),
+        "ttf" | "otf" | "woff" | "woff2" | "ttc" | "otc"
+    )
+}
+
+/// Corvene `1330-font-source-preview`: the font source kind of `path`.
+pub fn font_source_kind(path: &str) -> Option<FontSourceKind> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "glif" => FontSourceKind::Glif,
+        "glyphs" => FontSourceKind::Glyphs,
+        "designspace" => FontSourceKind::Designspace,
         _ => return None,
     })
 }
@@ -2377,6 +2439,19 @@ pub enum Diff {
     },
     /// Corvene `1323-archive-diff`: a binary archive read as its entries.
     Archive(Box<ArchiveDiff>),
+    /// Corvene `1329-font-diff`: a binary font file; `previous` is missing
+    /// for new files, `current` for deleted ones.
+    Font {
+        previous: Option<FontBlob>,
+        current: Option<FontBlob>,
+    },
+    /// Corvene `1330-font-source-preview`: a font source file switched from
+    /// its text diff to glyphs.
+    FontSource {
+        kind: FontSourceKind,
+        previous: Option<FontSourceBlob>,
+        current: Option<FontSourceBlob>,
+    },
     /// Nothing to show (e.g. empty file, mode-only change).
     Empty,
     /// `Unrenderable`: beyond what git would even hand over.

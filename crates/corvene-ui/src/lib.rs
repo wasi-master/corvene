@@ -34,6 +34,7 @@ pub mod file_icons;
 pub mod file_tree_rows;
 pub mod filter_list;
 pub mod foldout;
+pub mod font_diff;
 pub mod format;
 pub mod git_email_not_found_warning;
 pub mod github_list;

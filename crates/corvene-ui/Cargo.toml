@@ -9,11 +9,14 @@ description = "Corvene views, widgets and theme (GPUI)"
 gpui-kit.workspace = true
 corvene-core.workspace = true
 corvene-extensions.workspace = true
+# `1329-font-diff`: font files read, compared and drawn
+corvene-fonts.workspace = true
 corvene-highlight.workspace = true
 corvene-packs.workspace = true
 corvene-git.workspace = true
 corvene-github.workspace = true
 corvene-hosts.workspace = true
+corvene-models.workspace = true
 corvene-platform.workspace = true
 tracing.workspace = true
 libc = "0.2"

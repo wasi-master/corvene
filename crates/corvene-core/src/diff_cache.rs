@@ -104,6 +104,17 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|c| c.len() + 24)
             .sum(),
+        corvene_models::Diff::Font { previous, current } => {
+            previous.as_ref().map_or(0, |f| f.bytes.len())
+                + current.as_ref().map_or(0, |f| f.bytes.len())
+        }
+        corvene_models::Diff::FontSource {
+            previous, current, ..
+        } => [previous, current]
+            .into_iter()
+            .flatten()
+            .map(|s| s.bytes.len() + s.siblings.values().map(Vec::len).sum::<usize>())
+            .sum(),
         _ => 0,
     };
     diff_bytes + lines(new) + lines(old)
@@ -229,7 +240,7 @@ pub struct WorkingStamp {
     file: Option<(u64, i128, u64)>,
     /// the diff options (whitespace, rename, symlink, as-text, SVG as image,
     /// LFS images, LFS text)
-    options: [bool; 7],
+    options: [bool; 8],
 }
 
 type WorkingKey = (PathBuf, String, WorkingStamp);
@@ -257,7 +268,7 @@ pub fn working_stamp(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     head: Option<&str>,
-    options: [bool; 7],
+    options: [bool; 8],
 ) -> Option<WorkingStamp> {
     if file.status.submodule || file.status.kind == FileStatusKind::Conflicted {
         return None;

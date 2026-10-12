@@ -118,6 +118,7 @@ fn kind_of(diff: Option<&Arc<Diff>>, loading: bool) -> DiffKindVm {
         // binary files
         Some(Diff::Binary | Diff::Table { .. } | Diff::Archive(_)) => DiffKindVm::Binary,
         Some(Diff::Image { .. }) => DiffKindVm::Image,
+        Some(Diff::Font { .. } | Diff::FontSource { .. }) => DiffKindVm::Binary,
         Some(Diff::Empty) => DiffKindVm::Empty,
         Some(Diff::TooLarge) => DiffKindVm::TooLarge,
         Some(Diff::Submodule(_)) => DiffKindVm::Submodule,

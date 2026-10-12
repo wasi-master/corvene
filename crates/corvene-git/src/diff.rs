@@ -173,6 +173,7 @@ pub fn working_directory_diff(
             if binary_media_type(&file.path).is_none()
                 && crate::table_file::table_format(&file.path).is_none()
                 && crate::archive::archive_format(&file.path).is_none()
+                && !corvene_models::is_font_file(&file.path)
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
@@ -511,7 +512,8 @@ pub fn working_directory_patch(
 
 /// GHD `getImageDiff`: a binary change of a known image type becomes an
 /// image diff; anything else stays `Binary` (a spreadsheet or database
-/// becomes a table diff, Corvene `1321-table-file-diff`).
+/// becomes a table diff, Corvene `1321-table-file-diff`; a font a font
+/// diff, Corvene `1329-font-diff`).
 pub fn image_diff(
     path: &str,
     kind: FileStatusKind,
@@ -519,6 +521,10 @@ pub fn image_diff(
     previous: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Diff {
     let Some(media_type) = binary_media_type(path) else {
+        if corvene_models::is_font_file(path) {
+            return crate::font_file::font_diff(path, kind, current, previous)
+                .unwrap_or(Diff::Binary);
+        }
         return crate::table_file::table_diff(path, kind, current, previous)
             .unwrap_or(Diff::Binary);
     };

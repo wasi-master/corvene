@@ -125,6 +125,8 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Archive(_) => "Archive",
         Diff::Image { .. } => "Image",
         Diff::Table { .. } => "Table",
+        Diff::Font { .. } => "Font",
+        Diff::FontSource { .. } => "FontSource",
         Diff::Empty => "Empty",
         Diff::TooLarge => "Unrenderable",
         Diff::Submodule(_) => "Submodule",

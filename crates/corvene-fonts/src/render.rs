@@ -70,10 +70,16 @@ impl Raster {
         }
     }
 
-    /// Premultiplied BGRA, the order GPUI's image sprites take.
+    /// Straight-alpha BGRA, what GPUI's image sprites take.
     pub fn bgra(&self) -> Vec<u8> {
         let mut out = self.data.clone();
         for px in out.as_chunks_mut::<4>().0 {
+            let a = u32::from(px[3]);
+            if a != 0 && a != 255 {
+                for c in &mut px[..3] {
+                    *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
+                }
+            }
             px.swap(0, 2);
         }
         out
@@ -226,6 +232,88 @@ pub fn render_glyph(
         ink,
     );
     Raster::from_pixmap(pm)
+}
+
+/// Glyphs drawn one after another in `tile` (each `(gid, x)` with `x` its
+/// pen position in font units), the run centred: a substitution's input
+/// or output, a kerning pair.
+pub fn render_run(
+    font: &FontRef,
+    run: &[(u32, f32)],
+    coords: &[NormalizedCoord],
+    tile: Tile,
+    ink: Ink,
+) -> Raster {
+    let mut pm = pixmap(tile.width as f32, tile.height as f32);
+    let metrics = font.glyph_metrics(Size::unscaled(), LocationRef::new(coords));
+    let end = run
+        .iter()
+        .map(|&(gid, x)| x + metrics.advance_width(GlyphId::new(gid)).unwrap_or(0.0))
+        .fold(0.0f32, f32::max);
+    let left = (tile.width as f32 - end * tile.scale) / 2.0;
+    for &(gid, x) in run {
+        draw_glyph(
+            &mut pm,
+            font,
+            gid,
+            coords,
+            left + x * tile.scale,
+            tile.baseline,
+            tile.scale,
+            ink,
+        );
+    }
+    Raster::from_pixmap(pm)
+}
+
+/// The advance width of `gid`, font units.
+pub fn advance(font: &FontRef, gid: u32, coords: &[NormalizedCoord]) -> f32 {
+    font.glyph_metrics(Size::unscaled(), LocationRef::new(coords))
+        .advance_width(GlyphId::new(gid))
+        .unwrap_or(0.0)
+}
+
+/// Two rasters compared pixel by pixel, the way type designers overlay
+/// proofs: ink only the old one has in `removed`, ink only the new one has
+/// in `added`, ink both have in `same`. Coverage counts as ink above half.
+/// The rasters line up at their top left corners.
+pub fn highlight(old: &Raster, new: &Raster, removed: Ink, added: Ink, same: Ink) -> Raster {
+    let width = old.width.max(new.width);
+    let height = old.height.max(new.height);
+    let alpha = |r: &Raster, x: u32, y: u32| -> u8 {
+        if x < r.width && y < r.height {
+            r.data[((y * r.width + x) * 4 + 3) as usize]
+        } else {
+            0
+        }
+    };
+    let mut data = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            let (a, b) = (alpha(old, x, y), alpha(new, x, y));
+            let (ink, cover) = match (a > 127, b > 127) {
+                (true, true) => (same, a.max(b)),
+                (true, false) => (removed, a),
+                (false, true) => (added, b),
+                // antialiased edges keep their coverage in the colour of the
+                // side that has more of it
+                (false, false) if a > b => (removed, a),
+                (false, false) => (added, b),
+            };
+            let cover = u32::from(cover) * u32::from(ink.a) / 255;
+            let i = ((y * width + x) * 4) as usize;
+            let pre = |c: u8| (u32::from(c) * cover / 255) as u8;
+            data[i] = pre(ink.r);
+            data[i + 1] = pre(ink.g);
+            data[i + 2] = pre(ink.b);
+            data[i + 3] = cover as u8;
+        }
+    }
+    Raster {
+        width,
+        height,
+        data,
+    }
 }
 
 /// An outline (from a font source) drawn in a cell the way
@@ -836,6 +924,36 @@ mod tests {
         let text = "abcdefgh";
         let g = shaped(&[1.0; 8], text);
         assert_eq!(wrap(text, &g, 3.0), vec![0..3, 3..6, 6..8]);
+    }
+
+    #[test]
+    fn highlight_colours_each_side() {
+        let raster = |a: u8| Raster {
+            width: 1,
+            height: 1,
+            data: vec![0, 0, 0, a],
+        };
+        let (r, g, k) = (
+            Ink::rgba(255, 0, 0, 255),
+            Ink::rgba(0, 255, 0, 255),
+            Ink::rgba(0, 0, 0, 255),
+        );
+        assert_eq!(
+            highlight(&raster(255), &raster(0), r, g, k).data,
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            highlight(&raster(0), &raster(255), r, g, k).data,
+            [0, 255, 0, 255]
+        );
+        assert_eq!(
+            highlight(&raster(255), &raster(255), r, g, k).data,
+            [0, 0, 0, 255]
+        );
+        assert_eq!(
+            highlight(&raster(0), &raster(0), r, g, k).data,
+            [0, 0, 0, 0]
+        );
     }
 
     #[test]

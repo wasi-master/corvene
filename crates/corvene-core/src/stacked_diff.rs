@@ -285,7 +285,7 @@ impl Dispatcher {
                 file,
                 s.settings.hide_whitespace_in_history_diff,
                 Self::remerge_applies(s, rs),
-                Self::svg_shown_as_image(s, &path),
+                Self::svg_shown_as_image(s, &path) || Self::font_source_shown_as_glyphs(s, &path),
                 CommitDiffOptions::of(s),
             )
         };
@@ -304,6 +304,9 @@ impl Dispatcher {
                 return remerge_diff(git, &workdir, &file, hide_whitespace);
             }
             if svg_image {
+                if corvene_models::font_source_kind(&file.path).is_some() {
+                    return font_source_diff(git, &workdir, &shas, &file);
+                }
                 return svg_image_diff(git, &workdir, &shas, &file);
             }
             let loaded = compute_commit_diff(git, &workdir, &shas, &file, options);
@@ -483,6 +486,35 @@ pub(crate) fn svg_image_diff(
         || corvene_git::blob_bytes(git.clone(), workdir, &newest, &file.path).ok(),
         || corvene_git::blob_bytes(git.clone(), workdir, &format!("{oldest}^"), previous_path).ok(),
     );
+    (Arc::new(diff), None, None)
+}
+
+/// `1330-font-source-preview`: a font source's before and after, for its
+/// glyph view. Shared with `Dispatcher::load_commit_diff`.
+pub(crate) fn font_source_diff(
+    git: Arc<corvene_git::GitBinary>,
+    workdir: &std::path::Path,
+    ordered: &[String],
+    file: &CommittedFileChange,
+) -> LoadedDiff {
+    let newest = match ordered {
+        [_, .., newest] => newest.clone(),
+        _ => file.commitish.clone(),
+    };
+    let oldest = ordered
+        .first()
+        .cloned()
+        .unwrap_or_else(|| file.commitish.clone());
+    let base = format!("{oldest}^");
+    let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+    let diff = corvene_git::font_file::font_source_diff(
+        &file.path,
+        previous_path,
+        file.status.kind,
+        |p| corvene_git::blob_bytes(git.clone(), workdir, &newest, p).ok(),
+        |p| corvene_git::blob_bytes(git.clone(), workdir, &base, p).ok(),
+    )
+    .unwrap_or(corvene_models::Diff::Binary);
     (Arc::new(diff), None, None)
 }
 

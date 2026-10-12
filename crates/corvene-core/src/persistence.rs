@@ -199,6 +199,10 @@ pub struct Settings {
     /// Corvene `1323-archive-diff`: width of the archive view's entry tree.
     #[serde(default = "default_file_list_width")]
     pub archive_tree_width: f32,
+    /// Corvene `1330-font-source-preview`: font source diffs show the text
+    /// (off: the glyphs). The diff header's Text / Glyphs switch flips it.
+    #[serde(default)]
+    pub font_source_text_diff: bool,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -217,6 +221,19 @@ pub struct Settings {
     pub stacked_diff_history: bool,
     /// Last chosen tab of a modified-image diff (`imageDiffType`).
     pub image_diff_type: corvene_models::ImageDiffType,
+    /// Corvene `1329-font-diff`: the font viewer's last tab.
+    #[serde(default)]
+    pub font_diff_view: corvene_models::FontDiffView,
+    /// Corvene `1329-font-diff`: the specimen's own sample text (empty: the
+    /// chosen preset).
+    #[serde(default)]
+    pub font_specimen_text: String,
+    /// Corvene `1329-font-diff`: specimen size, points.
+    #[serde(default = "default_font_specimen_size")]
+    pub font_specimen_size: f32,
+    /// Corvene `1329-font-diff`: glyph tile size, points.
+    #[serde(default = "default_font_glyph_tile")]
+    pub font_glyph_tile: f32,
     /// GHD `tabSize` for diffs (Appearance › Diff).
     #[serde(default = "default_tab_size")]
     pub tab_size: u32,
@@ -422,6 +439,14 @@ fn default_tab_size() -> u32 {
 /// GHD `tabSizeDefault`.
 pub const TAB_SIZE_DEFAULT: u32 = 4;
 
+fn default_font_specimen_size() -> f32 {
+    48.0
+}
+
+fn default_font_glyph_tile() -> f32 {
+    72.0
+}
+
 fn default_true() -> bool {
     true
 }
@@ -555,11 +580,16 @@ impl Default for Settings {
             archive_show_metadata_only: false,
             archive_stacked: false,
             archive_tree_width: 250.0,
+            font_source_text_diff: false,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,
             stacked_diff_history: false,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,
+            font_diff_view: corvene_models::FontDiffView::Overview,
+            font_specimen_text: String::new(),
+            font_specimen_size: default_font_specimen_size(),
+            font_glyph_tile: default_font_glyph_tile(),
             tab_size: TAB_SIZE_DEFAULT,
             syntax_highlighter: SyntaxHighlighter::GitHubDesktop,
             date_format: default_date_format(),

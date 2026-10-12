@@ -7,6 +7,8 @@ description = "Corvene git engine: gitoxide reads, git CLI writes"
 
 [dependencies]
 corvene-models.workspace = true
+# flags 1329-font-diff / 1330-font-source-preview: sniffing, UFO components
+corvene-fonts.workspace = true
 gix.workspace = true
 libc = "0.2"
 dunce = "1"

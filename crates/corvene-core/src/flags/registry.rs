@@ -8780,6 +8780,45 @@ registry! {
         code: &["crates/corvene-ui/src/image_diff.rs"],
     },
 
+    /// Font files open in a font viewer instead of "Binary file not shown".
+    FONT_DIFF = 1329 "font-diff" {
+        title: "Font file diffs",
+        summary: "A changed TrueType, OpenType, WOFF, WOFF2 or collection (.ttc) font opens \
+                  in a font viewer instead of \"Binary file not shown\". Overview compares \
+                  names, metrics and formats; Specimen sets sample text in both versions \
+                  with 2-up, Swipe, Onion Skin and Difference, axis sliders for variable \
+                  fonts; Glyphs lists every glyph with added, removed and changed ones \
+                  marked and an inspector that overlays old and new outlines with their \
+                  points; Tables compares every table field by field; Features compares \
+                  scripts, OpenType features, substitutions and kerning pairs, with a \
+                  playground that turns features on and off. A collection has a tab per \
+                  face. Files over 64 MB stay binary.",
+        ghd_behaviour: "Font files show \"Binary file not shown\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-fonts/src/lib.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/mod.rs"],
+    },
+    /// UFO glyphs, Glyphs files and designspaces can be shown as glyphs.
+    FONT_SOURCE_PREVIEW = 1330 "font-source-preview" {
+        title: "Font sources as glyphs",
+        summary: "A changed UFO glyph (.glif), Glyphs file (.glyphs) or designspace gets a \
+                  Text / Glyphs switch in the diff header (remembered for every such file). Glyphs draws \
+                  the old and new outlines over each other with their points, anchors and \
+                  components; a Glyphs file lists its changed glyphs per master with its \
+                  font info, masters and kerning; a designspace compares its axes, sources, \
+                  instances and rules.",
+        ghd_behaviour: "Font sources only have the text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-fonts/src/sources/mod.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/source.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

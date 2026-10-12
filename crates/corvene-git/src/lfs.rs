@@ -283,6 +283,7 @@ fn is_pointer_diff(hunks: &[corvene_models::DiffHunk]) -> bool {
 /// that is a pointer becomes its local object. A pointer diff whose
 /// objects are not all local stays a text diff, marked
 /// `DiffWarnings::lfs_not_downloaded`. Any other diff is returned as it is.
+/// Fonts resolve the same way into font diffs (`1329-font-diff`).
 pub fn resolve_lfs_images(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -292,9 +293,13 @@ pub fn resolve_lfs_images(
     current: impl FnOnce() -> Option<Vec<u8>>,
     previous: impl FnOnce() -> Option<Vec<u8>>,
 ) -> Diff {
-    let Some(media_type) = crate::diff::binary_media_type(path) else {
+    let media_type = crate::diff::binary_media_type(path);
+    let font = media_type.is_none()
+        && corvene_models::is_font_file(path)
+        && crate::font_file::read_font_files();
+    if media_type.is_none() && !font {
         return diff;
-    };
+    }
     let resolve = |bytes: Vec<u8>| -> (bool, Option<Vec<u8>>) {
         match lfs_pointer(&bytes) {
             Some(pointer) => (true, lfs_object(git.clone(), workdir, &pointer)),
@@ -323,12 +328,13 @@ pub fn resolve_lfs_images(
                 warnings.lfs_not_downloaded = true;
                 return Diff::Text { hunks, warnings };
             }
-            crate::diff::image_diff_as(
-                media_type,
-                kind,
-                || current.and_then(|(_, bytes)| bytes),
-                || previous.and_then(|(_, bytes)| bytes),
-            )
+            let current = || current.and_then(|(_, bytes)| bytes);
+            let previous = || previous.and_then(|(_, bytes)| bytes);
+            match media_type {
+                Some(media_type) => crate::diff::image_diff_as(media_type, kind, current, previous),
+                None => crate::font_file::font_diff(path, kind, current, previous)
+                    .unwrap_or(Diff::Binary),
+            }
         }
         Diff::Image { previous, current } => {
             // git-lfs not installed: git compares a pointer with the image;

@@ -15,6 +15,7 @@ pub mod description;
 pub mod detect;
 pub mod diff;
 pub mod error;
+pub mod font_file;
 pub mod git_errors;
 pub mod handle;
 pub mod history_ops;
