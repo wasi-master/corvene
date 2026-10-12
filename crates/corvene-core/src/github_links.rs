@@ -1,7 +1,9 @@
 //! Corvene `355-github-links-in-app`: links to a repository's pages on
 //! GitHub (in release notes, issues, pull request descriptions) that the
 //! app can show itself when the repository is cloned: a release, a
-//! comparison, a commit, an issue.
+//! comparison, a commit, an issue, a pull request (in the review view,
+//! `348-pull-request-review`, when it is among the open ones; an issue
+//! link to one shows it there too, as GitHub redirects it).
 //!
 //! GitHub Desktop opens every link in the browser
 //! (`app/src/ui/lib/link-button.tsx`, `shell.openExternal`).
@@ -11,6 +13,7 @@ use crate::host::Host;
 use crate::ref_compare::RefRange;
 use crate::remote::spawn_bg;
 use crate::state::AppState;
+use corvene_models::PullRequest;
 
 /// What a GitHub link points at.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +30,8 @@ pub enum GitHubLinkTarget {
     Commit(String),
     /// `/issues/<number>`
     Issue(u64),
+    /// `/pull/<number>`
+    PullRequest(u64),
 }
 
 /// A parsed link to a page of `owner/name` on `host`.
@@ -53,6 +58,7 @@ impl GitHubLink {
             ),
             GitHubLinkTarget::Commit(sha) => format!("Commit {}", &sha[..sha.len().min(7)]),
             GitHubLinkTarget::Issue(number) => format!("Issue #{number}"),
+            GitHubLinkTarget::PullRequest(number) => format!("Pull Request #{number}"),
         }
     }
 }
@@ -120,6 +126,7 @@ pub fn parse_github_link(url: &str) -> Option<GitHubLink> {
             GitHubLinkTarget::Commit(sha.to_ascii_lowercase())
         }
         "issues" => GitHubLinkTarget::Issue(rest.split('/').next()?.parse().ok()?),
+        "pull" => GitHubLinkTarget::PullRequest(rest.split('/').next()?.parse().ok()?),
         _ => return None,
     };
     if let GitHubLinkTarget::Compare { base, head, .. } = &target
@@ -151,27 +158,58 @@ pub fn repository_for_link(s: &AppState, link: &GitHubLink) -> Option<u64> {
     if !s.flags.bool(ids::GITHUB_LINKS_IN_APP) {
         return None;
     }
-    let shown = match link.target {
-        GitHubLinkTarget::Release(_) => s.flags.bool(ids::RELEASES),
-        GitHubLinkTarget::Compare { .. } => crate::ref_compare::enabled(s),
-        GitHubLinkTarget::Commit(_) => true,
-        GitHubLinkTarget::Issue(_) => s.flags.bool(ids::ISSUES),
+    let same = |gh: &corvene_models::GitHubRepository| {
+        gh.owner.eq_ignore_ascii_case(&link.owner)
+            && gh.name.eq_ignore_ascii_case(&link.name)
+            && html_host(&gh.html_url).is_some_and(|h| h == link.host)
     };
-    if !shown {
-        return None;
-    }
+    // a fork's issues and pull requests are its parent's
+    let upstream = matches!(
+        link.target,
+        GitHubLinkTarget::Issue(_) | GitHubLinkTarget::PullRequest(_)
+    );
     let matches = |id: u64| {
-        s.repository(id)
-            .and_then(|r| r.github.as_ref())
-            .is_some_and(|gh| {
-                gh.owner.eq_ignore_ascii_case(&link.owner)
-                    && gh.name.eq_ignore_ascii_case(&link.name)
-                    && html_host(&gh.html_url).is_some_and(|h| h == link.host)
-            })
+        let shown = match link.target {
+            GitHubLinkTarget::Release(_) => s.flags.bool(ids::RELEASES),
+            GitHubLinkTarget::Compare { .. } => crate::ref_compare::enabled(s),
+            GitHubLinkTarget::Commit(_) => true,
+            GitHubLinkTarget::Issue(number) => {
+                s.flags.bool(ids::ISSUES) || reviewable_pull_request(s, id, number).is_some()
+            }
+            GitHubLinkTarget::PullRequest(number) => {
+                reviewable_pull_request(s, id, number).is_some()
+            }
+        };
+        shown
+            && s.repository(id)
+                .and_then(|r| r.github.as_ref())
+                .is_some_and(|gh| same(gh) || (upstream && gh.parent.as_deref().is_some_and(same)))
     };
     s.selected
         .filter(|&id| matches(id))
         .or_else(|| s.repositories.iter().map(|r| r.id).find(|&id| matches(id)))
+}
+
+/// Open pull request `number` of repository `id` when the review view
+/// (`348-pull-request-review`) can show it.
+fn reviewable_pull_request(s: &AppState, id: u64, number: u64) -> Option<&PullRequest> {
+    if !s.flags.bool(crate::flags::ids::PULL_REQUEST_REVIEW) {
+        return None;
+    }
+    s.pull_requests_for(id)
+        .iter()
+        .find(|pr| pr.number == number)
+}
+
+/// What the in-app menu item for `link` in repository `id` says it opens:
+/// an issue link to an open pull request names the pull request.
+pub fn link_description(s: &AppState, id: u64, link: &GitHubLink) -> String {
+    match link.target {
+        GitHubLinkTarget::Issue(number) if reviewable_pull_request(s, id, number).is_some() => {
+            format!("Pull Request #{number}")
+        }
+        _ => link.description(),
+    }
 }
 
 impl Dispatcher {
@@ -185,9 +223,16 @@ impl Dispatcher {
         match link.target {
             GitHubLinkTarget::Release(tag) => Self::show_release_tag(id, tag, cx),
             GitHubLinkTarget::Commit(sha) => Self::reveal_commit(id, sha, cx),
-            GitHubLinkTarget::Issue(number) => {
-                Self::show_issues(id, cx);
-                Self::select_issue(id, Some(number), cx);
+            GitHubLinkTarget::Issue(number) | GitHubLinkTarget::PullRequest(number) => {
+                let pr = reviewable_pull_request(Self::state(cx).read(cx), id, number).cloned();
+                match pr {
+                    Some(pr) => Self::review_pull_request(id, pr, cx),
+                    None if matches!(link.target, GitHubLinkTarget::Issue(_)) => {
+                        Self::show_issues(id, cx);
+                        Self::select_issue(id, Some(number), cx);
+                    }
+                    None => Self::open_url(&url, cx),
+                }
             }
             GitHubLinkTarget::Compare {
                 base,
@@ -286,6 +331,10 @@ mod tests {
             target("https://github.com/o/n/issues/12#issuecomment-1"),
             Some(GitHubLinkTarget::Issue(12))
         );
+        assert_eq!(
+            target("https://github.com/o/n/pull/3/files"),
+            Some(GitHubLinkTarget::PullRequest(3))
+        );
     }
 
     #[test]
@@ -294,7 +343,7 @@ mod tests {
             "https://github.com/o/n",
             "https://github.com/o/n/releases",
             "https://github.com/o/n/releases/latest",
-            "https://github.com/o/n/pull/3",
+            "https://github.com/o/n/pull/new",
             "https://github.com/o/n/commit/xyz",
             "https://github.com/o/n/compare/main",
             "https://github.com/o/n/issues/new",

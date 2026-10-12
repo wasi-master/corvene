@@ -3094,9 +3094,10 @@ registry! {
     GITHUB_LINKS_IN_APP = 355 "github-links-in-app" {
         title: "Open GitHub links in the app",
         summary: "A click on a link in release notes, an issue or a pull request description \
-                  that points at a release, a comparison, a commit or an issue of a repository \
-                  in the list asks whether to show it in Corvene (the release in Releases, the \
-                  comparison or the commit in History, the issue in Issues) or on GitHub.",
+                  that points at a release, a comparison, a commit, an issue or a pull request \
+                  of a repository in the list asks whether to show it in Corvene (the release \
+                  in Releases, the comparison or the commit in History, the issue in Issues, an \
+                  open pull request in its review) or on GitHub.",
         ghd_behaviour: "Every link opens in the browser.",
         nature: Nature::Feature,
         kind: Kind::Bool,

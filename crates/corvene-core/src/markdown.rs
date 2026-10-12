@@ -21,9 +21,10 @@
 //! text (`<sub>` / `<sup>` have no smaller type).
 //!
 //! As with `breaks: true`, a single newline inside a paragraph is a line
-//! break. Bare `http(s)://` URLs are linkified as GFM does. GHD's markdown
-//! filters (emoji, `@mention`, `#123` issue and commit-SHA links, videos) are
-//! not ported.
+//! break. Bare `http(s)://` URLs are linkified as GFM does. Of GHD's
+//! markdown filters, the issue ones are [`crate::markdown_filters`] (applied
+//! when drawing); emoji, `@mention`, commit-SHA links and videos are not
+//! ported.
 
 use std::ops::Range;
 
@@ -101,7 +102,7 @@ impl RichText {
             .filter_map(|s| s.link.as_deref().map(|l| (&s.range, l)))
     }
 
-    fn push(&mut self, text: &str, style: InlineStyle, link: Option<&str>) {
+    pub(crate) fn push(&mut self, text: &str, style: InlineStyle, link: Option<&str>) {
         if text.is_empty() {
             return;
         }

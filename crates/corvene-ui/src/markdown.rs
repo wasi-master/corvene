@@ -35,6 +35,10 @@
 //! highlighted code blocks, changed-word marks and their own pictures
 //! ([`MarkdownOptions`]).
 //!
+//! GHD's issue markdown filters run when the base link is a page of a GitHub
+//! repository in the list ([`MarkdownOptions::references`]); a click on a
+//! link goes through [`crate::link_menu`] (`355-github-links-in-app`).
+//!
 //! Deviation (`881-issue-title-tooltips`): with
 //! [`rich_text_with_issue_titles`] a `#123` link's tooltip is "#123 <title>"
 //! from the repository's issue cache (hovering loads the cache), else the URL.
@@ -50,6 +54,7 @@ use corvene_core::markdown::{
 use std::ops::Range;
 
 use crate::math::SharedMacros;
+use corvene_core::markdown_filters::{ReferenceRepository, link_issue_references};
 use corvene_core::{Dispatcher, GitHubRepository};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -159,6 +164,17 @@ pub struct MarkdownOptions {
     pub highlight_code: bool,
     /// The body text size (GHD's 12 px when `None`).
     pub font_size: Option<f32>,
+    /// Link `#123` and pasted issue links of this repository (GHD's issue
+    /// markdown filters, `corvene_core::markdown_filters`).
+    pub references: Option<ReferenceRepository>,
+}
+
+/// The repository GitHub Markdown under `base_href` refers to.
+fn references_for(base_href: Option<&str>, cx: &App) -> Option<ReferenceRepository> {
+    let base = base_href?;
+    corvene_core::AppState::try_global(cx)?
+        .read(cx)
+        .reference_repository_for(base)
 }
 
 /// `1333-markdown-math`: the options GitHub.com-like Markdown (issues, pull
@@ -186,6 +202,7 @@ pub fn github_markdown(
     match github_options(cx) {
         Some(mut options) => {
             options.base_href = base_href.map(str::to_string);
+            options.references = references_for(base_href, cx);
             markdown_with(id, &parsed_math(text), &options, cx)
         }
         None => markdown(id, &parsed(text), base_href, cx),
@@ -201,7 +218,8 @@ impl Global for DetailsToggles {}
 
 /// Render `blocks` at `font_size` (GHD `--font-size`, 12 px) with
 /// `line-height: 1.5`. `base_href` resolves relative links and image
-/// sources (GHD `baseHref`). `id` keys the collapsible state: the same
+/// sources (GHD `baseHref`); a page of a GitHub repository in the list also
+/// links its issue references. `id` keys the collapsible state: the same
 /// document under the same id keeps its `<details>` open or closed.
 pub fn markdown(
     id: impl Into<SharedString>,
@@ -214,6 +232,7 @@ pub fn markdown(
         blocks,
         &MarkdownOptions {
             base_href: base_href.map(str::to_string),
+            references: references_for(base_href, cx),
             ..MarkdownOptions::default()
         },
         cx,
@@ -246,6 +265,7 @@ pub fn markdown_with(
         images: options.images.clone(),
         highlight_code: options.highlight_code,
         font_size: size,
+        references: options.references.clone().map(Rc::new),
     };
     div()
         .text_size(zpx(size))
@@ -286,6 +306,7 @@ pub fn rich_text_with_issue_titles(
         images: None,
         highlight_code: false,
         font_size: 12.,
+        references: None,
     }
     .rich(text)
 }
@@ -430,6 +451,8 @@ struct Renderer<'a> {
     images: Option<ImageResolver>,
     highlight_code: bool,
     font_size: f32,
+    /// [`MarkdownOptions::references`]
+    references: Option<Rc<ReferenceRepository>>,
 }
 
 impl Renderer<'_> {
@@ -812,6 +835,11 @@ impl Renderer<'_> {
     /// A paragraph: one text when it has no images or formulas, else its
     /// lines of text runs, images and formulas.
     fn paragraph(&self, text: &RichText) -> AnyElement {
+        let linked = self
+            .references
+            .as_ref()
+            .and_then(|repo| link_issue_references(text, repo));
+        let text = linked.as_ref().unwrap_or(text);
         if text.images.is_empty() && text.maths.is_empty() {
             return self.rich(text);
         }
