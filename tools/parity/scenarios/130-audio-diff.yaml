@@ -1,0 +1,30 @@
+# Sound diffs (1336-audio-diff): Corvene shows an edited WAVE tone's
+# waveforms stacked and overlaid, its spectrograms and its facts, with the
+# changed stretch marked; GitHub Desktop shows "This binary file has
+# changed." (deviations.md › Video and sound diffs).
+name: audio-diff
+description: An edited WAVE tone stacked, overlaid, as spectrograms and Info (Corvene only)
+setup: repo-media
+corvene_flags: 1335-video-diff=on, 1336-audio-diff=on
+steps:
+  - click: [125, 243]
+    wait: 3000
+  - snap: {name: binary, note: "GHD: binary file; Corvene: stacked waveforms, 1-1.5 s shaded"}
+  - ghd: {skip: true}
+    corvene: {click: [900, 300]}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {key: "2"}
+    wait: 1000
+  - snap: {name: overlay, corvene_only: true, note: "Overlay with the difference lane"}
+  - ghd: {skip: true}
+    corvene: {key: "3"}
+    wait: 1500
+  - snap: {name: spectrogram, corvene_only: true, note: "Spectrograms: 660 Hz band in New"}
+  - ghd: {skip: true}
+    corvene: {key: "4"}
+    wait: 800
+  - snap: {name: info, corvene_only: true, note: "Info"}
+  - click: [125, 214]
+    wait: 3000
+  - snap: {name: aac, corvene_only: true, note: "AAC song read by Symphonia"}

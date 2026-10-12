@@ -829,6 +829,54 @@ def _images(repo: Path, edited: bool) -> None:
         fill="#2da44e" if edited else "#0969da", label="Corvene 2" if edited else "Corvene"))
 
 
+# `repo-media` (`1335-video-diff`, `1336-audio-diff`): a short test-pattern
+# video with a tone, a WAVE tone and an AAC song, each edited in the working
+# copy (a red box over the picture from 1 s to 2 s; a higher note from 1 s
+# to 1.5 s). The video needs an installed `ffmpeg`; the song is made with
+# macOS `afconvert`. Encoders run single-threaded and bit-exact.
+def _wave(seconds: float, edited: bool, rate: int = 22050) -> bytes:
+    import io
+    import math
+    import struct
+    import wave
+    frames = bytearray()
+    for i in range(int(seconds * rate)):
+        t = i / rate
+        hz = 660.0 if edited and 1.0 <= t < 1.5 else 440.0
+        frames += struct.pack("<h", int(math.sin(2 * math.pi * hz * t) * 0.5 * 32767))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+    return out.getvalue()
+
+
+def _media(repo: Path, edited: bool) -> None:
+    import shutil
+    media = repo / "media"
+    media.mkdir(exist_ok=True)
+    (media / "tone.wav").write_bytes(_wave(3.0, edited))
+    if shutil.which("afconvert"):
+        tmp = media / ".song.wav"
+        tmp.write_bytes(_wave(3.0, not edited, 44100))
+        subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", str(tmp), str(media / "song.m4a")],
+                       check=True, capture_output=True)
+        tmp.unlink()
+    ffmpeg = shutil.which("ffmpeg") or next(
+        (p for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg") if Path(p).exists()), None)
+    if ffmpeg:
+        box = ",drawbox=x=60:y=50:w=140:h=90:color=red@1:t=fill:enable='between(t,1,2)'" if edited else ""
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "testsrc2=size=320x240:rate=25:duration=3", "-f", "lavfi", "-i",
+                        "sine=frequency=440:duration=3", "-vf", "format=yuv420p" + box,
+                        "-c:v", "libx264", "-threads", "1", "-preset", "veryfast",
+                        "-c:a", "aac", "-shortest", "-map_metadata", "-1",
+                        "-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact",
+                        str(media / "clip.mp4")], check=True, capture_output=True)
+
+
 # `repo-documents` (`1324-document-diff`): a Word file, a slide deck and an
 # RTF file committed on top, then edited: the Word file gets an edited
 # paragraph, a removed list item and a new table row; the deck an edited
@@ -1265,7 +1313,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
-          documents: bool = False, notebooks: bool = False, markdown: bool = False) -> Path:
+          documents: bool = False, notebooks: bool = False, markdown: bool = False,
+          media: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1426,6 +1475,12 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if archives:
         _archives(repo)
+        return repo
+    if media:
+        _media(repo, False)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "Add the media", date="2026-09-28T10:00:00+00:00")
+        _media(repo, True)
         return repo
     if documents:
         _documents(repo)

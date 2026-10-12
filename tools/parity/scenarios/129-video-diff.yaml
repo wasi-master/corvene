@@ -1,0 +1,31 @@
+# Video diffs (1335-video-diff): Corvene plays an edited video's two versions
+# in step, with the picture compared 2-up, swiped, subtracted and its facts
+# side by side; GitHub Desktop shows "This binary file has changed."
+# (deviations.md › Video and sound diffs). Needs ffmpeg for the fixture.
+name: video-diff
+description: An edited H.264 video in 2-up, at its change, Swipe, Difference and Info (Corvene only)
+setup: repo-media
+corvene_flags: 1335-video-diff=on, 1336-audio-diff=on, 1337-media-ffmpeg=on
+steps:
+  - click: [125, 185]
+    wait: 4000
+  - snap: {name: binary, note: "GHD: binary file; Corvene: 2-up with the change strip under it"}
+  - ghd: {skip: true}
+    corvene: {click: [900, 400]}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {key: "]"}
+    wait: 2000
+  - snap: {name: at-change, corvene_only: true, note: "] jumps to the first change: the red box in New"}
+  - ghd: {skip: true}
+    corvene: {key: "2"}
+    wait: 1500
+  - snap: {name: swipe, corvene_only: true, note: "Swipe, divider in the middle"}
+  - ghd: {skip: true}
+    corvene: {key: "4"}
+    wait: 2000
+  - snap: {name: difference, corvene_only: true, note: "Difference: only the box shows"}
+  - ghd: {skip: true}
+    corvene: {key: "5"}
+    wait: 800
+  - snap: {name: info, corvene_only: true, note: "Info: codecs, sizes, rates, decoders"}
