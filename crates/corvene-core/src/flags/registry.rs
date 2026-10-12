@@ -8731,6 +8731,20 @@ registry! {
         upstream: &[],
         code: &["crates/corvene-git/src/archive/mod.rs", "crates/corvene-core/src/archive_browse.rs", "crates/corvene-ui/src/archive_diff_view.rs"],
     },
+    /// Archive entries listed under their archive in the file lists.
+    ARCHIVE_ENTRIES_IN_FILE_LIST = 1328 "archive-entries-in-file-list" {
+        title: "Archive entries in file lists",
+        summary: "With archive diffs on, a changed archive in the Changes, History and stash \
+                  file lists gets a disclosure arrow that lists its changed entries under it, \
+                  like a folder. Clicking an entry shows the archive with that entry's diff.",
+        ghd_behaviour: "An archive is one row like any other file.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/file_tree_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
 
     /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
     MORE_IMAGE_FORMATS = 1326 "more-image-formats" {

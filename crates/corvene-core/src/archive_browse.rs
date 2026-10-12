@@ -6,19 +6,26 @@
 //! entry's own diff. Leaving an archive remembers the place, so coming back
 //! to it (or a refresh that reloads it) keeps the selection.
 //!
+//! `1328-archive-entries-in-file-list` lists an archive's changed entries
+//! under it in the file lists: [`ArchiveBrowses::listings`] holds the
+//! diffs read for that, and clicking an entry there selects it here.
+//!
 //! GitHub Desktop shows archives as binary files (`app/src/lib/git/diff.ts`
 //! `getBinaryPaths`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use corvene_git::archive::EntrySide;
 use corvene_models::{ArchiveDiff, ArchiveEntryChange, Diff};
 
-use crate::dispatcher::{Dispatcher, LoadedDiff};
+use crate::dispatcher::{
+    CommitDiffOptions, Dispatcher, LoadedDiff, WorkingDiffOptions, compute_commit_diff,
+    compute_working_diff,
+};
 use crate::host::Host;
-use crate::state::AppState;
+use crate::state::{AppState, RepositoryState};
 
 /// Which diff an archive view belongs to (the UI's `DiffSource`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -166,11 +173,16 @@ struct Place {
     selected: Option<String>,
 }
 
-/// Every surface's archive view.
+/// Every surface's archive view, and the file lists' archive rows.
 #[derive(Clone, Debug, Default)]
 pub struct ArchiveBrowses {
     pub open: HashMap<ArchiveSurface, ArchiveBrowse>,
     places: HashMap<(ArchiveSurface, String), Place>,
+    /// `1328-archive-entries-in-file-list`: archives expanded in a list.
+    pub expanded: HashSet<(ArchiveSurface, String)>,
+    /// Their diffs (`None` while reading), by surface, scope (the commit
+    /// selection or stash they were read for) and path.
+    listings: HashMap<(ArchiveSurface, String, String), Option<Arc<Diff>>>,
     next_request: u64,
 }
 
@@ -196,6 +208,11 @@ impl ArchiveBrowses {
                 .filter(|p| p.chain.is_empty())
                 .and_then(|p| p.selected.as_deref()),
         }
+    }
+
+    /// `1328-archive-entries-in-file-list`: whether `path` is expanded.
+    pub fn is_expanded(&self, surface: ArchiveSurface, path: &str) -> bool {
+        self.expanded.contains(&(surface, path.to_string()))
     }
 
     fn remember(&mut self, surface: ArchiveSurface) {
@@ -227,9 +244,31 @@ fn archive_of(diff: &Diff) -> Option<&ArchiveDiff> {
     }
 }
 
+/// `1328-archive-entries-in-file-list`: `path`'s listing on `surface` for
+/// what the surface shows now: `None` when not read, `Some(None)` while
+/// reading.
+pub fn listing<'a>(
+    rs: &'a RepositoryState,
+    surface: ArchiveSurface,
+    path: &str,
+) -> Option<Option<&'a ArchiveDiff>> {
+    let scope = Dispatcher::listing_scope(surface, rs);
+    rs.archives
+        .listings
+        .get(&(surface, scope, path.to_string()))
+        .map(|d| d.as_deref().and_then(archive_of))
+}
+
 /// Whether the archive view is on.
 pub fn enabled(s: &AppState) -> bool {
     s.flags.bool(crate::flags::ids::ARCHIVE_DIFF)
+}
+
+/// Whether the file lists show archives' entries.
+pub fn nested_in_lists(s: &AppState) -> bool {
+    enabled(s)
+        && s.flags
+            .bool(crate::flags::ids::ARCHIVE_ENTRIES_IN_FILE_LIST)
 }
 
 type EntryWork = (Arc<corvene_git::GitBinary>, PathBuf, Arc<ArchiveDiff>, bool);
@@ -807,6 +846,269 @@ impl Dispatcher {
                 if let Err(err) = result {
                     Self::show_error("Could not open the diff tool", err, cx);
                 }
+            },
+        );
+    }
+
+    // ---- `1328-archive-entries-in-file-list` ----
+
+    /// Expand or collapse `path`'s entries in a file list; expanding reads
+    /// its diff when no listing is kept.
+    pub fn set_archive_expanded(
+        id: u64,
+        surface: ArchiveSurface,
+        path: String,
+        expanded: bool,
+        cx: &mut dyn Host,
+    ) {
+        Self::archives_mut(id, cx, |a| {
+            let key = (surface, path.clone());
+            if expanded {
+                a.expanded.insert(key)
+            } else {
+                a.expanded.remove(&key)
+            }
+        });
+        if expanded {
+            Self::ensure_archive_listing(id, surface, path, cx);
+        }
+    }
+
+    /// Select `entry` of the archive at `path` in a file list: remembered
+    /// for when the archive opens, applied now when it is open.
+    pub fn select_archive_entry_in_list(
+        id: u64,
+        surface: ArchiveSurface,
+        path: String,
+        entry: String,
+        cx: &mut dyn Host,
+    ) {
+        let open = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.archives.open.get(&surface))
+            .is_some_and(|b| b.outer_path == path);
+        Self::archives_mut(id, cx, |a| {
+            a.places.insert(
+                (surface, path.clone()),
+                Place {
+                    chain: Vec::new(),
+                    selected: Some(entry.clone()),
+                },
+            );
+            false
+        });
+        if open {
+            let nested = Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .and_then(|rs| rs.archives.open.get(&surface))
+                .is_some_and(|b| !b.nested.is_empty());
+            if nested {
+                Self::archive_up(id, surface, usize::MAX, cx);
+            }
+            Self::select_archive_entry(id, surface, entry, cx);
+        }
+    }
+
+    /// The scope a surface's listings belong to.
+    fn listing_scope(surface: ArchiveSurface, rs: &RepositoryState) -> String {
+        match surface {
+            ArchiveSurface::History => Self::ordered_selection(rs).join(","),
+            ArchiveSurface::Stash => rs.shown_stash().map(|s| s.sha.clone()).unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// Read `path`'s listing for the current scope unless it is read or
+    /// being read (the list asks while it draws an expanded archive).
+    pub fn ensure_archive_listing(
+        id: u64,
+        surface: ArchiveSurface,
+        path: String,
+        cx: &mut dyn Host,
+    ) {
+        let read = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .is_some_and(|rs| {
+                let scope = Self::listing_scope(surface, rs);
+                rs.archives
+                    .listings
+                    .contains_key(&(surface, scope, path.clone()))
+            });
+        if !read {
+            Self::load_archive_listing(id, surface, path, cx);
+        }
+    }
+
+    /// After a status refresh: re-read the expanded working-directory
+    /// archives (their caches answer unchanged files at once).
+    pub(crate) fn refresh_archive_listings(id: u64, cx: &mut dyn Host) {
+        let reload: Vec<String> = {
+            let s = Self::state(cx).read(cx);
+            if !nested_in_lists(s) {
+                return;
+            }
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            rs.archives
+                .expanded
+                .iter()
+                .filter(|(sf, _)| *sf == ArchiveSurface::Changes)
+                .map(|(_, p)| p.clone())
+                .collect()
+        };
+        for path in reload {
+            Self::load_archive_listing(id, ArchiveSurface::Changes, path, cx);
+        }
+    }
+
+    fn load_archive_listing(id: u64, surface: ArchiveSurface, path: String, cx: &mut dyn Host) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        enum Work {
+            Working(
+                corvene_models::WorkingDirectoryFileChange,
+                WorkingDiffOptions,
+                Option<crate::diff_cache::WorkingStamp>,
+            ),
+            Commit(
+                Vec<String>,
+                corvene_models::CommittedFileChange,
+                CommitDiffOptions,
+                bool,
+            ),
+            Stash(corvene_models::CommittedFileChange, bool),
+        }
+        let (work, scope) = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            let scope = Self::listing_scope(surface, rs);
+            let work = match surface {
+                ArchiveSurface::Changes => {
+                    let Some(status) = rs.status.as_deref() else {
+                        return;
+                    };
+                    let Some(file) = status.files.iter().find(|f| f.path == path).cloned() else {
+                        return;
+                    };
+                    let options = WorkingDiffOptions::of(s, rs, &path);
+                    let stamp = crate::diff_cache::working_stamp(
+                        &workdir,
+                        &file,
+                        status.current_tip.as_deref(),
+                        options.key(),
+                    );
+                    Work::Working(file, options, stamp)
+                }
+                ArchiveSurface::History => {
+                    let shas = Self::ordered_selection(rs);
+                    let Some(file) = rs
+                        .changeset
+                        .as_ref()
+                        .and_then(|c| c.files.iter().find(|f| f.path == path).cloned())
+                    else {
+                        return;
+                    };
+                    Work::Commit(
+                        shas,
+                        file,
+                        CommitDiffOptions::of(s),
+                        s.settings.hide_whitespace_in_history_diff,
+                    )
+                }
+                ArchiveSurface::Stash => {
+                    let Some(file) = rs
+                        .stash_files
+                        .as_ref()
+                        .and_then(|f| f.iter().find(|f| f.path == path).cloned())
+                    else {
+                        return;
+                    };
+                    Work::Stash(file, s.settings.hide_whitespace_in_history_diff)
+                }
+                _ => return,
+            };
+            (work, scope)
+        };
+        let key = (surface, scope, path);
+        Self::archives_mut(id, cx, |a| {
+            // listings of another commit or stash are not shown again soon
+            a.listings
+                .retain(|(sf, sc, _), _| *sf != key.0 || *sc == key.1);
+            a.listings.entry(key.clone()).or_insert(None);
+            true
+        });
+        crate::remote::spawn_bg(
+            cx,
+            move || -> Arc<Diff> {
+                match work {
+                    Work::Working(file, options, stamp) => {
+                        if let Some(loaded) = stamp.as_ref().and_then(|st| {
+                            crate::diff_cache::working_diff(&workdir, &file.path, st)
+                        }) {
+                            return loaded.0;
+                        }
+                        let loaded = compute_working_diff(git, &workdir, &file, options, None);
+                        if let Some(stamp) = stamp {
+                            crate::diff_cache::store_working_diff(
+                                &workdir,
+                                &file.path,
+                                stamp,
+                                loaded.clone(),
+                            );
+                        }
+                        loaded.0
+                    }
+                    Work::Commit(shas, file, options, hide_whitespace) => {
+                        if let Some(loaded) = crate::diff_cache::commit_diff(
+                            &workdir,
+                            &shas,
+                            &file.path,
+                            hide_whitespace,
+                        ) {
+                            return loaded.0;
+                        }
+                        let loaded = compute_commit_diff(git, &workdir, &shas, &file, options);
+                        crate::diff_cache::store_commit_diff(
+                            &workdir,
+                            &shas,
+                            &file.path,
+                            hide_whitespace,
+                            loaded.clone(),
+                        );
+                        loaded.0
+                    }
+                    Work::Stash(file, hide_whitespace) => Arc::new(
+                        corvene_git::stash_file_diff(git, &workdir, &file, hide_whitespace)
+                            .unwrap_or(Diff::Binary),
+                    ),
+                }
+            },
+            move |diff, cx| {
+                Self::archives_mut(id, cx, |a| {
+                    if !a.listings.contains_key(&key) {
+                        return false;
+                    }
+                    let same = a
+                        .listings
+                        .get(&key)
+                        .and_then(Option::as_ref)
+                        .is_some_and(|d| **d == *diff);
+                    if same {
+                        return false;
+                    }
+                    a.listings.insert(key, Some(diff));
+                    true
+                });
             },
         );
     }

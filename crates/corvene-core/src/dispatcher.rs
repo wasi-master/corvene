@@ -2040,6 +2040,8 @@ impl Dispatcher {
                 }
                 // `1311-stacked-diff`: the stacked files' diffs too
                 Self::refresh_stacked_working(id, cx);
+                // `1328-archive-entries-in-file-list`
+                Self::refresh_archive_listings(id, cx);
                 // GHD `GitStore.loadFilesForCurrentStashEntry`, run with every
                 // stash entry load (the no-changes "View stash" card counts them)
                 Self::load_stash_files(id, cx);

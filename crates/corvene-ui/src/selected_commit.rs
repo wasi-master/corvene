@@ -38,6 +38,7 @@ use gpui_kit::*;
 use crate::widgets::GhdTooltip;
 use crate::widgets::IconButtonA11y;
 use crate::widgets::ListRowA11y;
+use corvene_core::archive_browse::ArchiveSurface;
 
 use crate::actions::{
     CopySelectedFilePaths, CopySelectedRelativeFilePaths, ExtendSelectionDown, ExtendSelectionUp,
@@ -80,6 +81,9 @@ pub struct SelectedCommitView {
     /// is its origin.
     multi_end: Option<String>,
     file_scroll: UniformListScrollHandle,
+    /// `1328-archive-entries-in-file-list`: the rows drawn, as of the last
+    /// render.
+    archive_splice: std::rc::Rc<crate::archive_list_rows::ArchiveSplice>,
     /// Shift+F10 / Menu: the selected file's row.
     menu_anchor: crate::context_menu::RowMenuAnchor,
     /// Corvene (`801-history-review-mode`): the file list is hidden.
@@ -133,6 +137,7 @@ impl SelectedCommitView {
             multi_end: None,
             menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&file_scroll),
             file_scroll,
+            archive_splice: Default::default(),
             file_list_hidden: false,
             tree: Default::default(),
         }
@@ -300,7 +305,7 @@ impl SelectedCommitView {
             None => return,
         }
         self.file_scroll
-            .scroll_to_item(row, ScrollStrategy::Nearest);
+            .scroll_to_item(self.archive_splice.display_of(row), ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -431,7 +436,8 @@ impl SelectedCommitView {
         self.multi_files = None;
         self.multi_end = None;
         Dispatcher::select_commit_file(id, order[ix].clone(), cx);
-        self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        self.file_scroll
+            .scroll_to_item(self.archive_splice.display_of(ix), ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -527,7 +533,8 @@ impl SelectedCommitView {
             None => order.iter().position(|p| *p == new_end),
         };
         if let Some(ix) = row {
-            self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+            self.file_scroll
+                .scroll_to_item(self.archive_splice.display_of(ix), ScrollStrategy::Nearest);
         }
         let next: Vec<String> = order.into_iter().filter(|p| range.contains(p)).collect();
         self.multi_files = (next.len() > 1).then_some((commits, next));
@@ -1240,9 +1247,10 @@ impl SelectedCommitView {
     }
 
     /// `FileList` + `.file-list-header`
-    fn file_list(&self, id: u64, cx: &Context<Self>) -> AnyElement {
-        let t = cx.ghd();
-        let s = self.state.read(cx);
+    fn file_list(&mut self, id: u64, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        let state = self.state.clone();
+        let s = state.read(cx);
         let rs = s.repo_states.get(&id);
         let files: Vec<CommittedFileChange> = rs
             .and_then(|r| r.changeset.as_ref())
@@ -1293,6 +1301,36 @@ impl SelectedCommitView {
         let tree_anchor = tree.as_ref().and_then(|t| self.tree_current_row(id, t, cx));
         let cursor_row = tree.as_ref().and_then(|t| self.tree.cursor_row(&t.2));
         let rows = tree.as_ref().map_or(count, |t| t.2.rows.len());
+        // `1328-archive-entries-in-file-list`
+        let (splice, missing) = match rs {
+            Some(rs) => {
+                crate::archive_list_rows::splice(s, rs, ArchiveSurface::History, rows, |path| {
+                    match &tree {
+                        Some(t) => {
+                            let item = t.0.iter().position(|p| p == path)?;
+                            let row = t.2.row_of_item(item)?;
+                            matches!(
+                                t.2.rows.get(row),
+                                Some(corvene_core::file_tree::TreeRow::File { .. })
+                            )
+                            .then(|| (row, Some(t.2.rows[row].depth())))
+                        }
+                        None => files
+                            .iter()
+                            .position(|f| f.path == path)
+                            .map(|ix| (ix, None)),
+                    }
+                })
+            }
+            None => (
+                crate::archive_list_rows::ArchiveSplice::plain(rows),
+                Vec::new(),
+            ),
+        };
+        crate::archive_list_rows::request_missing(id, ArchiveSurface::History, missing, cx);
+        let splice = std::rc::Rc::new(splice);
+        self.archive_splice = splice.clone();
+        let rows = splice.len();
         let files = std::rc::Rc::new(files);
         let focus = self.file_list_focus.clone();
         let focused = self.file_list_focused;
@@ -1331,6 +1369,40 @@ impl SelectedCommitView {
                         uniform_list("commit-file-rows", rows, move |range, _, cx| {
                             range
                                 .map(|ix| {
+                                    let ix = match splice.row(ix) {
+                                        Some(crate::archive_list_rows::DisplayRow::Base(b)) => b,
+                                        Some(crate::archive_list_rows::DisplayRow::Child(
+                                            list,
+                                            c,
+                                        )) => {
+                                            let outer = list.outer.clone();
+                                            let (focus, weak) = (focus.clone(), weak.clone());
+                                            return crate::archive_list_rows::child_row(
+                                                id,
+                                                ArchiveSurface::History,
+                                                list,
+                                                c,
+                                                multi.is_empty()
+                                                    && selected.as_deref()
+                                                        == Some(list.outer.as_str()),
+                                                focused,
+                                                std::rc::Rc::new(move |window, cx| {
+                                                    window.focus(&focus, cx);
+                                                    weak.update(cx, |this, cx| {
+                                                        this.click_file(
+                                                            id,
+                                                            outer.clone(),
+                                                            FileClick::Plain,
+                                                            cx,
+                                                        )
+                                                    })
+                                                    .ok();
+                                                }),
+                                                cx,
+                                            );
+                                        }
+                                        None => return div().into_any_element(),
+                                    };
                                     if let Some(t) = &tree {
                                         return commit_tree_row(
                                             id,
@@ -1837,6 +1909,14 @@ fn commit_file_row(
                 ))
             },
         )
+        // `1328-archive-entries-in-file-list`
+        .children(crate::archive_list_rows::toggle(
+            id,
+            ArchiveSurface::History,
+            &file.path,
+            (is_selected && list_focused).then_some(t.box_selected_active_text),
+            cx,
+        ))
         // `1319-trivial-change-icon`
         .child(crate::trivial_change::status_icon(
             icon,
@@ -2068,6 +2148,7 @@ impl Render for SelectedCommitView {
                 .and_then(|rs| corvene_core::stacked_diff::commit_stack(s, rs, &multi))
                 .is_some()
         };
+        let file_list = self.file_list(id, cx);
         let diff_pane = div().size_full().flex().flex_col().min_h_0();
         let diff_pane = if stacked {
             diff_pane.child(StackedDiffView::embed(&self.stacked))
@@ -2133,7 +2214,7 @@ impl Render for SelectedCommitView {
                                     "Selected commit file list",
                                     FILE_LIST_MIN()..FILE_LIST_MAX(),
                                 ),
-                                self.file_list(id, cx),
+                                file_list,
                             )
                             // `1310-file-list-tree`: ← / → fold the tree's folders
                             .key_context(if crate::file_tree_rows::tree_mode(cx) {

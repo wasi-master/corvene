@@ -14,6 +14,8 @@
 //! Deviation (`1315-discard-stash-file`): a file's context menu can take it
 //! out of the stash (GHD's `FileList` here has no context menu).
 
+use corvene_core::archive_browse::ArchiveSurface;
+use corvene_core::file_tree::TreeRow;
 use corvene_core::{AppState, CommittedFileChange, Dispatcher};
 use gpui_kit::component::resizable::{
     ResizablePanelEvent, ResizableState, h_resizable, resizable_panel,
@@ -53,6 +55,9 @@ pub struct StashDiffViewer {
     file_scroll: UniformListScrollHandle,
     /// `1310-file-list-tree`: the file list's folders.
     tree: crate::file_tree_rows::ListTree,
+    /// `1328-archive-entries-in-file-list`: the rows drawn, as of the last
+    /// render.
+    archive_splice: std::rc::Rc<crate::archive_list_rows::ArchiveSplice>,
 }
 
 /// `1310-file-list-tree`: a tree over the stash's paths.
@@ -82,6 +87,7 @@ impl StashDiffViewer {
             file_list_focused: false,
             file_scroll: UniformListScrollHandle::new(),
             tree: Default::default(),
+            archive_splice: Default::default(),
         }
     }
 
@@ -131,7 +137,7 @@ impl StashDiffViewer {
             None => return,
         }
         self.file_scroll
-            .scroll_to_item(row, ScrollStrategy::Nearest);
+            .scroll_to_item(self.archive_splice.display_of(row), ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -232,12 +238,14 @@ impl StashDiffViewer {
     fn select_index(&mut self, id: u64, order: &[String], ix: usize, cx: &mut Context<Self>) {
         self.tree.clear_cursor();
         Dispatcher::select_stash_file(id, order[ix].clone(), cx);
-        self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        self.file_scroll
+            .scroll_to_item(self.archive_splice.display_of(ix), ScrollStrategy::Nearest);
     }
 
-    fn file_list(&self, id: u64, cx: &Context<Self>) -> AnyElement {
-        let t = cx.ghd();
-        let s = self.state.read(cx);
+    fn file_list(&mut self, id: u64, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        let state = self.state.clone();
+        let s = state.read(cx);
         let rs = s.repo_states.get(&id);
         let files: Vec<CommittedFileChange> =
             rs.and_then(|r| r.stash_files.clone()).unwrap_or_default();
@@ -248,6 +256,33 @@ impl StashDiffViewer {
         let weak = cx.weak_entity();
         let focus = self.file_list_focus.clone();
         let count = tree.as_ref().map_or(files.len(), |t| t.2.rows.len());
+        // `1328-archive-entries-in-file-list`
+        let (splice, missing) = match rs {
+            Some(rs) => {
+                crate::archive_list_rows::splice(s, rs, ArchiveSurface::Stash, count, |path| {
+                    match &tree {
+                        Some(t) => {
+                            let item = t.0.iter().position(|p| p == path)?;
+                            let row = t.2.row_of_item(item)?;
+                            matches!(t.2.rows.get(row), Some(TreeRow::File { .. }))
+                                .then(|| (row, Some(t.2.rows[row].depth())))
+                        }
+                        None => files
+                            .iter()
+                            .position(|f| f.path == path)
+                            .map(|ix| (ix, None)),
+                    }
+                })
+            }
+            None => (
+                crate::archive_list_rows::ArchiveSplice::plain(count),
+                Vec::new(),
+            ),
+        };
+        crate::archive_list_rows::request_missing(id, ArchiveSurface::Stash, missing, cx);
+        let splice = std::rc::Rc::new(splice);
+        self.archive_splice = splice.clone();
+        let count = splice.len();
         let files = std::rc::Rc::new(files);
         let scroll = self.file_scroll.clone();
         let focused = self.file_list_focused;
@@ -271,6 +306,34 @@ impl StashDiffViewer {
                         uniform_list("stash-file-rows", count, move |range, _, cx| {
                             range
                                 .map(|ix| {
+                                    let ix = match splice.row(ix) {
+                                        Some(crate::archive_list_rows::DisplayRow::Base(b)) => b,
+                                        Some(crate::archive_list_rows::DisplayRow::Child(
+                                            list,
+                                            c,
+                                        )) => {
+                                            let outer = list.outer.clone();
+                                            let focus = focus.clone();
+                                            return crate::archive_list_rows::child_row(
+                                                id,
+                                                ArchiveSurface::Stash,
+                                                list,
+                                                c,
+                                                selected.as_deref() == Some(list.outer.as_str()),
+                                                focused,
+                                                std::rc::Rc::new(move |window, cx| {
+                                                    window.focus(&focus, cx);
+                                                    Dispatcher::select_stash_file(
+                                                        id,
+                                                        outer.clone(),
+                                                        cx,
+                                                    )
+                                                }),
+                                                cx,
+                                            );
+                                        }
+                                        None => return div().into_any_element(),
+                                    };
                                     if let Some(t) = &tree {
                                         return stash_tree_row(
                                             id,
@@ -528,6 +591,14 @@ fn stash_file_row(
             }
             .text_size(FONT_SIZE())
         })
+        // `1328-archive-entries-in-file-list`
+        .children(crate::archive_list_rows::toggle(
+            id,
+            ArchiveSurface::Stash,
+            &file.path,
+            (is_selected && list_focused).then_some(t.box_selected_active_text),
+            cx,
+        ))
         // `1319-trivial-change-icon`
         .child(crate::trivial_change::status_icon(
             icon,
@@ -595,7 +666,7 @@ fn open_stash_file_menu(
 impl Render for StashDiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.file_list_focused = self.file_list_focus.is_focused(window);
-        let t = cx.ghd();
+        let t = cx.ghd().clone();
         let id = self.state.read(cx).selected;
         let Some(id) = id else {
             return div().size_full().into_any_element();
@@ -616,6 +687,7 @@ impl Render for StashDiffViewer {
                 ("Stashed changes".to_string(), None)
             }
         };
+        let file_list = self.file_list(id, cx);
         div()
             .id("stash-diff-viewer")
             .size_full()
@@ -701,7 +773,7 @@ impl Render for StashDiffViewer {
                                         "Stash file list",
                                         FILE_LIST_MIN()..FILE_LIST_MAX(),
                                     ),
-                                    self.file_list(id, cx),
+                                    file_list,
                                 )
                                 // `1310-file-list-tree`: ← / → fold the tree's folders
                                 .key_context(if crate::file_tree_rows::tree_mode(cx) {

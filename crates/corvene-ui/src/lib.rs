@@ -23,6 +23,7 @@ pub mod commit_message_avatar;
 pub mod context_menu;
 pub mod copy_button;
 pub mod archive_diff_view;
+pub mod archive_list_rows;
 pub mod csv_table_diff;
 pub mod dialog;
 pub mod dialogs;

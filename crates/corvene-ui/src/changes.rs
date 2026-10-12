@@ -116,6 +116,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use corvene_core::archive_browse::ArchiveSurface;
 use corvene_core::changelists::{Changelists, UNGROUPED};
 use corvene_core::commit_progress::{CommitPhase, CommitProgress};
 use corvene_core::filter::{no_results_message, option_count};
@@ -264,6 +265,9 @@ pub struct ChangesSidebar {
     check_all_focus: FocusHandle,
     /// Keeps the row an arrow key moved to in view (`scrollRowToVisible`).
     list_scroll: UniformListScrollHandle,
+    /// `1328-archive-entries-in-file-list`: the rows drawn, as of the last
+    /// render (the list renders from `&self`).
+    archive_splice: std::cell::RefCell<std::rc::Rc<crate::archive_list_rows::ArchiveSplice>>,
     /// Shift+F10 / Menu: the selected file's row.
     menu_anchor: crate::context_menu::RowMenuAnchor,
     /// View › Hide Changes Filter (`isChangesFilterVisible`).
@@ -1168,6 +1172,7 @@ impl ChangesSidebar {
             check_all_focus: cx.focus_handle(),
             menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&list_scroll),
             list_scroll,
+            archive_splice: Default::default(),
             filter_visible: true,
             autocomplete: None,
             summary_misspelled: Vec::new(),
@@ -2334,8 +2339,10 @@ impl ChangesSidebar {
             return;
         };
         Dispatcher::select_file(id, file.path.clone(), cx);
-        self.list_scroll
-            .scroll_to_item(index, ScrollStrategy::Nearest);
+        self.list_scroll.scroll_to_item(
+            self.archive_splice.borrow().display_of(index),
+            ScrollStrategy::Nearest,
+        );
     }
 
     /// The repository and the highlighted files (the selection, else the
@@ -2469,8 +2476,10 @@ impl ChangesSidebar {
             end.and_then(|p| order.iter().position(|o| *o == p))
         };
         if let Some(index) = index {
-            self.list_scroll
-                .scroll_to_item(index, ScrollStrategy::Nearest);
+            self.list_scroll.scroll_to_item(
+                self.archive_splice.borrow().display_of(index),
+                ScrollStrategy::Nearest,
+            );
         }
     }
 
@@ -3052,8 +3061,10 @@ impl ChangesSidebar {
             }
             None => return,
         }
-        self.list_scroll
-            .scroll_to_item(row, ScrollStrategy::Nearest);
+        self.list_scroll.scroll_to_item(
+            self.archive_splice.borrow().display_of(row),
+            ScrollStrategy::Nearest,
+        );
     }
 
     /// The row the keyboard moves from: the group header or folder row the
@@ -4950,6 +4961,24 @@ impl ChangesSidebar {
         let tree_cursor = self.tree_cursor.clone();
         let group_cursor = self.group_cursor;
         let rows = layout.rows;
+        // `1328-archive-entries-in-file-list` (expanding reads the
+        // listing, and every refresh re-reads it)
+        let splice = std::rc::Rc::new(match (repo_id, s.selected_state()) {
+            (Some(_), Some(rs)) => {
+                crate::archive_list_rows::splice(s, rs, ArchiveSurface::Changes, rows, |path| {
+                    let visible = files.position(path)?;
+                    let row = layout.row_of_visible(visible)?;
+                    match layout.row(row)? {
+                        RowRef::File { depth, .. } => Some((row, depth)),
+                        _ => None,
+                    }
+                })
+                .0
+            }
+            _ => crate::archive_list_rows::ArchiveSplice::plain(rows),
+        });
+        *self.archive_splice.borrow_mut() = splice.clone();
+        let rows = splice.len();
         let query: SharedString = self.filter.read(cx).value().trim().to_string().into();
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();
@@ -4981,6 +5010,32 @@ impl ChangesSidebar {
                     let query = query.clone();
                     range
                         .filter_map(|ix| {
+                            let ix = match splice.row(ix)? {
+                                crate::archive_list_rows::DisplayRow::Base(b) => b,
+                                crate::archive_list_rows::DisplayRow::Child(list, c) => {
+                                    let id = repo_id?;
+                                    let outer = list.outer.clone();
+                                    let (focus, weak) = (list_focus.clone(), weak.clone());
+                                    return Some(crate::archive_list_rows::child_row(
+                                        id,
+                                        ArchiveSurface::Changes,
+                                        list,
+                                        c,
+                                        selected.list.len() == 1 && selected.contains(&list.outer),
+                                        list_focused,
+                                        std::rc::Rc::new(move |window, cx| {
+                                            window.focus(&focus, cx);
+                                            weak.update(cx, |this, _| {
+                                                this.tree_cursor = None;
+                                                this.group_cursor = None;
+                                            })
+                                            .ok();
+                                            Dispatcher::select_file(id, outer.clone(), cx);
+                                        }),
+                                        cx,
+                                    ));
+                                }
+                            };
                             let anchor = (anchor_row == Some(ix)).then_some(&menu_anchor);
                             match layout.row(ix)? {
                                 RowRef::File { visible, depth } => {
@@ -7664,6 +7719,16 @@ fn file_row(
                 cx,
             ))
         })
+        // `1328-archive-entries-in-file-list`
+        .children(repo_id.and_then(|repo| {
+            crate::archive_list_rows::toggle(
+                repo,
+                ArchiveSurface::Changes,
+                &file.path,
+                (is_selected && list_focused).then_some(t.box_selected_active_text),
+                cx,
+            )
+        }))
         // `1319-trivial-change-icon`
         .child(crate::trivial_change::status_icon(
             icon,
