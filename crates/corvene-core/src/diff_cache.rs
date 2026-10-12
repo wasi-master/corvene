@@ -121,9 +121,23 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
         } => [previous, current]
             .into_iter()
             .flatten()
-            .map(|d| {
-                d.images.iter().map(|i| i.bytes.len()).sum::<usize>() + d.block_count() * 160
-            })
+            .map(|d| d.images.iter().map(|i| i.bytes.len()).sum::<usize>() + d.block_count() * 160)
+            .sum(),
+        // `1331-notebook-diff`: both notebooks (the JSON diff is `source`)
+        corvene_models::Diff::Notebook {
+            previous, current, ..
+        } => [previous, current]
+            .into_iter()
+            .flatten()
+            .map(|n| n.weight())
+            .sum(),
+        // `1332-latex-diff`
+        corvene_models::Diff::Latex {
+            previous, current, ..
+        } => [previous, current]
+            .into_iter()
+            .flatten()
+            .map(|l| l.text.len() + l.images.iter().map(|(_, i)| i.bytes.len()).sum::<usize>())
             .sum(),
         _ => 0,
     };

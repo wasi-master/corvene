@@ -11,6 +11,7 @@ corvene-core.workspace = true
 corvene-extensions.workspace = true
 # `1329-font-diff`: font files read, compared and drawn
 corvene-fonts.workspace = true
+corvene-math.workspace = true
 corvene-highlight.workspace = true
 corvene-packs.workspace = true
 corvene-git.workspace = true

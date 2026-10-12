@@ -137,11 +137,11 @@ use crate::diff_view_rows::{
     max_line_number, render_row, render_split_row, search_rows, spans_for_row, unified_inner,
     unified_to_split,
 };
+use crate::document_diff::DocumentDiff;
 use crate::font_diff::FontDiffView;
 use crate::font_diff::source::FontSourceView;
 use crate::icons::{Octicon, octicon};
 use crate::image_diff::ImageDiff;
-use crate::document_diff::DocumentDiff;
 use crate::pdf_diff::PdfDiff;
 use crate::scrollbar::{ScrollbarExt, gutter, scrollbar};
 use crate::theme::sizes::*;
@@ -264,6 +264,8 @@ pub fn diff_header(
         .children(font_source_switch(path, cx))
         // `1324-document-diff`
         .children(document_switch(view, cx))
+        // `1331-notebook-diff` / `1332-latex-diff`
+        .children(rich_text::rich_switch(view, cx))
         // `798-blame`
         .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
@@ -424,7 +426,10 @@ fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement
         views.push((V::Pages, "Pages", "document-view-pages"));
     }
     let current = effective_document_view(s);
-    let selected = views.iter().position(|(v, _, _)| *v == current).unwrap_or(0);
+    let selected = views
+        .iter()
+        .position(|(v, _, _)| *v == current)
+        .unwrap_or(0);
     let ids: Vec<&'static str> = views.iter().map(|(_, _, id)| *id).collect();
     let labels: Vec<&'static str> = views.iter().map(|(_, l, _)| *l).collect();
     let values: Vec<V> = views.iter().map(|(v, _, _)| *v).collect();
@@ -723,6 +728,10 @@ struct Snapshot {
     /// `1324-document-diff`: the document diff `diff` was made from (the
     /// Text and Pages views replace it).
     document_source: Option<Arc<Diff>>,
+    /// `1331-notebook-diff` / `1332-latex-diff`: the notebook or LaTeX diff
+    /// `diff` was made from (the JSON, Script, Text and Pages views
+    /// replace it).
+    rich_source: Option<Arc<Diff>>,
 }
 
 /// A position in the diff's text: a list row (unified or split index) and a
@@ -878,6 +887,8 @@ pub struct DiffView {
     _document_text_task: Option<Task<()>>,
     document_pages: Option<(Arc<Diff>, DocumentPages)>,
     _document_pages_task: Option<Task<()>>,
+    /// `1331-notebook-diff` / `1332-latex-diff`
+    rich: rich_text::RichPane,
     context_menu: Option<Entity<ContextMenu>>,
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
@@ -1008,6 +1019,7 @@ impl DiffView {
             _document_text_task: None,
             document_pages: None,
             _document_pages_task: None,
+            rich: rich_text::RichPane::default(),
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
@@ -1229,6 +1241,14 @@ impl DiffView {
             Some((view, flip)) => (view, generation ^ flip, None, None),
             None => (diff, generation, contents, old_contents),
         };
+        // `1331-notebook-diff` / `1332-latex-diff`: the JSON / Script / Text
+        // / Pages view of a notebook or LaTeX file
+        let rich_source = rich_text::is_rich(&diff).then(|| diff.clone());
+        let (diff, generation, contents, old_contents) = match self.rich_view_of(&diff, cx) {
+            Some((view, flip, true)) => (view, generation ^ flip, contents, old_contents),
+            Some((view, flip, false)) => (view, generation ^ flip, None, None),
+            None => (diff, generation, contents, old_contents),
+        };
         // `1323-archive-diff`: rows are keyed by the entry's full name, so
         // the same path in another archive (or level) is another diff
         let key_path = match self.source {
@@ -1254,6 +1274,7 @@ impl DiffView {
             confirm_discard: s.settings.confirm_discard_changes,
             as_text,
             document_source,
+            rich_source,
         })
     }
 
@@ -1337,6 +1358,7 @@ impl DiffView {
             confirm_discard: s.settings.confirm_discard_changes,
             as_text,
             document_source: None,
+            rich_source: None,
         })
     }
 
@@ -1661,6 +1683,7 @@ impl DiffView {
             Some(_) => {}
             None => self.document = None,
         }
+        self.load_rich(snap, cx);
         let same_file = self
             .rows_key
             .as_ref()
@@ -2025,7 +2048,7 @@ impl DiffView {
     /// in Git LFS (the index holds its pointer).
     fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
         let warnings = diff.warnings();
-        warnings.is_some_and(|w| w.lfs_contents || w.pdf_text || w.document_text)
+        warnings.is_some_and(|w| w.lfs_contents || w.pdf_text || w.document_text || w.derived_text)
             || (warnings.is_some_and(|w| w.type_change.is_some())
                 && self
                     .state
@@ -3804,6 +3827,7 @@ impl DiffView {
         self.request_pdf_text(&snap.diff, cx);
         self.document_source = snap.document_source.clone();
         self.request_document_view(&snap, cx);
+        self.request_rich_view(&snap, cx);
         // View › Zoom changed the row heights the list has cached
         let zoom = crate::theme::sizes::zoom_factor();
         // … and so does `751-diff-font-size`
@@ -3950,6 +3974,8 @@ impl DiffView {
             },
             // `1324-document-diff`
             Diff::Document { .. } => self.document_panel(cx),
+            // `1331-notebook-diff` / `1332-latex-diff`
+            Diff::Notebook { .. } | Diff::Latex { .. } => self.rich_panel(snap, cx),
         })
     }
 
@@ -4025,8 +4051,7 @@ impl DiffView {
             V::Text if !fresh(self.document_text.as_ref().map(|(s, _)| s)) => {
                 // RTF: git's own diff of the markup
                 if let Diff::Document {
-                    source: Some(text),
-                    ..
+                    source: Some(text), ..
                 } = &*source
                 {
                     let text = Arc::new((**text).clone());
@@ -5529,6 +5554,9 @@ fn selection_of_lines(lines: &[u32]) -> DiffSelection {
     }
     selection
 }
+
+/// `1331-notebook-diff` / `1332-latex-diff`
+mod rich_text;
 
 #[cfg(test)]
 mod tests {

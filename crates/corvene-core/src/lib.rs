@@ -15,6 +15,7 @@ pub mod avatar_users;
 pub mod avatars;
 pub mod banner_focus;
 pub mod bisect;
+pub mod block_diff;
 pub mod blame;
 pub mod bookmarks;
 pub mod branch_pruner;
@@ -64,6 +65,9 @@ pub mod insights;
 pub mod integrations;
 pub mod issues;
 pub mod job_log;
+pub mod latex_doc;
+pub mod bibtex;
+pub mod latex_pages;
 pub mod keymap_file;
 pub mod lfs_locks;
 pub mod line_selection;
@@ -74,6 +78,8 @@ pub mod mco;
 pub mod menu_bar_status;
 pub mod menu_state;
 pub mod navigation;
+pub mod notebook_diff;
+pub mod notebook_stage;
 pub mod new_branch_flows;
 pub mod notifications;
 pub mod offset_from;
@@ -157,6 +163,7 @@ pub use persistence::{
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
 pub use persistence::DocumentDiffView;
+pub use persistence::{LatexDiffView, NotebookDiffView};
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{

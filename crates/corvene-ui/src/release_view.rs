@@ -75,9 +75,10 @@ impl ReleaseView {
                 .child("No release notes.")
                 .into_any_element()
         } else {
-            crate::markdown::markdown(
+            // `1333-markdown-math`
+            crate::markdown::github_markdown(
                 format!("release-body-{release}"),
-                &crate::markdown::parsed(&row.body),
+                &row.body,
                 Some(&row.html_url),
                 cx,
             )

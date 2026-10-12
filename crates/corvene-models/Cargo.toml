@@ -6,7 +6,7 @@ license.workspace = true
 description = "Corvene domain models (leaf crate shared by git, github, core)"
 
 [dependencies]
-serde.workspace = true
+serde = { workspace = true, features = ["rc"] }
 thiserror.workspace = true
 
 [dev-dependencies]

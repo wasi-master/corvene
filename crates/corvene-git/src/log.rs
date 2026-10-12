@@ -1187,6 +1187,49 @@ fn finish_committed_diff(
             )
             .unwrap_or(diff)
         }
+        // `1331-notebook-diff` / `1332-latex-diff`
+        diff @ (Diff::Text { .. } | Diff::LargeText { .. })
+            if crate::notebook_file::is_notebook(&file.path)
+                || crate::latex_file::is_latex(&file.path) =>
+        {
+            use crate::linked_files::Side;
+            let current = || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok();
+            let previous =
+                || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok();
+            let linked = |side: Side, rel: &str| {
+                let rev = match side {
+                    Side::Current => newest,
+                    Side::Previous => base,
+                };
+                crate::linked_files::read_blob(
+                    workdir,
+                    rev,
+                    rel,
+                    crate::diff::LINKED_FILE_MAX_BYTES,
+                )
+            };
+            let source = diff.clone();
+            if crate::notebook_file::is_notebook(&file.path) {
+                crate::notebook_file::notebook_diff(
+                    &file.path,
+                    file.status.kind,
+                    current,
+                    previous,
+                    source,
+                    linked,
+                )
+            } else {
+                crate::latex_file::latex_diff(
+                    &file.path,
+                    file.status.kind,
+                    current,
+                    previous,
+                    source,
+                    linked,
+                )
+            }
+            .unwrap_or(diff)
+        }
         other => other,
     }
 }

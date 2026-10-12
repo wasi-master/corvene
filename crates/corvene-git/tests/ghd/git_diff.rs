@@ -131,6 +131,8 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::TooLarge => "Unrenderable",
         Diff::Submodule(_) => "Submodule",
         Diff::Document { .. } => "Document",
+        Diff::Notebook { .. } => "Notebook",
+        Diff::Latex { .. } => "Latex",
     }
 }
 

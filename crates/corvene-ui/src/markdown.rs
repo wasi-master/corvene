@@ -29,6 +29,12 @@
 //! and has no padding or rounded corners, `<sub>` / `<sup>` are not smaller,
 //! and images sit on the bottom of their line rather than the baseline.
 //!
+//! Deviation (`1333-markdown-math`, and always in notebooks and LaTeX
+//! files): with [`MarkdownOptions::macros`] set, `$…$` / `$$…$$` math is
+//! typeset ([`crate::math`]); notebooks and LaTeX files also get
+//! highlighted code blocks, changed-word marks and their own pictures
+//! ([`MarkdownOptions`]).
+//!
 //! Deviation (`881-issue-title-tooltips`): with
 //! [`rich_text_with_issue_titles`] a `#123` link's tooltip is "#123 <title>"
 //! from the repository's issue cache (hovering loads the cache), else the URL.
@@ -41,6 +47,9 @@ use std::sync::Arc;
 use corvene_core::markdown::{
     AlertKind, Align, Block, InlineImage, ListItem, RichText, resolve_link,
 };
+use std::ops::Range;
+
+use crate::math::SharedMacros;
 use corvene_core::{Dispatcher, GitHubRepository};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -106,6 +115,83 @@ pub fn parsed(text: &str) -> Arc<Vec<Block>> {
     })
 }
 
+/// [`parsed`] with math (`1333-markdown-math`).
+pub fn parsed_math(text: &str) -> Arc<Vec<Block>> {
+    thread_local! {
+        static PARSED_MATH: RefCell<ParseCache> = RefCell::new((HashMap::new(), VecDeque::new()));
+    }
+    PARSED_MATH.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(blocks) = cache.0.get(text) {
+            return blocks.clone();
+        }
+        let blocks = Arc::new(corvene_core::markdown::parse_with(
+            text,
+            corvene_core::markdown::ParseOptions { math: true },
+        ));
+        let key: Arc<str> = Arc::from(text);
+        if cache.1.len() >= PARSE_CACHE_SIZE
+            && let Some(old) = cache.1.pop_front()
+        {
+            cache.0.remove(&old);
+        }
+        cache.1.push_back(key.clone());
+        cache.0.insert(key, blocks.clone());
+        blocks
+    })
+}
+
+/// Pictures a document carries itself (a notebook cell's attachments, a
+/// repository file at the diff's revision), by source as written.
+pub type ImageResolver = Rc<dyn Fn(&str) -> Option<Arc<Image>>>;
+
+/// How [`markdown_with`] draws a document beyond GHD's renderer.
+#[derive(Clone, Default)]
+pub struct MarkdownOptions {
+    pub base_href: Option<String>,
+    /// Typeset math with these macros (`None`: math shows as its source).
+    pub macros: Option<SharedMacros>,
+    /// Changed-word ranges of a lone paragraph or heading, and their colour.
+    pub marks: Option<(Rc<[Range<usize>]>, Hsla)>,
+    /// Pictures resolved before the network is tried.
+    pub images: Option<ImageResolver>,
+    /// Syntax-highlight fenced code blocks by their language.
+    pub highlight_code: bool,
+    /// The body text size (GHD's 12 px when `None`).
+    pub font_size: Option<f32>,
+}
+
+/// `1333-markdown-math`: the options GitHub.com-like Markdown (issues, pull
+/// requests, releases) is drawn with when the flag is on.
+pub fn github_options(cx: &App) -> Option<MarkdownOptions> {
+    let on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::MARKDOWN_MATH)
+    });
+    on.then(|| MarkdownOptions {
+        macros: Some(SharedMacros::default()),
+        ..MarkdownOptions::default()
+    })
+}
+
+/// `markdown` with `1333-markdown-math` applied: the text is parsed with
+/// math when the flag is on.
+pub fn github_markdown(
+    id: impl Into<SharedString>,
+    text: &str,
+    base_href: Option<&str>,
+    cx: &App,
+) -> Div {
+    match github_options(cx) {
+        Some(mut options) => {
+            options.base_href = base_href.map(str::to_string);
+            markdown_with(id, &parsed_math(text), &options, cx)
+        }
+        None => markdown(id, &parsed(text), base_href, cx),
+    }
+}
+
 /// `<details>` blocks toggled away from their initial state (`open` or
 /// not), by element key; kept for the session.
 #[derive(Default)]
@@ -123,11 +209,30 @@ pub fn markdown(
     base_href: Option<&str>,
     cx: &App,
 ) -> Div {
+    markdown_with(
+        id,
+        blocks,
+        &MarkdownOptions {
+            base_href: base_href.map(str::to_string),
+            ..MarkdownOptions::default()
+        },
+        cx,
+    )
+}
+
+/// [`markdown`] with [`MarkdownOptions`].
+pub fn markdown_with(
+    id: impl Into<SharedString>,
+    blocks: &[Block],
+    options: &MarkdownOptions,
+    cx: &App,
+) -> Div {
     let underline =
         corvene_core::AppState::try_global(cx).is_some_and(|s| s.read(cx).settings.underline_links);
+    let size = options.font_size.unwrap_or(12.);
     let r = Renderer {
         id: id.into(),
-        base: base_href.map(Rc::from),
+        base: options.base_href.as_deref().map(Rc::from),
         t: cx.ghd(),
         cx,
         underline,
@@ -136,10 +241,15 @@ pub fn markdown(
         next: Cell::new(0),
         next_details: Cell::new(0),
         align: Cell::new(None),
+        macros: options.macros.clone(),
+        marks: options.marks.clone(),
+        images: options.images.clone(),
+        highlight_code: options.highlight_code,
+        font_size: size,
     };
     div()
-        .text_size(zpx(12.))
-        .line_height(LINE_HEIGHT())
+        .text_size(zpx(size))
+        .line_height(zpx(size * 1.5))
         .text_color(r.t.text)
         .child(r.blocks(blocks, 0))
 }
@@ -171,6 +281,11 @@ pub fn rich_text_with_issue_titles(
         next: Cell::new(0),
         next_details: Cell::new(0),
         align: Cell::new(None),
+        macros: None,
+        marks: None,
+        images: None,
+        highlight_code: false,
+        font_size: 12.,
     }
     .rich(text)
 }
@@ -217,10 +332,11 @@ fn alert_style(kind: AlertKind, dark: bool) -> (Hsla, Hsla, Octicon) {
     }
 }
 
-/// One piece of a line of a paragraph with images.
+/// One piece of a line of a paragraph with images or formulas.
 enum Piece {
     Text(std::ops::Range<usize>),
     Image(usize),
+    Math(usize),
 }
 
 /// A paragraph with images as lines (split at its line breaks) of text
@@ -245,14 +361,36 @@ fn lines_of(text: &RichText) -> Vec<Vec<Piece>> {
             line.push(Piece::Text(start..to));
         }
     };
+    // images and formulas in text order
+    let mut objects: Vec<(usize, Piece)> = text
+        .images
+        .iter()
+        .enumerate()
+        .map(|(ix, i)| (i.at, Piece::Image(ix)))
+        .chain(
+            text.maths
+                .iter()
+                .enumerate()
+                .map(|(ix, m)| (m.at, Piece::Math(ix))),
+        )
+        .collect();
+    objects.sort_by_key(|(at, _)| *at);
     let mut at = 0;
-    for (ix, image) in text.images.iter().enumerate() {
-        let image_at = image.at.clamp(at, text.text.len());
-        push_text(&mut lines, at, image_at);
-        if let Some(line) = lines.last_mut() {
-            line.push(Piece::Image(ix));
+    for (object_at, piece) in objects {
+        let object_at = object_at.clamp(at, text.text.len());
+        push_text(&mut lines, at, object_at);
+        let display = matches!(piece, Piece::Math(ix) if text.maths[ix].display);
+        // `$$…$$` amid text sits on a line of its own
+        if display && lines.last().is_some_and(|l| !l.is_empty()) {
+            lines.push(Vec::new());
         }
-        at = image_at;
+        if let Some(line) = lines.last_mut() {
+            line.push(piece);
+        }
+        if display {
+            lines.push(Vec::new());
+        }
+        at = object_at;
     }
     push_text(&mut lines, at, text.text.len());
     lines
@@ -286,6 +424,12 @@ struct Renderer<'a> {
     next_details: Cell<usize>,
     /// The `<p align>` around the blocks being drawn.
     align: Cell<Option<Align>>,
+    /// [`MarkdownOptions`]
+    macros: Option<SharedMacros>,
+    marks: Option<(Rc<[Range<usize>]>, Hsla)>,
+    images: Option<ImageResolver>,
+    highlight_code: bool,
+    font_size: f32,
 }
 
 impl Renderer<'_> {
@@ -342,6 +486,24 @@ impl Renderer<'_> {
                     .child(self.paragraph(text))
                     .into_any_element()
             }
+            Block::CodeBlock { code, language } if self.highlight_code => {
+                self.highlighted_code(code, language.as_deref())
+            }
+            Block::Math { tex, number } => match &self.macros {
+                Some(macros) => crate::math::block(
+                    self.element_id(),
+                    tex,
+                    number.as_deref(),
+                    macros,
+                    zpx(self.font_size),
+                    self.cx,
+                ),
+                None => div()
+                    .font_family(mono_font())
+                    .text_color(t.md_fg_muted)
+                    .child(SharedString::from(format!("$$ {tex} $$")))
+                    .into_any_element(),
+            },
             Block::CodeBlock { code, .. } => div()
                 .id(self.element_id())
                 .w_full()
@@ -600,10 +762,57 @@ impl Renderer<'_> {
             .into_any_element()
     }
 
-    /// A paragraph: one text when it has no images, else its lines of text
-    /// runs and images.
+    /// A fenced code block highlighted by its language.
+    fn highlighted_code(&self, code: &str, language: Option<&str>) -> AnyElement {
+        let t = self.t;
+        let lines: Vec<&str> = code.split('\n').collect();
+        let path = format!("code.{}", extension_for(language.unwrap_or("")));
+        let mut highlights = Vec::new();
+        if lines.len() <= 4_000
+            && let Some(spans) = corvene_highlight::highlight_lines(&path, lines.iter().copied())
+        {
+            let mut offset = 0;
+            for (line, spans) in lines.iter().zip(spans) {
+                for span in spans {
+                    let range = offset + span.range.start..offset + span.range.end;
+                    if range.end <= code.len()
+                        && code.is_char_boundary(range.start)
+                        && code.is_char_boundary(range.end)
+                    {
+                        highlights.push((
+                            range,
+                            HighlightStyle {
+                                color: Some(crate::diff_view_rows::token_color(span.class, t)),
+                                ..HighlightStyle::default()
+                            },
+                        ));
+                    }
+                }
+                offset += line.len() + 1;
+            }
+        }
+        div()
+            .id(self.element_id())
+            .w_full()
+            .overflow_x_scroll()
+            .p(zpx(12.))
+            .rounded(zpx(6.))
+            .bg(t.md_canvas_subtle)
+            .font_family(mono_font())
+            .text_size(zpx(self.font_size * 0.85))
+            .line_height(zpx(self.font_size * 0.85 * 1.45))
+            .whitespace_nowrap()
+            .text_align(TextAlign::Left)
+            .child(
+                StyledText::new(SharedString::from(code.to_string())).with_highlights(highlights),
+            )
+            .into_any_element()
+    }
+
+    /// A paragraph: one text when it has no images or formulas, else its
+    /// lines of text runs, images and formulas.
     fn paragraph(&self, text: &RichText) -> AnyElement {
-        if text.images.is_empty() {
+        if text.images.is_empty() && text.maths.is_empty() {
             return self.rich(text);
         }
         let justify = self.align.get();
@@ -624,25 +833,70 @@ impl Renderer<'_> {
                     Some(Align::Right) => d.justify_end(),
                     _ => d,
                 })
-                .children(line.into_iter().map(|piece| {
-                    match piece {
-                        Piece::Text(range) => div()
+                .children(line.into_iter().map(|piece| match piece {
+                    Piece::Text(range) => {
+                        let marks = self.slice_marks(range.clone());
+                        div()
                             .min_w_0()
                             .flex_shrink(1.)
-                            .child(self.rich(&text.slice(range)))
-                            .into_any_element(),
-                        Piece::Image(ix) => self.image(&text.images[ix]),
+                            .child(self.rich_marked(&text.slice(range), &marks))
+                            .into_any_element()
                     }
+                    Piece::Image(ix) => self.image(&text.images[ix]),
+                    Piece::Math(ix) => self.math(&text.maths[ix]),
                 }));
             col = col.child(row);
         }
         col.into_any_element()
     }
 
+    /// An inline formula, or its source when math is off.
+    fn math(&self, math: &corvene_core::markdown::InlineMath) -> AnyElement {
+        match &self.macros {
+            Some(macros) => crate::math::inline(
+                self.element_id(),
+                &math.tex,
+                math.display,
+                macros,
+                zpx(self.font_size),
+                self.cx,
+            ),
+            None => div()
+                .flex_none()
+                .font_family(mono_font())
+                .child(SharedString::from(if math.display {
+                    format!("$${}$$", math.tex)
+                } else {
+                    format!("${}$", math.tex)
+                }))
+                .into_any_element(),
+        }
+    }
+
+    /// The marks within `range` of the paragraph, from its start.
+    fn slice_marks(&self, range: Range<usize>) -> Vec<Range<usize>> {
+        let Some((marks, _)) = &self.marks else {
+            return Vec::new();
+        };
+        marks
+            .iter()
+            .filter(|m| m.end > range.start && m.start < range.end)
+            .map(|m| m.start.max(range.start) - range.start..m.end.min(range.end) - range.start)
+            .collect()
+    }
+
     /// An image: the downloaded file at its size (at most the width there
     /// is), else its alt text.
     fn image(&self, image: &InlineImage) -> AnyElement {
         let t = self.t;
+        if let Some(resolved) = self.images.as_ref().and_then(|r| r(&image.src)) {
+            let element = img(resolved).max_w_full().object_fit(ObjectFit::ScaleDown);
+            return match (image.width, image.height) {
+                (Some(w), _) => element.w(zpx(w as f32)).into_any_element(),
+                (None, Some(h)) => element.h(zpx(h as f32)).into_any_element(),
+                _ => element.max_h(zpx(480.)).into_any_element(),
+            };
+        }
         let Some(url) = resolve_link(&image.src, self.base.as_deref()) else {
             return self.image_alt(image, false);
         };
@@ -736,8 +990,14 @@ impl Renderer<'_> {
             .into_any_element()
     }
 
-    /// One paragraph: styled runs, clickable links.
+    /// One paragraph: styled runs, clickable links (and the changed-word
+    /// marks of a lone paragraph).
     fn rich(&self, text: &RichText) -> AnyElement {
+        let marks = self.slice_marks(0..text.text.len());
+        self.rich_marked(text, &marks)
+    }
+
+    fn rich_marked(&self, text: &RichText, marks: &[Range<usize>]) -> AnyElement {
         let t = self.t;
         let mut highlights = Vec::new();
         let mut fonts: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
@@ -788,6 +1048,11 @@ impl Renderer<'_> {
                 );
             }
         }
+        if !marks.is_empty()
+            && let Some((_, mark_bg)) = &self.marks
+        {
+            highlights = overlay_marks(&text.text, highlights, marks, *mark_bg);
+        }
         let styled = StyledText::new(SharedString::from(text.text.clone()))
             .with_highlights(highlights)
             .with_font_family_overrides(fonts);
@@ -823,4 +1088,93 @@ impl Renderer<'_> {
         })
         .into_any_element()
     }
+}
+
+/// `highlights` (sorted, not overlapping) with `marks` laid over them as a
+/// background: the ranges are cut where either starts or ends.
+fn overlay_marks(
+    text: &str,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    marks: &[Range<usize>],
+    bg: Hsla,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let mut cuts: Vec<usize> = highlights
+        .iter()
+        .flat_map(|(r, _)| [r.start, r.end])
+        .chain(marks.iter().flat_map(|m| [m.start, m.end]))
+        .map(|c| c.min(text.len()))
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut out = Vec::new();
+    for pair in cuts.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if a >= b || !text.is_char_boundary(a) || !text.is_char_boundary(b) {
+            continue;
+        }
+        let base = highlights
+            .iter()
+            .find(|(r, _)| r.start <= a && b <= r.end)
+            .map(|(_, h)| *h);
+        let marked = marks.iter().any(|m| m.start <= a && b <= m.end);
+        match (base, marked) {
+            (Some(mut h), true) => {
+                h.background_color = Some(bg);
+                out.push((a..b, h));
+            }
+            (Some(h), false) => out.push((a..b, h)),
+            (None, true) => out.push((
+                a..b,
+                HighlightStyle {
+                    background_color: Some(bg),
+                    ..HighlightStyle::default()
+                },
+            )),
+            (None, false) => {}
+        }
+    }
+    out
+}
+
+/// A file extension the highlighter knows for a code fence's language.
+pub fn extension_for(language: &str) -> String {
+    let lang = language
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '{')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match lang.as_str() {
+        "python" | "py" | "python3" | "ipython" | "ipython3" => "py",
+        "javascript" | "js" | "node" => "js",
+        "typescript" | "ts" => "ts",
+        "rust" | "rs" => "rs",
+        "ruby" | "rb" => "rb",
+        "julia" | "jl" => "jl",
+        "r" => "r",
+        "bash" | "sh" | "shell" | "zsh" | "console" => "sh",
+        "c++" | "cpp" | "cxx" => "cpp",
+        "c" => "c",
+        "csharp" | "c#" | "cs" => "cs",
+        "fsharp" | "f#" => "fs",
+        "golang" | "go" => "go",
+        "java" => "java",
+        "kotlin" | "kt" => "kt",
+        "scala" => "scala",
+        "haskell" | "hs" => "hs",
+        "matlab" | "octave" => "m",
+        "latex" | "tex" => "tex",
+        "markdown" | "md" => "md",
+        "yaml" | "yml" => "yml",
+        "json" => "json",
+        "toml" => "toml",
+        "html" => "html",
+        "css" => "css",
+        "sql" => "sql",
+        "powershell" | "ps1" => "ps1",
+        "perl" | "pl" => "pl",
+        "lua" => "lua",
+        "" => "txt",
+        other => return other.to_string(),
+    }
+    .to_string()
 }

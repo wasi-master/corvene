@@ -1,0 +1,26 @@
+# LaTeX and BibTeX files shown rendered (1332-latex-diff, off in the GitHub
+# Desktop preset; deviations.md › Diff viewer). GHD shows their text diffs.
+# paper.tex gets an edited abstract, a new citation, a new numbered
+# equation with a resolved \eqref and an edited figure caption (the figure
+# drawn from the repository); refs.bib an edited and an added entry.
+# Coordinates: calibrate the switch click on the first run.
+name: latex-diff
+description: LaTeX and BibTeX files rendered, then as text (Corvene only)
+setup: repo-notebooks
+corvene_flags: 1332-latex-diff=on
+steps:
+  - click: [125, 243]
+    wait: 1500
+  - snap: {name: paper, corvene_only: true, note: "GHD shows the text diff (1332-latex-diff)"}
+  - click: [125, 272]
+    wait: 1200
+  - snap: {name: refs, corvene_only: true, note: "BibTeX entries as references with changed fields"}
+  - click: [125, 243]
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {click: [1270, 97]}
+    wait: 1000
+  - snap: {name: paper-text, corvene_only: true, note: "the Rendered / Text switch"}
+  - ghd: {skip: true}
+    corvene: {click: [1215, 97]}
+    wait: 800

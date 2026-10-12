@@ -75,9 +75,10 @@ pub fn markdown_editor(
                 .child("Nothing to preview")
                 .into_any_element()
         } else {
-            crate::markdown::markdown(
+            // `1333-markdown-math`
+            crate::markdown::github_markdown(
                 SharedString::from(format!("{key}-preview")),
-                &crate::markdown::parsed(&text),
+                &text,
                 base_href,
                 cx,
             )

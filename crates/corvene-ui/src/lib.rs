@@ -51,6 +51,9 @@ pub mod keymap;
 pub mod link_menu;
 pub mod markdown;
 pub mod markdown_editor;
+pub mod math;
+pub mod notebook_diff;
+pub mod latex_diff;
 #[cfg(not(target_os = "macos"))]
 pub mod menu_bar;
 pub mod missing_repository;

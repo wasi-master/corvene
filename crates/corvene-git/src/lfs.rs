@@ -269,7 +269,7 @@ pub fn resolve_lfs_text(
 }
 
 /// Whether a text diff's lines are those of LFS pointer files.
-fn is_pointer_diff(hunks: &[corvene_models::DiffHunk]) -> bool {
+pub(crate) fn is_pointer_diff(hunks: &[corvene_models::DiffHunk]) -> bool {
     hunks.iter().flat_map(|h| h.lines.iter()).any(|l| {
         l.text.starts_with("oid sha256:")
             || l.text

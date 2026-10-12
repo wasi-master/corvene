@@ -244,9 +244,56 @@ pub fn working_directory_diff(
             )
             .unwrap_or(diff)
         }
+        // `1331-notebook-diff` / `1332-latex-diff`: a notebook read into
+        // cells, a LaTeX file shown rendered, next to git's own diff
+        diff @ (Diff::Text { .. } | Diff::LargeText { .. })
+            if crate::notebook_file::is_notebook(&file.path)
+                || crate::latex_file::is_latex(&file.path) =>
+        {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            let (old_rev, old_path) = match &old_side {
+                Some((rev, path)) => (rev.as_str(), path.as_str()),
+                None => ("HEAD", previous_path),
+            };
+            let current = || std::fs::read(workdir.join(&file.path)).ok();
+            let previous = || blob_bytes(git.clone(), workdir, old_rev, old_path).ok();
+            let linked = |side: crate::linked_files::Side, rel: &str| match side {
+                crate::linked_files::Side::Current => {
+                    crate::linked_files::read_working(workdir, rel, LINKED_FILE_MAX_BYTES)
+                }
+                crate::linked_files::Side::Previous => {
+                    crate::linked_files::read_blob(workdir, old_rev, rel, LINKED_FILE_MAX_BYTES)
+                }
+            };
+            let source = diff.clone();
+            if crate::notebook_file::is_notebook(&file.path) {
+                crate::notebook_file::notebook_diff(
+                    &file.path,
+                    file.status.kind,
+                    current,
+                    previous,
+                    source,
+                    linked,
+                )
+            } else {
+                crate::latex_file::latex_diff(
+                    &file.path,
+                    file.status.kind,
+                    current,
+                    previous,
+                    source,
+                    linked,
+                )
+            }
+            .unwrap_or(diff)
+        }
         other => other,
     })
 }
+
+/// A linked file read from the working tree for a notebook or LaTeX diff
+/// (`1331-notebook-diff`, `1332-latex-diff`); larger ones are left out.
+pub(crate) const LINKED_FILE_MAX_BYTES: usize = 16 << 20;
 
 /// `git diff --no-index` of two versions held in memory (`None` for a
 /// side that does not exist), run in a temporary directory so none of the
@@ -1094,6 +1141,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         utf16: None,
         pdf_text: false,
         document_text: false,
+        derived_text: false,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

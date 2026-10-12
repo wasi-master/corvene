@@ -2428,7 +2428,10 @@ impl DocBlob {
                 for block in &section.notes {
                     block.text_lines(&mut note);
                 }
-                lines.extend(note.into_iter().map(|l| format!("> {l}").trim_end().to_string()));
+                lines.extend(
+                    note.into_iter()
+                        .map(|l| format!("> {l}").trim_end().to_string()),
+                );
             }
         }
         let mut text = lines.join("\n");
@@ -2443,6 +2446,175 @@ impl DocBlob {
             .map(|s| s.blocks.len() + s.notes.len())
             .sum()
     }
+}
+
+/// Corvene `1331-notebook-diff`: the kind of a Jupyter notebook cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NbCellKind {
+    Code,
+    Markdown,
+    Raw,
+}
+
+/// Corvene `1331-notebook-diff`: the payload of one MIME type of an output
+/// or attachment bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NbData {
+    /// Text (`text/plain`, `text/html`, `text/latex`, `image/svg+xml`, …).
+    Text(String),
+    /// Base64 bytes (`image/png`, `image/jpeg`, `application/pdf`, …),
+    /// decoded only when drawn.
+    Base64(String),
+    /// A JSON value (`application/json`, widget and chart specs),
+    /// pretty-printed with sorted keys.
+    Json(String),
+}
+
+impl NbData {
+    pub fn text(&self) -> &str {
+        match self {
+            NbData::Text(s) | NbData::Base64(s) | NbData::Json(s) => s,
+        }
+    }
+}
+
+/// Corvene `1331-notebook-diff`: one entry of a MIME bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NbMime {
+    pub mime: String,
+    pub data: NbData,
+}
+
+/// Corvene `1331-notebook-diff`: nbformat `output_type`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NbOutputKind {
+    Stream,
+    DisplayData,
+    ExecuteResult,
+    Error,
+}
+
+/// Corvene `1331-notebook-diff`: one output of a code cell.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NbOutput {
+    pub kind: NbOutputKind,
+    /// The stream (`stdout`, `stderr`) or the exception class (`ename`).
+    pub name: String,
+    /// A stream's text, or an error's traceback lines joined by newlines
+    /// (both may hold ANSI escapes).
+    pub text: String,
+    /// An error's `evalue`.
+    pub evalue: String,
+    /// `execute_result`'s `execution_count`.
+    pub execution_count: Option<u64>,
+    /// The MIME bundle of `display_data` / `execute_result`, in file order.
+    pub data: Vec<NbMime>,
+    /// Output metadata keys and their pretty-printed JSON values, sorted.
+    pub metadata: Vec<(String, String)>,
+}
+
+/// Corvene `1331-notebook-diff`: a markdown cell attachment
+/// (`![](attachment:name.png)`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NbAttachment {
+    pub name: String,
+    pub data: Vec<NbMime>,
+}
+
+/// Corvene `1331-notebook-diff`: one cell of a notebook.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NbCell {
+    /// nbformat 4.5 cell `id`.
+    pub id: Option<String>,
+    pub kind: NbCellKind,
+    pub source: String,
+    pub execution_count: Option<u64>,
+    pub outputs: Vec<NbOutput>,
+    /// Cell metadata keys and their pretty-printed JSON values, sorted.
+    pub metadata: Vec<(String, String)>,
+    pub attachments: Vec<NbAttachment>,
+    /// The cell's lines in the file (1-based, inclusive), from its `{` to
+    /// its closing `}` or `},`; ties the cell to git's own diff for staging.
+    pub lines: (u32, u32),
+}
+
+/// Corvene `1331-notebook-diff`: one side of a notebook diff, read from an
+/// nbformat 3 or 4 `.ipynb` file.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotebookBlob {
+    /// `nbformat`, `nbformat_minor`.
+    pub format: (u32, u32),
+    /// `language_info.name` or the kernelspec's language (`python`).
+    pub language: String,
+    /// `language_info.file_extension` (`.py`), for highlighting.
+    pub file_extension: String,
+    /// The kernelspec's `display_name` (`Python 3 (ipykernel)`).
+    pub kernel: Option<String>,
+    /// Notebook metadata keys and their pretty-printed JSON values, sorted.
+    pub metadata: Vec<(String, String)>,
+    pub cells: Vec<NbCell>,
+    /// Repository images markdown cells link to by relative path, read at
+    /// the same revision.
+    pub linked_images: Vec<(String, ImageBlob)>,
+    /// The file's text, for checking a staged selection still parses.
+    #[serde(skip)]
+    pub raw: std::sync::Arc<str>,
+}
+
+impl NotebookBlob {
+    /// Cells, outputs and image payload size (diff cache sizing).
+    pub fn weight(&self) -> usize {
+        self.raw.len().max(
+            self.cells
+                .iter()
+                .map(|c| {
+                    c.source.len()
+                        + c.outputs
+                            .iter()
+                            .map(|o| {
+                                o.text.len()
+                                    + o.data.iter().map(|d| d.data.text().len()).sum::<usize>()
+                            })
+                            .sum::<usize>()
+                })
+                .sum(),
+        )
+    }
+}
+
+/// Corvene `1332-latex-diff`: what a LaTeX-family text file holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LatexKind {
+    /// `.tex`, `.ltx`, `.latex`: a document or a part of one.
+    Document,
+    /// `.bib`, `.bibtex`: a BibTeX bibliography.
+    Bibliography,
+}
+
+/// Corvene `1332-latex-diff`: one side of a LaTeX or BibTeX diff.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatexBlob {
+    pub text: String,
+    /// Pictures `\includegraphics` names, read at the same revision, by the
+    /// path as written.
+    pub images: Vec<(String, ImageBlob)>,
+}
+
+/// Corvene `1331-notebook-diff`: whether `path` is a Jupyter notebook.
+pub fn is_notebook_file(path: &str) -> bool {
+    path.rsplit_once('.')
+        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("ipynb"))
+}
+
+/// Corvene `1332-latex-diff`: the LaTeX kind of `path` (`.sty`, `.cls` and
+/// `.dtx` are macro code and stay text).
+pub fn latex_kind(path: &str) -> Option<LatexKind> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "tex" | "ltx" | "latex" => LatexKind::Document,
+        "bib" | "bibtex" => LatexKind::Bibliography,
+        _ => return None,
+    })
 }
 
 /// GHD `ISubmoduleDiff`.
@@ -2614,6 +2786,11 @@ pub struct DiffWarnings {
     /// cannot be selected.
     #[serde(default)]
     pub document_text: bool,
+    /// Corvene `1331-notebook-diff` / `1332-latex-diff`: the diff compares
+    /// text made from a notebook's cells (its Script view) or a document's
+    /// rendering, so its lines cannot be selected.
+    #[serde(default)]
+    pub derived_text: bool,
 }
 
 /// Corvene `1306-utf16-diffs`: how a UTF-16 text file is stored.
@@ -2692,6 +2869,23 @@ pub enum Diff {
         #[serde(default)]
         source: Option<Box<Diff>>,
     },
+    /// Corvene `1331-notebook-diff`: a Jupyter notebook read into cells.
+    /// `previous` is missing for new files, `current` for deleted ones.
+    /// `source` is git's own diff of the JSON, for the JSON view and for
+    /// staging (a cell's checkbox selects its lines there).
+    Notebook {
+        previous: Option<std::sync::Arc<NotebookBlob>>,
+        current: Option<std::sync::Arc<NotebookBlob>>,
+        source: Box<Diff>,
+    },
+    /// Corvene `1332-latex-diff`: a LaTeX document or BibTeX bibliography
+    /// shown rendered. `source` is git's own diff, for the Text view.
+    Latex {
+        kind: LatexKind,
+        previous: Option<std::sync::Arc<LatexBlob>>,
+        current: Option<std::sync::Arc<LatexBlob>>,
+        source: Box<Diff>,
+    },
 }
 
 impl Diff {
@@ -2704,6 +2898,7 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.line_count(),
+            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.line_count(),
             _ => 0,
         }
     }
@@ -2717,6 +2912,7 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.hunks(),
+            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.hunks(),
             _ => None,
         }
     }
@@ -2729,6 +2925,7 @@ impl Diff {
                 source: Some(source),
                 ..
             } => source.warnings(),
+            Diff::Notebook { source, .. } | Diff::Latex { source, .. } => source.warnings(),
             _ => None,
         }
     }

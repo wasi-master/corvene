@@ -67,18 +67,31 @@ pub struct InlineImage {
     pub link: Option<String>,
 }
 
-/// One paragraph's text with its styled spans and images.
+/// TeX math inside a paragraph (`$…$`; `$$…$$` amid text), when parsed
+/// with [`ParseOptions::math`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlineMath {
+    /// Byte offset into the paragraph's text where the formula sits.
+    pub at: usize,
+    pub tex: String,
+    /// `$$…$$`: display style, on a line of its own.
+    pub display: bool,
+}
+
+/// One paragraph's text with its styled spans, images and formulas.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RichText {
     pub text: String,
     pub spans: Vec<Span>,
     /// Sorted by `at`.
     pub images: Vec<InlineImage>,
+    /// Sorted by `at`.
+    pub maths: Vec<InlineMath>,
 }
 
 impl RichText {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.images.is_empty()
+        self.text.is_empty() && self.images.is_empty() && self.maths.is_empty()
     }
 
     /// The linked spans in order, for click handling.
@@ -131,6 +144,7 @@ impl RichText {
             text: self.text[range].to_string(),
             spans,
             images: Vec::new(),
+            maths: Vec::new(),
         }
     }
 
@@ -140,8 +154,12 @@ impl RichText {
     }
 
     fn trim_end_matches(&mut self, chars: &[char]) {
-        // white space before the last image stays
-        let keep = self.images.last().map_or(0, |i| i.at);
+        // white space before the last image or formula stays
+        let keep = self
+            .images
+            .last()
+            .map_or(0, |i| i.at)
+            .max(self.maths.last().map_or(0, |m| m.at));
         let trimmed = self.text.trim_end_matches(chars).len().max(keep);
         self.text.truncate(trimmed);
         self.spans.retain(|s| s.range.start < trimmed);
@@ -151,11 +169,24 @@ impl RichText {
         for image in &mut self.images {
             image.at = image.at.min(trimmed);
         }
+        for math in &mut self.maths {
+            math.at = math.at.min(trimmed);
+        }
     }
 
     /// Whether anything but white space was collected.
     fn has_content(&self) -> bool {
-        !self.images.is_empty() || !self.text.trim().is_empty()
+        !self.images.is_empty() || !self.maths.is_empty() || !self.text.trim().is_empty()
+    }
+
+    /// The paragraph is one `$$…$$` formula and nothing else.
+    fn lone_display_math(&self) -> Option<&str> {
+        match self.maths.as_slice() {
+            [m] if m.display && self.images.is_empty() && self.text.trim().is_empty() => {
+                Some(&m.tex)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -250,20 +281,120 @@ pub enum Block {
     },
     /// The footnote definitions, numbered from 1 in reference order.
     Footnotes(Vec<Vec<Block>>),
+    /// A display formula (`$$…$$` alone in a paragraph, a ```` ```math ````
+    /// fence, a LaTeX math environment) when parsed with
+    /// [`ParseOptions::math`]. `number` is a LaTeX equation number.
+    Math {
+        tex: String,
+        number: Option<String>,
+    },
+}
+
+/// How [`parse_with`] reads Markdown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ParseOptions {
+    /// `$…$` / `$$…$$` / ```` ```math ```` and bare `\begin{align}`-style
+    /// environments become formulas, as github.com and Jupyter show them
+    /// (Corvene `1331-notebook-diff`, `1333-markdown-math`). Off, they stay
+    /// text, as in GHD.
+    pub math: bool,
 }
 
 /// Parse Markdown into blocks.
 pub fn parse(markdown: &str) -> Vec<Block> {
-    let options = Options::ENABLE_STRIKETHROUGH
+    parse_with(markdown, ParseOptions::default())
+}
+
+/// Parse Markdown into blocks with `options`.
+pub fn parse_with(markdown: &str, options: ParseOptions) -> Vec<Block> {
+    let mut flags = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_GFM;
-    let mut walk = Walk::default();
-    for event in Parser::new_ext(markdown, options) {
+    let wrapped;
+    let markdown = if options.math {
+        flags |= Options::ENABLE_MATH;
+        wrapped = wrap_math_environments(markdown);
+        wrapped.as_str()
+    } else {
+        markdown
+    };
+    let mut walk = Walk {
+        math: options.math,
+        ..Walk::default()
+    };
+    for event in Parser::new_ext(markdown, flags) {
         walk.event(event);
     }
     walk.finish()
+}
+
+/// Math environments MathJax typesets where they stand in Jupyter markdown.
+const MATH_ENVIRONMENTS: [&str; 16] = [
+    "equation",
+    "equation*",
+    "align",
+    "align*",
+    "aligned",
+    "gather",
+    "gather*",
+    "gathered",
+    "multline",
+    "multline*",
+    "split",
+    "eqnarray",
+    "eqnarray*",
+    "alignat",
+    "alignat*",
+    "CD",
+];
+
+/// Puts `$$` lines around a `\begin{align}` … `\end{align}` that starts a
+/// line outside code (Jupyter's MathJax renders those without dollars).
+fn wrap_math_environments(markdown: &str) -> String {
+    let mut out = String::with_capacity(markdown.len() + 16);
+    let mut open: Option<String> = None;
+    let mut fence: Option<&str> = None;
+    for line in markdown.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if open.is_none() {
+            for marker in ["```", "~~~"] {
+                if trimmed.starts_with(marker) {
+                    fence = match fence {
+                        Some(m) if m == marker => None,
+                        None => Some(marker),
+                        other => other,
+                    };
+                }
+            }
+        }
+        if fence.is_none()
+            && open.is_none()
+            && let Some(env) = trimmed
+                .strip_prefix("\\begin{")
+                .and_then(|r| r.split_once('}'))
+                .map(|(env, _)| env)
+                .filter(|env| MATH_ENVIRONMENTS.contains(env))
+        {
+            out.push_str("$$\n");
+            open = Some(format!("\\end{{{env}}}"));
+        }
+        out.push_str(line);
+        if let Some(end) = &open
+            && line.contains(end.as_str())
+        {
+            if !line.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str("$$\n");
+            open = None;
+        }
+    }
+    if open.is_some() {
+        out.push_str("\n$$\n");
+    }
+    out
 }
 
 /// Plain text of a document (search, accessibility labels, previews).
@@ -291,6 +422,7 @@ pub fn plain_text(blocks: &[Block]) -> String {
                     walk(blocks, out);
                 }
                 Block::Footnotes(notes) => notes.iter().for_each(|n| walk(n, out)),
+                Block::Math { tex, .. } => out.push(tex.clone()),
             }
         }
     }
@@ -323,7 +455,7 @@ pub fn image_sources(blocks: &[Block]) -> Vec<&str> {
                     walk(blocks, out);
                 }
                 Block::Footnotes(notes) => notes.iter().for_each(|n| walk(n, out)),
-                Block::CodeBlock { .. } | Block::Rule => {}
+                Block::CodeBlock { .. } | Block::Rule | Block::Math { .. } => {}
             }
         }
     }
@@ -447,6 +579,8 @@ struct Walk {
     /// Footnote labels in the order of their first reference.
     footnote_order: Vec<String>,
     footnotes: Vec<(String, Vec<Block>)>,
+    /// [`ParseOptions::math`].
+    math: bool,
 }
 
 /// A commit message as GHD's `RichText` shows it: the
@@ -922,7 +1056,13 @@ impl Walk {
                 self.frame().blocks.push(Block::Heading { level, text })
             }
             InlineTarget::Paragraph if !text.has_content() => {}
-            InlineTarget::Paragraph => self.frame().blocks.push(Block::Paragraph(text)),
+            InlineTarget::Paragraph => match text.lone_display_math() {
+                Some(tex) => {
+                    let tex = tex.trim().to_string();
+                    self.frame().blocks.push(Block::Math { tex, number: None })
+                }
+                None => self.frame().blocks.push(Block::Paragraph(text)),
+            },
             InlineTarget::Cell => {
                 if let Some(table) = self.tables.last_mut() {
                     if table.in_head {
@@ -1060,6 +1200,20 @@ impl Walk {
             last = range.end;
         }
         self.inline().push(&text[last..], style, None);
+    }
+
+    fn push_math(&mut self, tex: &str, display: bool) {
+        if let Some(image) = &mut self.image {
+            image.alt.push_str(tex);
+            return;
+        }
+        let inline = self.inline();
+        let at = inline.text.len();
+        inline.maths.push(InlineMath {
+            at,
+            tex: tex.to_string(),
+            display,
+        });
     }
 
     fn push_image(&mut self, src: String, alt: String, width: Option<u32>, height: Option<u32>) {
@@ -1396,6 +1550,13 @@ impl Walk {
             if code.ends_with('\n') {
                 code.pop();
             }
+            if self.math && language.as_deref() == Some("math") {
+                self.push_block(Block::Math {
+                    tex: code,
+                    number: None,
+                });
+                return;
+            }
             self.push_block(Block::CodeBlock { language, code });
         }
     }
@@ -1427,7 +1588,9 @@ impl Walk {
             }
             Event::Html(html) => self.html(&html, true),
             Event::InlineHtml(html) => self.html(&html, false),
-            Event::InlineMath(m) | Event::DisplayMath(m) => self.text(&m),
+            Event::InlineMath(m) | Event::DisplayMath(m) if !self.math => self.text(&m),
+            Event::InlineMath(m) => self.push_math(&m, false),
+            Event::DisplayMath(m) => self.push_math(&m, true),
             Event::FootnoteReference(label) => {
                 let number = self.footnote_number(&label);
                 let link = format!("#user-content-fn-{label}");
@@ -2026,5 +2189,61 @@ mod tests {
     fn plain_text_joins_blocks() {
         let blocks = parse("# T\n\n- a\n- b\n\n```\ncode\n```");
         assert_eq!(plain_text(&blocks), "T\na\nb\ncode");
+    }
+}
+
+#[cfg(test)]
+mod math_tests {
+    use super::*;
+
+    fn math(md: &str) -> Vec<Block> {
+        parse_with(md, ParseOptions { math: true })
+    }
+
+    #[test]
+    fn inline_and_display_math() {
+        let blocks = math("Euler: $e^{i\\pi} + 1 = 0$ holds.\n\n$$\\int_0^1 x\\,dx$$\n");
+        let Block::Paragraph(text) = &blocks[0] else {
+            panic!("{blocks:?}")
+        };
+        assert_eq!(text.text, "Euler:  holds.");
+        assert_eq!(text.maths.len(), 1);
+        assert_eq!(text.maths[0].tex, "e^{i\\pi} + 1 = 0");
+        assert_eq!(text.maths[0].at, 7);
+        assert!(!text.maths[0].display);
+        assert_eq!(
+            blocks[1],
+            Block::Math {
+                tex: "\\int_0^1 x\\,dx".into(),
+                number: None
+            }
+        );
+    }
+
+    #[test]
+    fn math_off_keeps_text() {
+        let blocks = parse("cost $5 and $x^2$");
+        let Block::Paragraph(text) = &blocks[0] else {
+            panic!()
+        };
+        assert!(text.maths.is_empty());
+        assert!(text.text.contains("x^2"));
+    }
+
+    #[test]
+    fn fences_and_environments() {
+        let blocks = math(
+            "```math\na^2+b^2=c^2\n```\n\n\\begin{align}\na &= b\\\\\nc &= d\n\\end{align}\n\ntext\n",
+        );
+        assert!(matches!(&blocks[0], Block::Math { tex, .. } if tex == "a^2+b^2=c^2"));
+        assert!(
+            matches!(&blocks[1], Block::Math { tex, .. } if tex.starts_with("\\begin{align}") && tex.ends_with("\\end{align}")),
+            "{:?}",
+            blocks[1]
+        );
+        assert!(matches!(&blocks[2], Block::Paragraph(t) if t.text == "text"));
+        // not inside code
+        let code = math("```\n\\begin{align}\nx\n\\end{align}\n```\n");
+        assert!(matches!(&code[0], Block::CodeBlock { .. }));
     }
 }

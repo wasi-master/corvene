@@ -397,12 +397,21 @@ impl ReviewUi {
                         .child("(no text)")
                         .into_any_element()
                 } else {
-                    crate::markdown::markdown(
-                        format!("comment-body-{}", comment.id),
-                        &blocks,
-                        Some(&comment.url),
-                        cx,
-                    )
+                    // `1333-markdown-math`: parsed again with math
+                    match crate::markdown::github_options(cx) {
+                        Some(_) => crate::markdown::github_markdown(
+                            format!("comment-body-{}", comment.id),
+                            &comment.body,
+                            Some(&comment.url),
+                            cx,
+                        ),
+                        None => crate::markdown::markdown(
+                            format!("comment-body-{}", comment.id),
+                            &blocks,
+                            Some(&comment.url),
+                            cx,
+                        ),
+                    }
                     .into_any_element()
                 }
             }

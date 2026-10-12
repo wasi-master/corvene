@@ -225,6 +225,8 @@ impl Dispatcher {
                 ids::FONT_DIFF,
                 ids::FONT_SOURCE_PREVIEW,
                 ids::DOCUMENT_DIFF,
+                ids::NOTEBOOK_DIFF,
+                ids::LATEX_DIFF,
             ]
             .map(|id| flags.bool(id))
         };
@@ -237,6 +239,8 @@ impl Dispatcher {
             corvene_git::archive::set_read_archives(now.bool(ids::ARCHIVE_DIFF));
             corvene_git::font_file::set_read_font_files(now.bool(ids::FONT_DIFF));
             corvene_git::document_file::set_read_document_files(now.bool(ids::DOCUMENT_DIFF));
+            corvene_git::notebook_file::set_read_notebooks(now.bool(ids::NOTEBOOK_DIFF));
+            corvene_git::latex_file::set_read_latex_files(now.bool(ids::LATEX_DIFF));
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);

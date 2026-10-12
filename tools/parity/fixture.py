@@ -964,13 +964,241 @@ def _documents(repo: Path) -> None:
     (docs / "notes.rtf").write_text(_RTF_EDITED)
 
 
+# `repo-notebooks` (`1331-notebook-diff`, `1332-latex-diff`): two notebooks,
+# a LaTeX paper and its bibliography committed, then edited. analysis.ipynb
+# (nbformat 4.5, cell ids) gets an edited code cell with a new stream, a
+# recoloured plot, a changed DataFrame cell, a new traceback, a moved cell,
+# a deleted and an added cell, an execution-count-only change and timing
+# metadata; legacy.ipynb (4.4, no ids) an edited markdown cell with math;
+# paper.tex an edited sentence, a new numbered equation and a figure
+# caption; refs.bib an edited and an added entry.
+def _png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    """A solid-colour PNG with a diagonal stripe (stdlib only)."""
+    import struct
+    import zlib
+    rows = b""
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            row += bytes((255, 255, 255)) if abs(x - y) < 3 else bytes(rgb)
+        rows += bytes(row)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
+def _b64(data: bytes) -> str:
+    import base64
+    return base64.b64encode(data).decode()
+
+
+def _lines(text: str) -> list[str]:
+    parts = text.split("\n")
+    return [p + "\n" for p in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def _code(cid: str | None, source: str, count: int | None, outputs: list, metadata: dict | None = None) -> dict:
+    cell = {"cell_type": "code", "execution_count": count, "metadata": metadata or {},
+            "outputs": outputs, "source": _lines(source)}
+    if cid:
+        cell["id"] = cid
+    return cell
+
+
+def _md(cid: str | None, source: str, attachments: dict | None = None) -> dict:
+    cell = {"cell_type": "markdown", "metadata": {}, "source": _lines(source)}
+    if cid:
+        cell["id"] = cid
+    if attachments:
+        cell["attachments"] = attachments
+    return cell
+
+
+def _stream(text: str, name: str = "stdout") -> dict:
+    return {"name": name, "output_type": "stream", "text": _lines(text)}
+
+
+def _result(count: int, data: dict) -> dict:
+    return {"data": data, "execution_count": count, "metadata": {}, "output_type": "execute_result"}
+
+
+def _display(data: dict) -> dict:
+    return {"data": data, "metadata": {}, "output_type": "display_data"}
+
+
+def _frame(rows: list[tuple[str, int, float]]) -> str:
+    body = "".join(f"<tr><th>{i}</th><td>{n}</td><td>{c}</td><td>{p}</td></tr>"
+                   for i, (n, c, p) in enumerate(rows))
+    return ('<div><table border="1" class="dataframe"><thead><tr style="text-align: right;">'
+            "<th></th><th>name</th><th>count</th><th>share</th></tr></thead>"
+            f"<tbody>{body}</tbody></table></div>")
+
+
+def _notebook(cells: list, ids: bool = True) -> str:
+    import json
+    nb = {"cells": cells, "metadata": {
+        "kernelspec": {"display_name": "Python 3 (ipykernel)", "language": "python", "name": "python3"},
+        "language_info": {"file_extension": ".py", "name": "python", "version": "3.12.4"}},
+        "nbformat": 4, "nbformat_minor": 5 if ids else 4}
+    return json.dumps(nb, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def _analysis(edited: bool) -> str:
+    rows = [("apples", 12, 0.4), ("pears", 9, 0.3), ("plums", 9, 0.3)]
+    rows2 = [("apples", 14, 0.45), ("pears", 9, 0.29), ("plums", 8, 0.26)]
+    plot = _png(48, 32, (31, 111, 235) if not edited else (218, 54, 51))
+    tb = ["\x1b[0;31m---------------------------------------------------------------------------\x1b[0m",
+          "\x1b[0;31mZeroDivisionError\x1b[0m                         Traceback (most recent call last)",
+          "Cell \x1b[0;32mIn[6], line 1\x1b[0m\n\x1b[0;32m----> 1\x1b[0m \x1b[38;5;241m1\x1b[39m\x1b[38;5;241m/\x1b[39m\x1b[38;5;241m0\x1b[39m",
+          "\x1b[0;31mZeroDivisionError\x1b[0m: division by zero"]
+    title = _md("c0", "# Fruit survey\n\nShares are $p_i = n_i / \\sum_j n_j$, and\n\n"
+                      "$$H = -\\sum_i p_i \\log_2 p_i$$")
+    imports = _code("c1", "import pandas as pd\nimport matplotlib.pyplot as plt", 1, [])
+    load = _code("c2", "df = pd.read_csv('fruit.csv')\nprint(len(df), 'rows')" if not edited else
+                 "df = pd.read_csv('fruit.csv', comment='#')\nprint(len(df), 'rows')\nprint('done')",
+                 2 if not edited else 5,
+                 [_stream("3 rows\n")] if not edited else [_stream("3 rows\ndone\n")],
+                 {} if not edited else {"ExecuteTime": {"end_time": "2026-10-12T09:00:01Z"}})
+    table = _code("c3", "df", 3 if not edited else 6,
+                  [_result(3 if not edited else 6, {"text/html": _frame(rows if not edited else rows2),
+                                                    "text/plain": "    name  count  share"})])
+    chart = _code("c4", "df.plot.bar(x='name', y='count', color='C0')" if not edited else
+                  "df.plot.bar(x='name', y='count', color='C3')", 4 if not edited else 7,
+                  [_display({"image/png": _b64(plot), "text/plain": "<Figure size 640x480 with 1 Axes>"})])
+    formula = _code("c5", "import sympy as sp\nx = sp.symbols('x')\nsp.integrate(x**2, x)", 5 if not edited else 8,
+                    [_result(5 if not edited else 8, {"text/latex": "$\\displaystyle \\frac{x^{3}}{3}$",
+                                                      "text/plain": "x**3/3"})])
+    helper = _code("c6", "def share(n, total):\n    return n / total", 6 if not edited else 2, [])
+    old_note = _md("c7", "Remember to check the plums again next week.")
+    boom = _code("c8", "1/0", 9, [{"ename": "ZeroDivisionError", "evalue": "division by zero",
+                                     "output_type": "error", "traceback": tb}])
+    new_note = _md("c9", "## Next steps\n\n- Ask **two** more shops\n- Plot the shares over time\n\n"
+                         "![logo](attachment:logo.png)",
+                   {"logo.png": {"image/png": _b64(_png(16, 16, (46, 160, 67)))}})
+    if not edited:
+        cells = [title, helper, imports, load, table, chart, formula, old_note]
+    else:
+        cells = [title, imports, load, table, chart, formula, helper, boom, new_note]
+    return _notebook(cells)
+
+
+def _legacy(edited: bool) -> str:
+    text = ("# Notes\n\nThe mean of $n$ values is $\\bar x = \\frac{1}{n}\\sum x_i$." if not edited else
+            "# Notes\n\nThe weighted mean of $n$ values is $\\bar x = \\sum w_i x_i / \\sum w_i$.")
+    cells = [_md(None, text), _code(None, "values = [3, 4, 5]\nsum(values) / len(values)", 1,
+                                   [_result(1, {"text/plain": "4.0"})])]
+    return _notebook(cells, ids=False)
+
+
+_PAPER = r"""\documentclass{article}
+\usepackage{amsmath}
+\newcommand{\R}{\mathbb{R}}
+\title{Counting Fruit}
+\author{Parity Team}
+\begin{document}
+\maketitle
+\begin{abstract}
+We count fruit in three shops.
+\end{abstract}
+\section{Introduction}
+Fruit is counted by hand~\cite{smith2020}. Each count $n_i \in \R$ is a share of the total.
+\section{Method}
+The share of fruit $i$ is
+\begin{equation}\label{eq:share}
+  p_i = \frac{n_i}{\sum_j n_j}.
+\end{equation}
+\begin{figure}
+  \includegraphics[width=4cm]{fig.png}
+  \caption{Counts per shop.}
+\end{figure}
+\end{document}
+"""
+
+_PAPER_EDITED = r"""\documentclass{article}
+\usepackage{amsmath}
+\newcommand{\R}{\mathbb{R}}
+\title{Counting Fruit}
+\author{Parity Team}
+\begin{document}
+\maketitle
+\begin{abstract}
+We count fruit in five shops over two weeks.
+\end{abstract}
+\section{Introduction}
+Fruit is counted by hand~\cite{smith2020,lee2024}. Each count $n_i \in \R$ is a share of the total.
+\section{Method}
+The share of fruit $i$ is
+\begin{equation}\label{eq:share}
+  p_i = \frac{n_i}{\sum_j n_j}.
+\end{equation}
+Its entropy, from \eqref{eq:share}, is
+\begin{equation}
+  H = -\sum_i p_i \log_2 p_i.
+\end{equation}
+\begin{figure}
+  \includegraphics[width=4cm]{fig.png}
+  \caption{Counts per shop and week.}
+\end{figure}
+\end{document}
+"""
+
+_BIB = """@article{smith2020,
+  author = {Smith, Jane and Doe, John},
+  title = {Counting Things by Hand},
+  journal = {Journal of Counting},
+  year = {2020},
+  volume = {12},
+  pages = {1--10}
+}
+"""
+
+_BIB_EDITED = """@article{smith2020,
+  author = {Smith, Jane and Doe, John},
+  title = {Counting Things by Hand},
+  journal = {Journal of Counting},
+  year = {2021},
+  volume = {13},
+  pages = {1--12}
+}
+
+@book{lee2024,
+  author = {Lee, Ana},
+  title = {Fruit in Numbers},
+  publisher = {Orchard Press},
+  year = {2024}
+}
+"""
+
+
+def _notebooks(repo: Path) -> None:
+    nbs = repo / "notebooks"
+    paper = repo / "paper"
+    nbs.mkdir(parents=True, exist_ok=True)
+    paper.mkdir(parents=True, exist_ok=True)
+    (nbs / "analysis.ipynb").write_text(_analysis(False))
+    (nbs / "legacy.ipynb").write_text(_legacy(False))
+    (paper / "paper.tex").write_text(_PAPER)
+    (paper / "refs.bib").write_text(_BIB)
+    (paper / "fig.png").write_bytes(_png(64, 40, (130, 80, 223)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the fruit survey notebooks and paper",
+         date="2026-09-28T09:00:00+00:00")
+    (nbs / "analysis.ipynb").write_text(_analysis(True))
+    (nbs / "legacy.ipynb").write_text(_legacy(True))
+    (paper / "paper.tex").write_text(_PAPER_EDITED)
+    (paper / "refs.bib").write_text(_BIB_EDITED)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
           forks: bool = False, mismatch: bool = False, codeowners: bool = False,
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
-          documents: bool = False) -> Path:
+          documents: bool = False, notebooks: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -997,7 +1225,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`). With `diff_marks`, see `_diff_marks`
     and no other working changes (flags 1316-1320). With `pdf`, see `_pdf`
     and no other working changes (`1322-pdf-diff`). With `documents`, see
-    `_documents` (`1324-document-diff`)."""
+    `_documents` (`1324-document-diff`). With `notebooks`, see `_notebooks`
+    (`1331-notebook-diff`, `1332-latex-diff`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -1133,6 +1362,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if documents:
         _documents(repo)
+        return repo
+    if notebooks:
+        _notebooks(repo)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel

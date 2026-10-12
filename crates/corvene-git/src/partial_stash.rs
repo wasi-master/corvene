@@ -306,6 +306,11 @@ fn part_of<'a>(
     // the diff the line selection was made in (`stage_partial_files_with`)
     let diff =
         crate::diff::working_directory_diff(git.clone(), workdir, file, false, false, false, None)?;
+    // `1331-notebook-diff` / `1332-latex-diff`: the lines of git's own diff
+    let diff = match diff {
+        Diff::Notebook { source, .. } | Diff::Latex { source, .. } => *source,
+        diff => diff,
+    };
     let (hunks, utf16) = match &diff {
         Diff::Text { hunks, warnings } | Diff::LargeText { hunks, warnings } => {
             (hunks, warnings.utf16.as_ref())

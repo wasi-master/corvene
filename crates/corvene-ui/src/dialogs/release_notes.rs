@@ -122,12 +122,8 @@ impl Render for ReleaseNotesDialog {
             ])]
         };
         let pretext = r.pretext.first().map(|p| {
-            crate::markdown::markdown(
-                "release-notes-pretext",
-                &crate::markdown::parsed(&p.message),
-                None,
-                cx,
-            )
+            // `1333-markdown-math`
+            crate::markdown::github_markdown("release-notes-pretext", &p.message, None, cx)
         });
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         // `renderButtons`: the ready update's notes get "Install and Restart"

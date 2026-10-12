@@ -179,6 +179,11 @@ impl Dispatcher {
         corvene_git::document_file::set_read_document_files(
             flags.bool(crate::flags::ids::DOCUMENT_DIFF),
         );
+        // `1331-notebook-diff`, `1332-latex-diff`
+        corvene_git::notebook_file::set_read_notebooks(
+            flags.bool(crate::flags::ids::NOTEBOOK_DIFF),
+        );
+        corvene_git::latex_file::set_read_latex_files(flags.bool(crate::flags::ids::LATEX_DIFF));
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -2448,25 +2453,24 @@ impl Dispatcher {
             }
             // GHD `updateChangesWorkingDirectoryDiff`: bound the file's
             // selection to the lines that exist in this diff.
-            let selectable: std::collections::BTreeSet<u32> = match rs.diff.as_deref() {
-                Some(
-                    corvene_models::Diff::Text { hunks, .. }
-                    | corvene_models::Diff::LargeText { hunks, .. },
-                ) => hunks
-                    .iter()
-                    .flat_map(|h| {
-                        h.lines.iter().enumerate().filter_map(move |(i, l)| {
-                            matches!(
-                                l.kind,
-                                corvene_models::DiffLineKind::Add
-                                    | corvene_models::DiffLineKind::Delete
-                            )
-                            .then_some(h.unified_diff_start + i as u32)
+            // (`1331-notebook-diff`: a notebook's lines are its JSON diff's)
+            let selectable: std::collections::BTreeSet<u32> =
+                match rs.diff.as_deref().and_then(corvene_models::Diff::hunks) {
+                    Some(hunks) => hunks
+                        .iter()
+                        .flat_map(|h| {
+                            h.lines.iter().enumerate().filter_map(move |(i, l)| {
+                                matches!(
+                                    l.kind,
+                                    corvene_models::DiffLineKind::Add
+                                        | corvene_models::DiffLineKind::Delete
+                                )
+                                .then_some(h.unified_diff_start + i as u32)
+                            })
                         })
-                    })
-                    .collect(),
-                _ => Default::default(),
-            };
+                        .collect(),
+                    _ => Default::default(),
+                };
             // Corvene (`790-selection-follows-lines`): a partial selection
             // made on another diff of the file moves with its lines
             let new_hunks = rs.diff.as_deref().and_then(|d| d.hunks());
@@ -7256,6 +7260,64 @@ impl Dispatcher {
     /// Pages switch.
     pub fn set_document_diff_view(view: crate::persistence::DocumentDiffView, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.document_diff_view = view);
+    }
+
+    /// Corvene `1331-notebook-diff`: the notebook switch.
+    pub fn set_notebook_diff_view(view: crate::persistence::NotebookDiffView, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.notebook_diff_view = view);
+    }
+
+    /// Corvene `1331-notebook-diff`: the notebook view's filter menu.
+    pub fn set_notebook_filters(filters: crate::notebook_diff::NotebookFilters, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.notebook_filters = filters);
+    }
+
+    /// Corvene `1332-latex-diff`: the LaTeX switch.
+    pub fn set_latex_diff_view(view: crate::persistence::LatexDiffView, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.latex_diff_view = view);
+    }
+
+    /// Corvene `1331-notebook-diff`: a notebook cell's checkbox, the
+    /// cell's lines of git's diff selected or not. The selection is widened
+    /// (or refused) so the staged notebook stays valid JSON
+    /// ([`crate::notebook_stage::select_cell`]); `false` when it was
+    /// refused.
+    pub fn set_notebook_cell_selected(
+        id: u64,
+        path: String,
+        old_text: std::sync::Arc<str>,
+        lines: Vec<u32>,
+        selected: bool,
+        cx: &mut dyn Host,
+    ) -> bool {
+        let hunks = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return false;
+            };
+            if rs.selected_file.as_deref() != Some(path.as_str()) {
+                return false;
+            }
+            match rs.diff.as_deref().and_then(corvene_models::Diff::hunks) {
+                Some(h) => h.to_vec(),
+                None => return false,
+            }
+        };
+        let mut refused = false;
+        Self::update_selection(
+            id,
+            &path,
+            cx,
+            |sel| match crate::notebook_stage::select_cell(&old_text, &hunks, sel, &lines, selected)
+            {
+                Ok(next) => next,
+                Err(_) => {
+                    refused = true;
+                    sel.clone()
+                }
+            },
+        );
+        !refused
     }
 
     /// Modified-image diff tab (`_changeImageDiffType`).

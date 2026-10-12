@@ -8863,6 +8863,65 @@ registry! {
         code: &["crates/corvene-fonts/src/sources/mod.rs", "crates/corvene-git/src/font_file.rs", "crates/corvene-ui/src/font_diff/source.rs"],
     },
 
+    /// Jupyter notebooks diffed as cells instead of their JSON.
+    NOTEBOOK_DIFF = 1331 "notebook-diff" {
+        title: "Jupyter notebook diffs",
+        summary: "A changed .ipynb file is shown as a notebook: cells are paired by id or \
+                  content (moved cells show as moved), code is highlighted with changed words \
+                  marked, markdown is rendered with typeset math and its changed paragraphs \
+                  marked, and outputs are drawn and compared: images side by side, ANSI \
+                  streams and tracebacks in colour, pandas tables cell by cell, LaTeX \
+                  typeset, HTML, JSON and text. Execution counts, metadata and unchanged \
+                  cells are hidden by default (a filter menu shows them; outputs can be \
+                  hidden too), and split mode lines the two notebooks up side by side. Each \
+                  changed cell has a checkbox that stages its lines, and a menu to discard \
+                  it. The Notebook / Script / JSON switch shows a py:percent script diff or \
+                  git's own diff of the JSON instead.",
+        ghd_behaviour: "Notebooks show git's line diff of their JSON.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5279), Upstream::issue(12121), Upstream::issue(17728)],
+        code: &["crates/corvene-git/src/notebook_file/mod.rs", "crates/corvene-core/src/notebook_diff/mod.rs", "crates/corvene-core/src/notebook_stage.rs", "crates/corvene-ui/src/notebook_diff/mod.rs", "crates/corvene-math/src/lib.rs"],
+    },
+
+    /// LaTeX documents and BibTeX files shown rendered.
+    LATEX_DIFF = 1332 "latex-diff" {
+        title: "Rendered LaTeX and BibTeX diffs",
+        summary: "A changed .tex file gets a Rendered / Text switch (and Pages when latexmk \
+                  or tectonic is installed): Rendered lays the document out with numbered \
+                  sections, typeset equations, lists, tables, figures with their pictures, \
+                  theorems, footnotes and resolved references, with added parts green, \
+                  removed ones red and edited paragraphs marked word by word. A .bib file \
+                  shows each entry as a formatted reference with its changed fields. Pages \
+                  compiles both versions without shell escape and compares the PDFs page \
+                  by page (needs 1322-pdf-diff).",
+        ghd_behaviour: "LaTeX and BibTeX files only have the text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/latex_file.rs", "crates/corvene-core/src/latex_doc.rs", "crates/corvene-core/src/bibtex.rs", "crates/corvene-ui/src/latex_diff.rs"],
+    },
+
+    /// Math in Markdown typeset like on GitHub.com.
+    MARKDOWN_MATH = 1333 "markdown-math" {
+        title: "Math in Markdown",
+        summary: "Pull request, issue, review and release Markdown typesets $…$, $$…$$ \
+                  and ```math blocks the way GitHub.com does (a KaTeX-compatible engine), \
+                  in the theme's text colour. A formula that does not parse shows its \
+                  source in red with the error on hover.",
+        ghd_behaviour: "Math stays as its TeX source.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-math/src/lib.rs", "crates/corvene-core/src/markdown.rs", "crates/corvene-ui/src/markdown.rs", "crates/corvene-ui/src/math.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

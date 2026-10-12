@@ -207,6 +207,17 @@ pub struct Settings {
     /// EPUB and RTF diffs are shown (the diff header's switch).
     #[serde(default)]
     pub document_diff_view: DocumentDiffView,
+    /// Corvene `1331-notebook-diff`: how notebooks are shown (the diff
+    /// header's Notebook / Script / JSON switch).
+    #[serde(default)]
+    pub notebook_diff_view: NotebookDiffView,
+    /// Corvene `1331-notebook-diff`: the notebook view's filter menu.
+    #[serde(default)]
+    pub notebook_filters: crate::notebook_diff::NotebookFilters,
+    /// Corvene `1332-latex-diff`: how LaTeX and BibTeX files are shown (the
+    /// diff header's Rendered / Text / Pages switch).
+    #[serde(default)]
+    pub latex_diff_view: LatexDiffView,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -516,6 +527,31 @@ pub enum DocumentDiffView {
     Pages,
 }
 
+/// Corvene `1331-notebook-diff`: the diff header's Notebook / Script /
+/// JSON switch of a notebook.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NotebookDiffView {
+    /// Cells, rendered.
+    #[default]
+    Notebook,
+    /// A line diff of the notebook written as a py:percent script.
+    Script,
+    /// Git's diff of the JSON (stageable line by line).
+    Json,
+}
+
+/// Corvene `1332-latex-diff`: the diff header's Rendered / Text / Pages
+/// switch of a LaTeX or BibTeX file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LatexDiffView {
+    #[default]
+    Rendered,
+    /// Git's own diff.
+    Text,
+    /// Both versions compiled to PDF and compared page by page.
+    Pages,
+}
+
 /// Corvene (`1314-code-owners`): a file row's owners as text or an icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CodeOwnersDisplay {
@@ -599,6 +635,9 @@ impl Default for Settings {
             archive_tree_width: 250.0,
             font_source_text_diff: false,
             document_diff_view: DocumentDiffView::Rendered,
+            notebook_diff_view: NotebookDiffView::Notebook,
+            notebook_filters: crate::notebook_diff::NotebookFilters::default(),
+            latex_diff_view: LatexDiffView::Rendered,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

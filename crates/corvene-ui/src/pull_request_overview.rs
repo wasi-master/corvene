@@ -892,8 +892,19 @@ impl Render for PullRequestOverviewView {
                         .child("No description provided.")
                         .into_any_element()
                 } else {
-                    crate::markdown::markdown("pr-overview-body", &blocks, Some(&o.url), cx)
-                        .into_any_element()
+                    // `1333-markdown-math`: parsed again with math
+                    match crate::markdown::github_options(cx) {
+                        Some(_) => crate::markdown::github_markdown(
+                            "pr-overview-body",
+                            &o.body,
+                            Some(&o.url),
+                            cx,
+                        ),
+                        None => {
+                            crate::markdown::markdown("pr-overview-body", &blocks, Some(&o.url), cx)
+                        }
+                    }
+                    .into_any_element()
                 }
             });
             let timeline = overview.map(|o| self.timeline(review, o, &t, cx));

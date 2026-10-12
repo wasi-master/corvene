@@ -197,6 +197,8 @@ pub fn commit_detail(s: &AppState, repo: u64) -> Option<CommitDetailVm> {
             source: Some(_), ..
         }) => DiffKindVm::Text,
         Some(Diff::Document { .. }) => DiffKindVm::Binary,
+        // `1331-notebook-diff`, `1332-latex-diff`: git's own diff
+        Some(Diff::Notebook { .. } | Diff::Latex { .. }) => DiffKindVm::Text,
     };
     Some(CommitDetailVm {
         repo,

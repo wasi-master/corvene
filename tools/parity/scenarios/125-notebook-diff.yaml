@@ -1,0 +1,42 @@
+# Jupyter notebooks drawn as cells (1331-notebook-diff, off in the GitHub
+# Desktop preset; deviations.md › Diff viewer). GHD shows the JSON diff.
+# analysis.ipynb has an edited cell with a new stream line, a recoloured
+# plot (image diff), a DataFrame with changed cells, a new traceback in
+# colour, a moved cell, a removed and an added markdown cell (attachment
+# picture), an execution-count-only change and timing metadata (hidden by
+# default). legacy.ipynb (no cell ids) has an edited sentence with math.
+# Then: unchanged cells and execution counts shown, split mode, the Script
+# and JSON views, and a cell's checkbox.
+# Coordinates: calibrate the switch and chip clicks on the first run.
+name: notebook-diff
+description: Jupyter notebooks diffed as cells, filters, split, Script and JSON views (Corvene only)
+setup: repo-notebooks
+corvene_flags: 1331-notebook-diff=on,1333-markdown-math=on
+steps:
+  - click: [125, 185]
+    wait: 1500
+  - snap: {name: analysis, corvene_only: true, note: "GHD shows the JSON diff (1331-notebook-diff)"}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [800, 500], dy: 900}}
+    wait: 800
+  - snap: {name: analysis-outputs, corvene_only: true, note: "image, table and traceback outputs (1331-notebook-diff)"}
+  - click: [125, 214]
+    wait: 1200
+  - snap: {name: legacy, corvene_only: true, note: "rendered markdown with typeset math, edited words marked"}
+  - click: [125, 185]
+    wait: 1000
+  - ghd: {skip: true}
+    corvene: {click: [905, 125]}
+    wait: 800
+  - snap: {name: analysis-counts, corvene_only: true, note: "Execution counts chip on"}
+  - ghd: {skip: true}
+    corvene: {click: [1135, 97]}
+    wait: 1200
+  - snap: {name: analysis-script, corvene_only: true, note: "the Notebook / Script / JSON switch: Script"}
+  - ghd: {skip: true}
+    corvene: {click: [1185, 97]}
+    wait: 1200
+  - snap: {name: analysis-json, corvene_only: true, note: "JSON: git's own diff, selectable"}
+  - ghd: {skip: true}
+    corvene: {click: [1080, 97]}
+    wait: 800

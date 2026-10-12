@@ -358,9 +358,10 @@ impl IssueView {
                 .child("No description provided.")
                 .into_any_element()
         } else {
-            crate::markdown::markdown(
+            // `1333-markdown-math`
+            crate::markdown::github_markdown(
                 format!("issue-body-{number}"),
-                &crate::markdown::parsed(&row.body),
+                &row.body,
                 Some(&row.html_url),
                 cx,
             )
@@ -447,9 +448,9 @@ impl IssueView {
                 .child("No description provided.")
                 .into_any_element()
         } else {
-            crate::markdown::markdown(
+            crate::markdown::github_markdown(
                 format!("issue-{number}-comment-{}", comment.id),
-                &crate::markdown::parsed(&comment.body),
+                &comment.body,
                 Some(base),
                 cx,
             )

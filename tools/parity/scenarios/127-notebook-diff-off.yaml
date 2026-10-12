@@ -1,0 +1,12 @@
+# The notebook and LaTeX files with the GitHub Desktop preset: JSON and text
+# diffs as in GHD (1331-notebook-diff and 1332-latex-diff off).
+name: notebook-diff-off
+description: Notebooks and LaTeX files as text diffs, like GitHub Desktop
+setup: repo-notebooks
+steps:
+  - click: [125, 185]
+    wait: 1200
+  - snap: {name: analysis-json}
+  - click: [125, 243]
+    wait: 1000
+  - snap: {name: paper-text}
