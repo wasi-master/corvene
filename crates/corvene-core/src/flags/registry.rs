@@ -9286,6 +9286,31 @@ registry! {
         code: &["crates/corvene-ui/src/page_strip.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/document_diff.rs", "crates/corvene-core/src/pdf.rs"],
     },
 
+    /// Compiled files open on a structured comparison rather than their
+    /// decoded listing.
+    COMPILED_SUMMARY = 1360 "compiled-summary" {
+        title: "Compiled file summary",
+        summary: "With compiled code diffs on, a changed compiled file opens on a Summary: \
+                  a header of its facts old → new (format, architectures, file type, entry \
+                  point, size, UUID or build ID, minimum OS and SDK, flags, code signature; \
+                  a class file's version, access flags, superclass and constant pool; a .pyc \
+                  file's Python version and source stamp) and tables of what changed, each \
+                  row marked added, removed or changed with size deltas: sections and \
+                  segments, linked libraries, defined and imported symbols (demangled Rust, \
+                  C++ and MSVC names, with a filter), a static library's members, a class \
+                  file's fields and methods (bytecode changed), Python code objects and a \
+                  WebAssembly module's imports, exports, functions, memories, tables, \
+                  globals and custom sections. The diff header's Summary / Listing switch \
+                  goes back to the decoded listing and is remembered.",
+        ghd_behaviour: "Compiled files are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-convert/src/compiled/summary.rs", "crates/corvene-ui/src/compiled_diff.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

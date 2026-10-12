@@ -160,7 +160,8 @@ class Run:
                              "repo-pdf", "repo-images",
                              "repo-archives", "repo-documents", "repo-notebooks",
                              "repo-markdown", "repo-media", "repo-inspect", "repo-converted",
-                             "repo-markdown-edits", "repo-page-strip")
+                             "repo-markdown-edits", "repo-page-strip",
+                             "repo-compiled")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
@@ -212,6 +213,9 @@ class Run:
         # `repo-page-strip`: a PDF with an inserted page and an EPUB with
         # edited, removed and added chapters (`1359-page-strip`)
         page_strip = setup == "repo-page-strip"
+        # `repo-compiled`: a changed class file, .pyc, WebAssembly module,
+        # Mach-O object and dylib (`1360-compiled-summary`)
+        compiled = setup == "repo-compiled"
         # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
         # fixtures' `lfs.url`
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
@@ -222,14 +226,14 @@ class Run:
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
                                converted=converted, markdown_edits=markdown_edits,
-                               page_strip=page_strip) if with_repo else None
+                               page_strip=page_strip, compiled=compiled) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
                                converted=converted, markdown_edits=markdown_edits,
-                               page_strip=page_strip) if with_repo else None
+                               page_strip=page_strip, compiled=compiled) if with_repo else None
         # `tags: {name: rev}`: lightweight tags added to both fixtures before
         # either app opens them
         for repo in (repo_g, repo_c) if with_repo else ():

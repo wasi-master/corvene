@@ -19,6 +19,10 @@
 //! decoded text, translation table, diagram or map pictures, mail) takes
 //! the diff's place, so the text, table and image views draw it; a file
 //! git diffs as text gets a view / Source switch.
+//!
+//! Corvene `1360-compiled-summary`: a compiled file opens on its Summary
+//! (an inspect pane like a lockfile's); the switch reads Summary /
+//! Listing, the listing being the decoded text above.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -31,6 +35,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use super::{DiffSource, DiffView, InspectContext, PdfText, Snapshot, view_switch_n};
+use crate::compiled_diff::CompiledDiffView;
 use crate::latex_diff::LatexDiff;
 use crate::lockfile_diff::LockfileDiffView;
 use crate::notebook_diff::{NotebookContext, NotebookDiffView};
@@ -79,11 +84,13 @@ pub(super) struct RichPane {
     markdown_source_top: Option<Option<u32>>,
 }
 
-/// `1338-lockfile-diff` / `1340-tensor-diff` / `1341-signing-material-diff`.
+/// `1338-lockfile-diff` / `1340-tensor-diff` / `1341-signing-material-diff`
+/// / `1360-compiled-summary`.
 enum InspectPane {
     Lockfile(Entity<LockfileDiffView>),
     Tensors(Entity<TensorDiffView>),
     Signing(Entity<SigningDiffView>),
+    Compiled(Entity<CompiledDiffView>),
 }
 
 impl InspectPane {
@@ -92,6 +99,7 @@ impl InspectPane {
             InspectPane::Lockfile(v) => v.read(cx).diff(),
             InspectPane::Tensors(v) => v.read(cx).diff(),
             InspectPane::Signing(v) => v.read(cx).diff(),
+            InspectPane::Compiled(v) => v.read(cx).diff(),
         }
     }
 
@@ -100,6 +108,7 @@ impl InspectPane {
             InspectPane::Lockfile(v) => v.clone().into_any_element(),
             InspectPane::Tensors(v) => v.clone().into_any_element(),
             InspectPane::Signing(v) => v.clone().into_any_element(),
+            InspectPane::Compiled(v) => v.clone().into_any_element(),
         }
     }
 }
@@ -132,6 +141,24 @@ fn source_of(diff: &Diff) -> Option<&Diff> {
         | Diff::Converted { source, .. } => Some(source),
         _ => None,
     }
+}
+
+/// `1360-compiled-summary`: a compiled file with a summary, while the flag
+/// is on.
+fn has_summary(diff: &Diff, s: &corvene_core::AppState) -> bool {
+    matches!(
+        diff,
+        Diff::Converted {
+            summary: Some(_),
+            ..
+        }
+    ) && s.flags.bool(corvene_core::flags::ids::COMPILED_SUMMARY)
+}
+
+/// A converted file shown as git's own diff (its Source view).
+fn converted_source_chosen(diff: &Diff, s: &corvene_core::AppState) -> bool {
+    matches!(diff, Diff::Converted { kind, source, .. }
+        if source.hunks().is_some() && s.settings.converted_source.contains(kind))
 }
 
 /// A signing material file git diffs as text (PEM, armored or SSH keys):
@@ -214,10 +241,9 @@ fn effective(diff: &Diff, s: &corvene_core::AppState) -> Effective {
         Diff::Converted { kind, .. } if !s.flags.bool(corvene_core::converted::flag_of(*kind)) => {
             Effective::Text
         }
-        Diff::Converted { kind, source, .. }
-            if source.hunks().is_some() && s.settings.converted_source.contains(kind) =>
-        {
-            Effective::Text
+        Diff::Converted { .. } if converted_source_chosen(diff, s) => Effective::Text,
+        Diff::Converted { .. } if has_summary(diff, s) && !s.settings.compiled_listing => {
+            Effective::Rendered
         }
         Diff::Converted { .. } => Effective::Converted,
         _ => Effective::Rendered,
@@ -346,6 +372,21 @@ pub(crate) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl Into
                 cx,
             ))
         }
+        Diff::Converted { kind, .. }
+            if has_summary(&source, s) && s.flags.bool(corvene_core::converted::flag_of(*kind)) =>
+        {
+            let with_source = source.hunks().is_some();
+            Some(compiled_switch(
+                *kind,
+                if converted_source_chosen(&source, s) {
+                    2
+                } else {
+                    usize::from(s.settings.compiled_listing)
+                },
+                with_source,
+                cx,
+            ))
+        }
         Diff::Converted { kind, source, .. }
             if source.hunks().is_some()
                 && s.flags.bool(corvene_core::converted::flag_of(*kind)) =>
@@ -381,6 +422,43 @@ fn converted_switch(kind: corvene_core::ConvertedKind, source: bool, cx: &App) -
         &[kind.view_label(), "Source"],
         usize::from(source),
         move |ix, cx| Dispatcher::set_converted_source(kind, ix == 1, cx),
+        cx,
+    )
+}
+
+/// `1360-compiled-summary`: a compiled file's Summary / Listing switch
+/// (and Source, for a file git diffs as text).
+fn compiled_switch(
+    kind: corvene_core::ConvertedKind,
+    selected: usize,
+    with_source: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let ids: &[&'static str] = if with_source {
+        &[
+            "compiled-view-summary",
+            "compiled-view-listing",
+            "compiled-view-source",
+        ]
+    } else {
+        &["compiled-view-summary", "compiled-view-listing"]
+    };
+    let labels: &[&'static str] = if with_source {
+        &["Summary", "Listing", "Source"]
+    } else {
+        &["Summary", "Listing"]
+    };
+    view_switch_n(
+        "compiled-view-switch",
+        ids,
+        labels,
+        selected,
+        move |ix, cx| {
+            if ix < 2 {
+                Dispatcher::set_compiled_listing(ix == 1, cx);
+            }
+            Dispatcher::set_converted_source(kind, ix == 2, cx);
+        },
         cx,
     )
 }
@@ -442,11 +520,15 @@ impl DiffView {
             return None;
         }
         let s = self.state.read(cx);
-        // a stack shows the file's own diff (a converted file its view)
-        let view = if self.stacked_path.is_some() && !matches!(**diff, Diff::Converted { .. }) {
-            Effective::Text
-        } else {
-            effective(diff, s)
+        // a stack shows the file's own diff (a converted file its view, a
+        // compiled one its listing)
+        let view = match (self.stacked_path.is_some(), &**diff) {
+            (true, Diff::Converted { .. }) => match effective(diff, s) {
+                Effective::Rendered => Effective::Converted,
+                other => other,
+            },
+            (true, _) => Effective::Text,
+            (false, _) => effective(diff, s),
         };
         match view {
             Effective::Rendered => None,
@@ -610,14 +692,27 @@ impl DiffView {
             self.rich.inspect = None;
             return;
         };
-        if !matches!(
+        let compiled = matches!(
             &*source,
-            Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. }
-        ) {
+            Diff::Converted {
+                summary: Some(_),
+                ..
+            }
+        );
+        if !compiled
+            && !matches!(
+                &*source,
+                Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. }
+            )
+        {
             self.rich.inspect = None;
         }
         match &*source {
-            Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. } => {
+            Diff::Converted { .. } if !compiled => {}
+            Diff::Lockfile { .. }
+            | Diff::Tensors { .. }
+            | Diff::Signing { .. }
+            | Diff::Converted { .. } => {
                 self.rich.notebook = None;
                 self.rich.latex = None;
                 let keep = self
@@ -637,6 +732,9 @@ impl DiffView {
                         ),
                         Diff::Tensors { .. } => InspectPane::Tensors(
                             cx.new(|cx| TensorDiffView::new(source, context, cx)),
+                        ),
+                        Diff::Converted { .. } => InspectPane::Compiled(
+                            cx.new(|cx| CompiledDiffView::new(source, context, cx)),
                         ),
                         _ => InspectPane::Signing(
                             cx.new(|cx| SigningDiffView::new(source, context, cx)),
@@ -707,12 +805,13 @@ impl DiffView {
                     }
                     None => self.panel("Reading the notebook…", cx),
                 },
-                Diff::Lockfile { .. } | Diff::Tensors { .. } | Diff::Signing { .. } => {
-                    match self.rich.inspect.as_ref() {
-                        Some(view) => view.element(),
-                        None => self.panel("Reading the file…", cx),
-                    }
-                }
+                Diff::Lockfile { .. }
+                | Diff::Tensors { .. }
+                | Diff::Signing { .. }
+                | Diff::Converted { .. } => match self.rich.inspect.as_ref() {
+                    Some(view) => view.element(),
+                    None => self.panel("Reading the file…", cx),
+                },
                 _ => match self.rich.latex.clone() {
                     Some(view) => view.into_any_element(),
                     None => self.panel("Reading the document…", cx),

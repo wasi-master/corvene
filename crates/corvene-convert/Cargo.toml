@@ -11,6 +11,9 @@ serde_json.workspace = true
 # flag 1350-compiled-code-diff: native binaries and static libraries
 object = { version = "0.37", default-features = false, features = ["std", "read_core", "archive", "coff", "elf", "macho", "pe", "unaligned"] }
 rustc-demangle = "0.1"
+# flag 1360-compiled-summary: C++ and MSVC symbol names
+cpp_demangle = "0.5"
+msvc-demangler = "0.11"
 # WebAssembly modules as text
 wasmprinter = { version = "0.244", default-features = false }
 wasmparser = { version = "0.244", default-features = false, features = ["std", "validate", "features"] }

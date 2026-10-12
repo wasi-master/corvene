@@ -1680,6 +1680,128 @@ def _converted(repo: Path) -> None:
     write(True)
 
 
+# `repo-compiled` (`1360-compiled-summary`): a changed Java class file,
+# Python bytecode file, WebAssembly module and (with a C compiler) a Mach-O
+# object file and dynamic library in the working copy
+_COMPILED_C = """int sink_add(int a, int b) { return a + b; }
+int legacy_api(void) { return 1; }
+const char *sink_name(void) { return "sink"; }
+"""
+_COMPILED_C_EDITED = """int sink_add(int a, int b) { return a + b + (a > b ? a : b); }
+int new_api(int x) { return x * 3; }
+int another_new(int x) { return x - 1; }
+const char *sink_name(void) { return "sink v2"; }
+"""
+
+
+def _class_file(major: int, fields: list, methods: list) -> bytes:
+    """A class file `com.example.Sink` with `fields` ((name, descriptor,
+    access)) and static `methods` ((name, descriptor, access, max_locals,
+    code))."""
+    import struct
+    pool: list[bytes] = []
+    index: dict = {}
+
+    def const(key, raw: bytes) -> int:
+        if key not in index:
+            pool.append(raw)
+            index[key] = len(pool)
+        return index[key]
+
+    def utf8(text: str) -> int:
+        data = text.encode()
+        return const(("u", text), b"\x01" + struct.pack(">H", len(data)) + data)
+
+    def klass(name: str) -> int:
+        return const(("c", name), b"\x07" + struct.pack(">H", utf8(name)))
+
+    this, sup = klass("com/example/Sink"), klass("java/lang/Object")
+    code_name, source_name, source = utf8("Code"), utf8("SourceFile"), utf8("Sink.java")
+    body = struct.pack(">HHHH", 0x0021, this, sup, 0)
+    body += struct.pack(">H", len(fields))
+    for name, desc, access in fields:
+        body += struct.pack(">HHHH", access, utf8(name), utf8(desc), 0)
+    body += struct.pack(">H", len(methods))
+    for name, desc, access, locals_, code in methods:
+        attr = struct.pack(">HHI", 4, locals_, len(code)) + code + struct.pack(">HH", 0, 0)
+        body += struct.pack(">HHHH", access, utf8(name), utf8(desc), 1)
+        body += struct.pack(">HI", code_name, len(attr)) + attr
+    body += struct.pack(">HHIH", 1, source_name, 2, source)
+    head = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, major, len(pool) + 1)
+    return head + b"".join(pool) + body
+
+
+def _wasm(funcs: list, memory_pages: int) -> bytes:
+    """A module of `funcs` ((name, params, code)), each exported, taking i32s
+    and returning one, with a memory and a name section."""
+    def vec(items: list) -> bytes:
+        return bytes([len(items)]) + b"".join(items)
+
+    def name(text: str) -> bytes:
+        return bytes([len(text)]) + text.encode()
+
+    def section(sid: int, data: bytes) -> bytes:
+        return bytes([sid, len(data)]) + data
+
+    arities = sorted({p for _, p, _ in funcs})
+    types = vec([b"\x60" + vec([b"\x7f"] * p) + b"\x01\x7f" for p in arities])
+    functions = vec([bytes([arities.index(p)]) for _, p, _ in funcs])
+    memory = vec([b"\x00" + bytes([memory_pages])])
+    exports = vec([name(n) + bytes([0, i]) for i, (n, _, _) in enumerate(funcs)] + [name("memory") + b"\x02\x00"])
+    code = vec([bytes([len(c) + 1]) + b"\x00" + c for _, _, c in funcs])
+    names = vec([bytes([i]) + name(n) for i, (n, _, _) in enumerate(funcs)])
+    name_section = name("name") + b"\x01" + bytes([len(names)]) + names
+    return (b"\x00asm\x01\x00\x00\x00" + section(1, types) + section(3, functions) + section(5, memory)
+            + section(7, exports) + section(10, code) + section(0, name_section))
+
+
+def _compiled(repo: Path) -> None:
+    import py_compile
+    import shutil
+    import subprocess
+    for d in ("java", "python", "wasm", "native"):
+        (repo / d).mkdir(exist_ok=True)
+    clang = shutil.which("clang")
+
+    def write(edited: bool) -> None:
+        # iload_0 iload_1 iadd [iconst_1 iadd] ireturn
+        add = bytes([0x1a, 0x1b, 0x60] + ([0x04, 0x60] if edited else []) + [0xac])
+        methods = [("add", "(II)I", 0x0009, 2, add)]
+        methods.append(("twice", "(I)I", 0x0009, 1, bytes([0x1a, 0x05, 0x68, 0xac])) if edited
+                       else ("legacy", "()V", 0x0009, 0, bytes([0xb1])))
+        fields = [("count", "I", 0x0002)] + ([("label", "Ljava/lang/String;", 0x0002)] if edited else [])
+        (repo / "java" / "Sink.class").write_bytes(_class_file(65 if edited else 61, fields, methods))
+        src = repo / "python" / "sink.py"
+        src.write_text("def area(w, h):\n    return w * h\n\n\nclass Sink:\n    def drain(self, level):\n        return level - 1\n"
+                       if not edited else
+                       "def area(w, h, d=1):\n    return w * h * d\n\n\nclass Sink:\n    def drain(self, level, rate=1):\n"
+                       "        return level - rate\n\n    def fill(self):\n        return 0\n")
+        py_compile.compile(str(src), cfile=str(repo / "python" / "sink.pyc"),
+                           invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH, doraise=True)
+        src.unlink()
+        # local.get 0 local.get 1 i32.add [i32.const 1 i32.add] end
+        add_w = b"\x20\x00\x20\x01\x6a" + (b"\x41\x01\x6a" if edited else b"") + b"\x0b"
+        funcs = [("add", 2, add_w)]
+        funcs.append(("step", 1, b"\x20\x00\x41\x02\x6c\x0b") if edited
+                     else ("legacy_step", 1, b"\x20\x00\x41\x01\x6a\x0b"))
+        (repo / "wasm" / "sink.wasm").write_bytes(_wasm(funcs, 2 if edited else 1))
+        if clang:
+            c = repo / "native" / "sink.c"
+            c.write_text(_COMPILED_C_EDITED if edited else _COMPILED_C)
+            version = "2.0" if edited else "1.0"
+            for args in (["-c", "-o", "native/sink.o"],
+                         ["-dynamiclib", "-install_name", "@rpath/libsink.dylib",
+                          f"-Wl,-current_version,{version}", "-o", "native/libsink.dylib"]):
+                subprocess.run([clang, "-O1", "-arch", "arm64", "-mmacosx-version-min=13.0", *args, "native/sink.c"],
+                               cwd=repo, check=True, capture_output=True)
+            c.unlink()
+
+    write(False)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the build outputs", date="2026-09-28T09:00:00+00:00")
+    write(True)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
@@ -1688,7 +1810,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
           documents: bool = False, notebooks: bool = False, markdown: bool = False,
           media: bool = False, inspect: bool = False, converted: bool = False,
-          markdown_edits: bool = False, page_strip: bool = False) -> Path:
+          markdown_edits: bool = False, page_strip: bool = False,
+          compiled: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -1716,7 +1839,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     and no other working changes (flags 1316-1320). With `pdf`, see `_pdf`
     and no other working changes (`1322-pdf-diff`). With `documents`, see
     `_documents` (`1324-document-diff`). With `notebooks`, see `_notebooks`
-    (`1331-notebook-diff`, `1332-latex-diff`)."""
+    (`1331-notebook-diff`, `1332-latex-diff`). With `compiled`, see
+    `_compiled` (`1360-compiled-summary`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -1873,6 +1997,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if converted:
         _converted(repo)
+        return repo
+    if compiled:
+        _compiled(repo)
         return repo
     if notebooks:
         _notebooks(repo)

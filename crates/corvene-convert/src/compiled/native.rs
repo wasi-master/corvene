@@ -283,7 +283,7 @@ fn macho_commands<M: object::read::macho::MachHeader<Endian = Endianness>>(
 }
 
 /// A Mach-O `xxxx.yy.zz` version.
-fn version(v: u32) -> String {
+pub(crate) fn version(v: u32) -> String {
     let (major, minor, patch) = (v >> 16, (v >> 8) & 0xff, v & 0xff);
     if patch == 0 {
         format!("{major}.{minor}")
@@ -420,14 +420,28 @@ fn list(out: &mut String, title: &str, names: &BTreeSet<String>) {
     }
 }
 
-/// A Rust symbol demangled (without its hash); others as they are.
-fn demangle(name: &str) -> String {
+/// A Rust (without its hash), C++ (Itanium) or MSVC symbol demangled;
+/// others as they are.
+pub(crate) fn demangle(name: &str) -> String {
     // Mach-O prefixes C names with an underscore
     let bare = name.strip_prefix('_').unwrap_or(name);
     for candidate in [name, bare] {
         if let Ok(d) = rustc_demangle::try_demangle(candidate) {
             return format!("{d:#}");
         }
+    }
+    for candidate in [name, bare] {
+        if candidate.starts_with("_Z")
+            && let Ok(symbol) = cpp_demangle::Symbol::new(candidate)
+            && let Ok(d) = symbol.demangle()
+        {
+            return d;
+        }
+    }
+    if name.starts_with('?')
+        && let Ok(d) = msvc_demangler::demangle(name, msvc_demangler::DemangleFlags::llvm())
+    {
+        return d;
     }
     name.to_string()
 }

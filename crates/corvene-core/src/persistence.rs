@@ -234,6 +234,11 @@ pub struct Settings {
     /// picture, map or message.
     #[serde(default)]
     pub converted_source: Vec<corvene_models::ConvertedKind>,
+    /// Corvene `1360-compiled-summary`: compiled files show their decoded
+    /// listing rather than the Summary (the diff header's Summary /
+    /// Listing switch).
+    #[serde(default)]
+    pub compiled_listing: bool,
     /// Corvene `1338-lockfile-diff`: Dependencies or Source.
     #[serde(default)]
     pub lockfile_diff_view: InspectDiffView,
@@ -718,6 +723,7 @@ impl Default for Settings {
             latex_diff_view: LatexDiffView::Rendered,
             markdown_diff_view: MarkdownDiffView::Source,
             converted_source: Vec::new(),
+            compiled_listing: false,
             lockfile_diff_view: InspectDiffView::Read,
             pretty_diff_view: InspectDiffView::Source,
             signing_diff_view: InspectDiffView::Read,

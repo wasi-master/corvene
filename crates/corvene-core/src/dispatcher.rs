@@ -7319,6 +7319,12 @@ impl Dispatcher {
         });
     }
 
+    /// Corvene `1360-compiled-summary`: the diff header's Summary / Listing
+    /// switch of compiled files.
+    pub fn set_compiled_listing(listing: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.compiled_listing = listing);
+    }
+
     /// Corvene `1338-lockfile-diff` / `1339-pretty-diff` /
     /// `1341-signing-material-diff`: the diff header's switch between the
     /// read view and git's own diff, per kind.

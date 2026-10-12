@@ -1748,9 +1748,11 @@ dependencies = [
  "base64 0.22.1",
  "cfb",
  "corvene-models",
+ "cpp_demangle",
  "encoding_rs",
  "flate2",
  "mail-parser",
+ "msvc-demangler",
  "object",
  "plist",
  "roxmltree 0.21.1",
@@ -2302,6 +2304,15 @@ dependencies = [
  "web-sys",
  "windows 0.62.2",
  "windows-core 0.62.2",
+]
+
+[[package]]
+name = "cpp_demangle"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0667304c32ea56cb4cd6d2d7c0cfe9a2f8041229db8c033af7f8d69492429def"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -6670,6 +6681,16 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "msvc-demangler"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbeff6bd154a309b2ada5639b2661ca6ae4599b34e8487dc276d2cd637da2d76"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
 ]
 
 [[package]]

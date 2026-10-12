@@ -1,0 +1,40 @@
+# Compiled files compared as structured data (`1360-compiled-summary`,
+# with `1350-compiled-code-diff`; both off in the GitHub Desktop preset;
+# deviations.md › Diff viewer): a header of facts old → new and tables of
+# added, removed and changed parts. GHD shows binary panels.
+# Rows (GHD's case-insensitive order): java/Sink.class,
+# native/libsink.dylib, native/sink.o, python/sink.pyc, wasm/sink.wasm
+# (the native files only where clang is installed).
+# Coordinates: the switch clicks follow 132-converted-diffs; calibrate on
+# the first run.
+name: compiled-summary
+description: A class file, dylib, object file, .pyc and WebAssembly module as facts and tables of changed parts (Corvene only)
+setup: repo-compiled
+corvene_flags: 1350-compiled-code-diff=on,1360-compiled-summary=on
+steps:
+  - click: [125, 185]
+    wait: 1500
+  - snap: {name: class, corvene_only: true, note: "Java 17 → 21, a field and a method added, add() bytecode grown, legacy() removed"}
+  - ghd: {skip: true}
+    corvene: {click: [1262, 97]}
+    wait: 1200
+  - snap: {name: class-listing, corvene_only: true, note: "the Summary / Listing switch: the javap-like listing"}
+  - ghd: {skip: true}
+    corvene: {click: [1180, 97]}
+    wait: 800
+  - click: [125, 214]
+    wait: 1500
+  - snap: {name: dylib, corvene_only: true, note: "UUID, current version, section sizes and exported symbols old → new"}
+  - ghd: {skip: true}
+    corvene: {click: [1150, 130]}
+    wait: 800
+  - snap: {name: dylib-unchanged, corvene_only: true, note: "Show unchanged lists the parts that stayed the same, dimmed"}
+  - click: [125, 243]
+    wait: 1500
+  - snap: {name: object, corvene_only: true, note: "a Mach-O object file's sections and symbols"}
+  - click: [125, 272]
+    wait: 1500
+  - snap: {name: pyc, corvene_only: true, note: "code objects with arguments, constants and names; fill() added"}
+  - click: [125, 301]
+    wait: 1500
+  - snap: {name: wasm, corvene_only: true, note: "exports and functions with code sizes; step added, legacy_step removed"}

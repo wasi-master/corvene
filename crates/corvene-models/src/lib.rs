@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod compiled;
 mod hosts;
 pub mod lockfile;
 mod signature;
@@ -3188,11 +3189,17 @@ pub enum Diff {
     /// diff of SVG pictures (diagrams, maps). `format` names what was read
     /// ("Java class file"); `source` is git's own diff, for the Source view
     /// and staging.
+    ///
+    /// `summary` (`1360-compiled-summary`): a compiled file's two versions
+    /// compared as structured data, for the Summary view (`view` is then
+    /// the decoded listing).
     Converted {
         kind: ConvertedKind,
         format: String,
         view: Box<Diff>,
         source: Box<Diff>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<std::sync::Arc<compiled::CompiledDiff>>,
     },
 }
 

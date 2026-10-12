@@ -4,6 +4,9 @@
 //! becomes a [`Diff::Converted`]: its decoded text (diffed by `git diff
 //! --no-index`), its table or its pictures, next to git's own diff.
 //!
+//! Corvene `1360-compiled-summary`: a compiled file also carries both
+//! versions compared as structured data, for the Summary view.
+//!
 //! GitHub Desktop shows all of these as text or binary diffs
 //! (`app/src/ui/diff/index.tsx`).
 
@@ -97,8 +100,28 @@ pub fn converted_diff(
             format: format.name().to_string(),
             view: Box::new(view),
             source: Box::new(source),
+            summary: compiled_summary(format, previous.as_deref(), current.as_deref()),
         },
         None => source,
+    }
+}
+
+/// `1360-compiled-summary`: a compiled file's versions compared as
+/// structured data (`None` for other kinds, or when a side does not read).
+fn compiled_summary(
+    format: Format,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+) -> Option<Arc<corvene_models::compiled::CompiledDiff>> {
+    if format.kind() != ConvertedKind::Compiled {
+        return None;
+    }
+    match corvene_convert::compiled::summary_diff(format, old, new) {
+        Ok(diff) => Some(Arc::new(diff)),
+        Err(reason) => {
+            tracing::debug!(?format, %reason, "compiled file did not summarize");
+            None
+        }
     }
 }
 

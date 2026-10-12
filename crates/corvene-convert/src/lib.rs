@@ -365,6 +365,10 @@ mod tests {
             format_by_name("app/src/main/res/values-fr/strings.xml"),
             Some(Format::AndroidStrings)
         );
+        assert_eq!(
+            format_by_name("native/speedups.cp312-win_amd64.pyd"),
+            Some(Format::Native)
+        );
         assert_eq!(format_by_name("pom.xml"), None);
         assert_eq!(format_by_name(".class"), None);
         assert_eq!(format_by_name("locales/de.json"), Some(Format::LocaleJson));

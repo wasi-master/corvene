@@ -26,6 +26,16 @@ pub fn to_text(bytes: &[u8]) -> Result<String, String> {
     Ok(class.listing())
 }
 
+/// `1360-compiled-summary`: one class file as facts and tables (fields,
+/// methods with their bytecode size, interfaces).
+pub fn summary(bytes: &[u8]) -> Result<super::summary::Side, String> {
+    if !is_class(bytes) {
+        return Err("Not a Java class file.".into());
+    }
+    let class = parse(bytes).ok_or("Not a readable Java class file.")?;
+    Ok(class.summary(bytes.len()))
+}
+
 #[derive(Clone, Debug)]
 enum Constant {
     Unused,
@@ -522,6 +532,121 @@ impl Class<'_> {
             self.bootstrap_methods(&mut out, data);
         }
         out
+    }
+
+    /// The class's kind word ("interface", "record").
+    fn kind_word(&self) -> &'static str {
+        if self.access & 0x2000 != 0 {
+            "annotation"
+        } else if self.access & 0x0200 != 0 {
+            "interface"
+        } else if self.access & 0x4000 != 0 {
+            "enum"
+        } else if self.access & 0x8000 != 0 {
+            "module"
+        } else if Self::attribute(&self.attributes, "Record").is_some() {
+            "record"
+        } else {
+            "class"
+        }
+    }
+
+    fn summary(&self, len: usize) -> super::summary::Side {
+        use super::summary::{Entry, Side, hash};
+        use corvene_models::compiled::CompiledGroupKind as G;
+        let mut side = Side::default();
+        let name = self.dotted(self.this);
+        let kind = self.kind_word();
+        side.title = format!("Java {kind} {name}");
+        side.fact("Class", name.clone());
+        side.fact("Kind", kind);
+        side.fact(
+            "Class file version",
+            format!(
+                "{}.{} (Java {})",
+                self.major,
+                self.minor,
+                java_release(self.major)
+            ),
+        );
+        let is_interface = self.access & 0x0200 != 0;
+        let words = modifiers(
+            if is_interface {
+                self.access & !0x0400
+            } else {
+                self.access
+            },
+            CLASS_FLAGS,
+        );
+        side.fact("Access flags", format!("{}(0x{:04x})", words, self.access));
+        let super_name = self.dotted(self.super_class);
+        side.fact("Superclass", super_name);
+        if let Some(data) = Self::attribute(&self.attributes, "SourceFile") {
+            let mut r = Reader::new(data);
+            if let Some(ix) = r.u2() {
+                side.fact("Source file", self.utf8(ix).to_string());
+            }
+        }
+        if let Some(data) = Self::attribute(&self.attributes, "Signature") {
+            let mut r = Reader::new(data);
+            if let Some(ix) = r.u2() {
+                side.fact("Signature", self.utf8(ix).to_string());
+            }
+        }
+        side.count("Constant pool", self.pool.len().saturating_sub(1) as u64);
+        side.count("Fields", self.fields.len() as u64);
+        side.count("Methods", self.methods.len() as u64);
+        side.bytes("Size", len as u64);
+        for ix in &self.interfaces {
+            side.push(G::Interfaces, Entry::new(self.dotted(*ix)));
+        }
+        for field in &self.fields {
+            let (ty, _) = field_type(field.descriptor.as_bytes(), 0);
+            let mut body = String::new();
+            self.signature(&mut body, &field.attributes, "");
+            self.annotations(&mut body, &field.attributes, "");
+            if let Some(data) = Self::attribute(&field.attributes, "ConstantValue") {
+                let mut r = Reader::new(data);
+                if let Some(ix) = r.u2() {
+                    body.push_str(&self.constant(ix));
+                }
+            }
+            side.push(
+                G::Fields,
+                Entry::new(field.name.clone())
+                    .detail(format!("{}{ty}", modifiers(field.access, FIELD_FLAGS)))
+                    .body(hash(body.as_bytes())),
+            );
+        }
+        let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
+        for method in &self.methods {
+            let (params, ret) = method_types(&method.descriptor);
+            let display = match method.name.as_str() {
+                "<init>" => format!("{simple}({})", params.join(", ")),
+                "<clinit>" => "static {}".to_string(),
+                n => format!("{n}({})", params.join(", ")),
+            };
+            let mut access = method.access;
+            if is_interface && access & 0x0400 != 0 {
+                access &= !0x0400;
+            }
+            let mut detail = modifiers(access, METHOD_FLAGS);
+            if !matches!(method.name.as_str(), "<init>" | "<clinit>") {
+                detail.push_str(&ret);
+            }
+            let mut entry = Entry::new(display)
+                .key(format!("{}{}", method.name, method.descriptor))
+                .detail(detail.trim_end().to_string());
+            if let Some(data) = Self::attribute(&method.attributes, "Code") {
+                let mut r = Reader::new(data);
+                let len = r.u2().and(r.u2()).and(r.u4()).unwrap_or(0);
+                let mut code = String::new();
+                self.code(&mut code, data);
+                entry = entry.size(u64::from(len)).body(hash(code.as_bytes()));
+            }
+            side.push(G::Methods, entry);
+        }
+        side
     }
 
     fn class_list(&self, data: &[u8]) -> Vec<String> {
@@ -1236,6 +1361,22 @@ mod tests {
         b.extend(2u32.to_be_bytes());
         b.extend(9u16.to_be_bytes());
         b
+    }
+
+    #[test]
+    fn summarizes_a_class() {
+        use corvene_models::compiled::CompiledGroupKind as G;
+        let side = summary(&sample()).unwrap();
+        assert_eq!(side.title, "Java class Hi");
+        assert!(
+            side.facts
+                .iter()
+                .any(|f| f.label == "Class file version" && f.value == "61.0 (Java 17)")
+        );
+        let (_, methods) = side.groups.iter().find(|(k, _)| *k == G::Methods).unwrap();
+        assert_eq!(methods[0].name, "f(int)");
+        assert_eq!(methods[0].detail, "public static int");
+        assert_eq!(methods[0].size, Some(10));
     }
 
     #[test]

@@ -191,29 +191,33 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flatten()
             .map(|l| l.text.len() + l.images.iter().map(|(_, i)| i.bytes.len()).sum::<usize>())
             .sum(),
-        // `1350`-`1355`: the converted view (git's diff is `source`)
-        corvene_models::Diff::Converted { view, .. } => match &**view {
-            corvene_models::Diff::Text { hunks, .. }
-            | corvene_models::Diff::LargeText { hunks, .. } => hunks
-                .iter()
-                .flat_map(|h| &h.lines)
-                .map(|l| l.text.len() + 32)
-                .sum(),
-            corvene_models::Diff::Table { previous, current } => [previous, current]
-                .into_iter()
-                .flatten()
-                .flat_map(|t| &t.sheets)
-                .flat_map(|s| &s.rows)
-                .flatten()
-                .map(|c| c.len() + 24)
-                .sum(),
-            corvene_models::Diff::Image { previous, current } => [previous, current]
-                .into_iter()
-                .flatten()
-                .map(|b| b.bytes.len())
-                .sum(),
-            _ => 0,
-        },
+        // `1350`-`1355`: the converted view (git's diff is `source`) and
+        // a compiled file's summary (`1360`)
+        corvene_models::Diff::Converted { view, summary, .. } => {
+            summary.as_ref().map_or(0, |s| s.weight())
+                + match &**view {
+                    corvene_models::Diff::Text { hunks, .. }
+                    | corvene_models::Diff::LargeText { hunks, .. } => hunks
+                        .iter()
+                        .flat_map(|h| &h.lines)
+                        .map(|l| l.text.len() + 32)
+                        .sum(),
+                    corvene_models::Diff::Table { previous, current } => [previous, current]
+                        .into_iter()
+                        .flatten()
+                        .flat_map(|t| &t.sheets)
+                        .flat_map(|s| &s.rows)
+                        .flatten()
+                        .map(|c| c.len() + 24)
+                        .sum(),
+                    corvene_models::Diff::Image { previous, current } => [previous, current]
+                        .into_iter()
+                        .flatten()
+                        .map(|b| b.bytes.len())
+                        .sum(),
+                    _ => 0,
+                }
+        }
         _ => 0,
     };
     diff_bytes + lines(new) + lines(old)

@@ -463,28 +463,7 @@ fn write_code(out: &mut String, code: &Code, depth: usize) {
     }
     let positional = (code.argcount + code.kwonly).max(0) as usize;
     if positional > 0 || code.flags & 0x0c != 0 {
-        let mut args: Vec<String> = Vec::new();
-        for (ix, name) in code.varnames.iter().take(positional).enumerate() {
-            if ix as i64 == code.argcount && code.kwonly > 0 {
-                args.push("*".into());
-            }
-            args.push(name.clone());
-            if code.posonly > 0 && ix as i64 + 1 == code.posonly {
-                args.push("/".into());
-            }
-        }
-        let mut next = positional;
-        if code.flags & 0x04 != 0 {
-            if let Some(name) = code.varnames.get(next) {
-                args.push(format!("*{name}"));
-            }
-            next += 1;
-        }
-        if code.flags & 0x08 != 0
-            && let Some(name) = code.varnames.get(next)
-        {
-            args.push(format!("**{name}"));
-        }
+        let args = arguments(code);
         let _ = writeln!(out, "{pad}  arguments: {}", args.join(", "));
     }
     let consts: Vec<String> = code
@@ -525,45 +504,45 @@ fn write_code(out: &mut String, code: &Code, depth: usize) {
     }
 }
 
-/// The text of one `.pyc` file.
-pub fn to_text(bytes: &[u8]) -> Result<String, String> {
+/// What a `.pyc` header says about its source.
+enum Stamp {
+    /// The source's hash, and whether Python checks it.
+    Hash(Vec<u8>, bool),
+    /// The source's modification time and size.
+    Time(Option<u32>, Option<u32>),
+}
+
+struct Parsed {
+    magic: u16,
+    version: (u8, u8),
+    stamp: Stamp,
+    code: Code,
+}
+
+fn parse(bytes: &[u8]) -> Result<Parsed, String> {
     if bytes.len() < 8 || &bytes[2..4] != b"\r\n" {
         return Err("Not a Python bytecode file.".into());
     }
     let magic = u16::from_le_bytes([bytes[0], bytes[1]]);
     let version =
         release(magic).ok_or_else(|| format!("Unknown Python bytecode version {magic}."))?;
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "Python {}.{} bytecode (magic {magic})",
-        version.0, version.1
-    );
     let word = |at: usize| {
         bytes
             .get(at..at + 4)
             .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     };
-    let start = if version >= (3, 7) {
+    let (stamp, start) = if version >= (3, 7) {
         let flags = word(4).ok_or("Truncated header.")?;
         if flags & 1 != 0 {
             let hash = bytes.get(8..16).ok_or("Truncated header.")?;
-            let _ = writeln!(
-                out,
-                "Source hash: {}{}",
-                crate::out::hex(hash),
-                if flags & 2 != 0 { " (checked)" } else { "" }
-            );
+            (Stamp::Hash(hash.to_vec(), flags & 2 != 0), 16)
         } else {
-            source_stamp(&mut out, word(8), word(12));
+            (Stamp::Time(word(8), word(12)), 16)
         }
-        16
     } else if version >= (3, 3) {
-        source_stamp(&mut out, word(4), word(8));
-        12
+        (Stamp::Time(word(4), word(8)), 12)
     } else {
-        source_stamp(&mut out, word(4), None);
-        8
+        (Stamp::Time(word(4), None), 8)
     };
     let mut reader = Reader {
         data: bytes,
@@ -575,12 +554,173 @@ pub fn to_text(bytes: &[u8]) -> Result<String, String> {
     let Some(Value::Code(code)) = reader.object() else {
         return Err("The bytecode could not be read.".into());
     };
+    Ok(Parsed {
+        magic,
+        version,
+        stamp,
+        code: *code,
+    })
+}
+
+/// The text of one `.pyc` file.
+pub fn to_text(bytes: &[u8]) -> Result<String, String> {
+    let Parsed {
+        magic,
+        version,
+        stamp,
+        code,
+    } = parse(bytes)?;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Python {}.{} bytecode (magic {magic})",
+        version.0, version.1
+    );
+    match stamp {
+        Stamp::Hash(hash, checked) => {
+            let _ = writeln!(
+                out,
+                "Source hash: {}{}",
+                crate::out::hex(&hash),
+                if checked { " (checked)" } else { "" }
+            );
+        }
+        Stamp::Time(mtime, size) => source_stamp(&mut out, mtime, size),
+    }
     if !code.filename.is_empty() {
         let _ = writeln!(out, "Compiled from {}", code.filename);
     }
     out.push('\n');
     write_code(&mut out, &code, 0);
     Ok(out)
+}
+
+/// `1360-compiled-summary`: one `.pyc` file as facts and a table of its
+/// code objects.
+pub fn summary(bytes: &[u8]) -> Result<super::summary::Side, String> {
+    use super::summary::Side;
+    let Parsed {
+        magic,
+        version,
+        stamp,
+        code,
+    } = parse(bytes)?;
+    let mut side = Side {
+        title: format!("Python {}.{} bytecode", version.0, version.1),
+        ..Side::default()
+    };
+    side.fact("Python", format!("{}.{}", version.0, version.1));
+    side.fact("Magic number", magic.to_string());
+    match stamp {
+        Stamp::Hash(hash, checked) => {
+            side.fact(
+                "Source hash",
+                format!(
+                    "{}{}",
+                    crate::out::hex(&hash),
+                    if checked { " (checked)" } else { "" }
+                ),
+            );
+        }
+        Stamp::Time(mtime, size) => {
+            if let Some(mtime) = mtime {
+                side.fact("Source modified", utc(i64::from(mtime)));
+            }
+            if let Some(size) = size {
+                side.bytes("Source size", u64::from(size));
+            }
+        }
+    }
+    side.fact("Compiled from", code.filename.clone());
+    side.bytes("Size", bytes.len() as u64);
+    code_rows(&mut side, &code, "", 0);
+    let n = side.groups.first().map_or(0, |(_, e)| e.len());
+    side.count("Code objects", n as u64);
+    Ok(side)
+}
+
+/// The arguments of a code object as a signature (`a, /, b, *args`).
+fn arguments(code: &Code) -> Vec<String> {
+    let positional = (code.argcount + code.kwonly).max(0) as usize;
+    let mut args: Vec<String> = Vec::new();
+    for (ix, name) in code.varnames.iter().take(positional).enumerate() {
+        if ix as i64 == code.argcount && code.kwonly > 0 {
+            args.push("*".into());
+        }
+        args.push(name.clone());
+        if code.posonly > 0 && ix as i64 + 1 == code.posonly {
+            args.push("/".into());
+        }
+    }
+    let mut next = positional;
+    if code.flags & 0x04 != 0 {
+        if let Some(name) = code.varnames.get(next) {
+            args.push(format!("*{name}"));
+        }
+        next += 1;
+    }
+    if code.flags & 0x08 != 0
+        && let Some(name) = code.varnames.get(next)
+    {
+        args.push(format!("**{name}"));
+    }
+    args
+}
+
+fn code_rows(side: &mut super::summary::Side, code: &Code, parent: &str, depth: usize) {
+    use super::summary::{Entry, hash};
+    use corvene_models::compiled::CompiledGroupKind as G;
+    // before 3.11 there is no qualified name: make one from the nesting
+    let name = if !code.qualname.is_empty() {
+        code.qualname.clone()
+    } else if parent.is_empty() || parent == "<module>" {
+        code.name.clone()
+    } else {
+        format!("{parent}.{}", code.name)
+    };
+    let consts: Vec<String> = code
+        .consts
+        .iter()
+        .filter(|c| !matches!(c, Value::Code(_)))
+        .map(short)
+        .collect();
+    let mut detail = format!("({})", arguments(code).join(", "));
+    let flags = flag_names(code.flags);
+    if !flags.is_empty() {
+        detail = format!("{} {detail}", flags.join(" "));
+    }
+    detail.push_str(&format!(
+        " · {} {} · {} {}",
+        consts.len(),
+        if consts.len() == 1 {
+            "constant"
+        } else {
+            "constants"
+        },
+        code.names.len(),
+        if code.names.len() == 1 {
+            "name"
+        } else {
+            "names"
+        },
+    ));
+    let mut body = code.bytecode.clone();
+    body.extend(consts.join("\n").as_bytes());
+    body.extend(code.names.join("\n").as_bytes());
+    side.push(
+        G::CodeObjects,
+        Entry::new(name.clone())
+            .detail(detail)
+            .size(code.bytecode.len() as u64)
+            .body(hash(&body)),
+    );
+    if depth < MAX_DEPTH {
+        for c in &code.consts {
+            if let Value::Code(inner) = c {
+                code_rows(side, inner, &name, depth + 1);
+            }
+        }
+    }
 }
 
 fn source_stamp(out: &mut String, mtime: Option<u32>, size: Option<u32>) {
@@ -678,6 +818,16 @@ mod tests {
         assert!(text.contains("<module> (line 1)"), "{text}");
         assert!(text.contains("    1\n    None"), "{text}");
         assert!(text.contains("names: x"), "{text}");
+    }
+
+    #[test]
+    fn summarizes_a_312_module() {
+        let side = summary(&sample_312()).unwrap();
+        assert_eq!(side.title, "Python 3.12 bytecode");
+        let (_, rows) = &side.groups[0];
+        assert_eq!(rows[0].name, "<module>");
+        assert_eq!(rows[0].detail, "() · 2 constants · 1 name");
+        assert_eq!(rows[0].size, Some(4));
     }
 
     #[test]

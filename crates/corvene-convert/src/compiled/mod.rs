@@ -8,10 +8,17 @@
 //! - native binaries: what changes between builds and matters (linked
 //!   libraries, sections with their sizes, defined and imported symbols),
 //!   without addresses, which move with every change.
+//!
+//! Corvene `1360-compiled-summary`: each kind is also read as structured
+//! data ([`summary::Side`]) and both versions compared ([`summary_diff`]),
+//! for the diff's Summary view.
 
 pub mod class;
 pub mod native;
+pub mod native_summary;
 pub mod pyc;
+pub mod summary;
+pub mod wasm;
 
 use crate::Format;
 
@@ -24,6 +31,40 @@ pub fn to_text(format: Format, bytes: &[u8]) -> Result<String, String> {
         Format::Native => native::to_text(bytes),
         _ => Err("Not compiled code.".into()),
     }
+}
+
+/// The structured summary of one side.
+pub fn to_summary(format: Format, bytes: &[u8]) -> Result<summary::Side, String> {
+    match format {
+        Format::JavaClass => class::summary(bytes),
+        Format::PythonBytecode => pyc::summary(bytes),
+        Format::WebAssembly => wasm::summary(bytes),
+        Format::Native => native_summary::summary(bytes),
+        _ => Err("Not compiled code.".into()),
+    }
+}
+
+/// Both sides of a compiled file compared (`None` for a side that does
+/// not exist). `Err` (why) when a side does not read as `format`.
+pub fn summary_diff(
+    format: Format,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+) -> Result<corvene_models::compiled::CompiledDiff, String> {
+    use corvene_models::compiled::CompiledFamily;
+    let family = match format {
+        Format::JavaClass => CompiledFamily::JavaClass,
+        Format::PythonBytecode => CompiledFamily::PythonBytecode,
+        Format::WebAssembly => CompiledFamily::WebAssembly,
+        Format::Native => CompiledFamily::Native,
+        _ => return Err("Not compiled code.".into()),
+    };
+    if old.is_none() && new.is_none() {
+        return Err("Neither side exists.".into());
+    }
+    let old = old.map(|b| to_summary(format, b)).transpose()?;
+    let new = new.map(|b| to_summary(format, b)).transpose()?;
+    Ok(summary::compare(family, old.as_ref(), new.as_ref()))
 }
 
 /// A WebAssembly module (binary) in the text format.
