@@ -19,6 +19,7 @@ gpui-pre-apple = "=0.3.7"
 corvene-core = { path = "crates/corvene-core" }
 corvene-extensions = { path = "crates/corvene-extensions" }
 corvene-fonts = { path = "crates/corvene-fonts" }
+corvene-math = { path = "crates/corvene-math" }
 corvene-git = { path = "crates/corvene-git" }
 corvene-github = { path = "crates/corvene-github" }
 corvene-grammars = { path = "crates/corvene-grammars" }
@@ -77,6 +78,14 @@ opt-level = 3
 [profile.dev.package.regex-automata]
 opt-level = 3
 [profile.dev.package.fancy-regex]
+opt-level = 3
+
+# `corvene-math`: formulas are laid out and rasterised as the diff scrolls
+[profile.dev.package.ratex-layout]
+opt-level = 3
+[profile.dev.package.ratex-render]
+opt-level = 3
+[profile.dev.package.ab_glyph_rasterizer]
 opt-level = 3
 [profile.dev.package.syntect]
 opt-level = 3

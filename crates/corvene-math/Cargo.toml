@@ -1,0 +1,14 @@
+[package]
+name = "corvene-math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TeX math typesetting (RaTeX, a KaTeX port) into alpha masks for the UI"
+
+[dependencies]
+thiserror.workspace = true
+ratex-parser = "=0.1.14"
+ratex-layout = "=0.1.14"
+ratex-types = "=0.1.14"
+ratex-render = { version = "=0.1.14", features = ["embed-fonts"] }
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd", "png-format"] }
