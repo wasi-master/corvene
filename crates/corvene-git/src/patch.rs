@@ -337,7 +337,7 @@ fn apply_hunks_to_index(
             }
             hunks
         }
-        Diff::Binary | Diff::Image { .. } | Diff::Table { .. } | Diff::Submodule(_) => {
+        Diff::Binary | Diff::Image { .. } | Diff::Table { .. } | Diff::Archive(_) | Diff::Submodule(_) => {
             return Err(GitError::Gix(format!(
                 "Can't create partial commit in binary file: {}",
                 file.path

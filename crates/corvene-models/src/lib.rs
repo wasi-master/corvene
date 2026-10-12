@@ -1924,6 +1924,280 @@ pub struct TableSheet {
     pub truncated: bool,
 }
 
+/// Corvene `1323-archive-diff`: how an archive is packed. The single-file
+/// kinds (`Gzip`, `Bzip2`, `Xz`, `Zstd`) hold one compressed file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ArchiveFormat {
+    Zip,
+    Tar,
+    TarGz,
+    TarBz2,
+    TarXz,
+    TarZst,
+    Gzip,
+    Bzip2,
+    Xz,
+    Zstd,
+}
+
+impl ArchiveFormat {
+    /// The short name shown on the archive's summary bar.
+    pub fn label(self) -> &'static str {
+        match self {
+            ArchiveFormat::Zip => "ZIP",
+            ArchiveFormat::Tar => "TAR",
+            ArchiveFormat::TarGz => "TAR.GZ",
+            ArchiveFormat::TarBz2 => "TAR.BZ2",
+            ArchiveFormat::TarXz => "TAR.XZ",
+            ArchiveFormat::TarZst => "TAR.ZST",
+            ArchiveFormat::Gzip => "GZIP",
+            ArchiveFormat::Bzip2 => "BZIP2",
+            ArchiveFormat::Xz => "XZ",
+            ArchiveFormat::Zstd => "ZSTD",
+        }
+    }
+
+    /// A compressor holding one file rather than an archive of entries.
+    pub fn is_single(self) -> bool {
+        matches!(
+            self,
+            ArchiveFormat::Gzip | ArchiveFormat::Bzip2 | ArchiveFormat::Xz | ArchiveFormat::Zstd
+        )
+    }
+}
+
+/// Corvene `1323-archive-diff`: where the outermost archive of one side is
+/// read from, pinned so an entry read later sees the same bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ArchiveRoot {
+    /// A blob in the object database (a commit's or the index's version).
+    Blob { oid: String },
+    /// A file on disk (the working tree, or a Git LFS object), with the
+    /// size and mtime it had when it was listed.
+    File {
+        path: PathBuf,
+        len: u64,
+        mtime_ns: i128,
+    },
+}
+
+/// Corvene `1323-archive-diff`: one side of an archive, possibly nested:
+/// `chain` holds the entry paths of the archives inside `root` that lead to
+/// it (empty for the outermost archive).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArchiveSource {
+    pub root: ArchiveRoot,
+    /// The outermost file's repository path (its extension picks the format).
+    pub name: String,
+    pub chain: Vec<String>,
+}
+
+impl ArchiveSource {
+    /// The source of the archive stored at `entry` inside this one.
+    pub fn nested(&self, entry: &str) -> ArchiveSource {
+        let mut chain = self.chain.clone();
+        chain.push(entry.to_string());
+        ArchiveSource {
+            root: self.root.clone(),
+            name: self.name.clone(),
+            chain,
+        }
+    }
+
+    /// The path whose extension names this level's format.
+    pub fn level_name(&self) -> &str {
+        self.chain.last().map_or(self.name.as_str(), String::as_str)
+    }
+}
+
+/// Corvene `1323-archive-diff`: one side of an archive diff.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveSummary {
+    pub source: ArchiveSource,
+    pub format: ArchiveFormat,
+    /// The archive's own size.
+    pub bytes: u64,
+    /// The entries' sizes added up.
+    pub unpacked: u64,
+    pub entry_count: usize,
+    /// A zip file's comment.
+    pub comment: Option<String>,
+}
+
+/// Corvene `1323-archive-diff`: what an archive entry is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArchiveEntryKind {
+    File,
+    Dir,
+    Symlink(String),
+    Hardlink(String),
+    /// A device, FIFO or other special file.
+    Other,
+}
+
+/// Corvene `1323-archive-diff`: one entry of one side.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveEntryMeta {
+    pub kind: ArchiveEntryKind,
+    /// Unpacked size.
+    pub size: u64,
+    /// Packed size (zip).
+    pub compressed: Option<u64>,
+    /// CRC-32 of the contents (of the packed bytes for an encrypted entry),
+    /// compared together with `size`.
+    pub crc32: u32,
+    /// Unix permission bits.
+    pub mode: Option<u32>,
+    /// Seconds since 1970. Zip stores a local time without a zone: those
+    /// are read as UTC and `mtime_naive` is set, so they print unshifted.
+    pub mtime: Option<i64>,
+    pub mtime_naive: bool,
+    /// Compression method (zip): `stored`, `deflate`, …
+    pub method: Option<String>,
+    /// `user:group` (tar).
+    pub owner: Option<String>,
+    pub encrypted: bool,
+}
+
+impl ArchiveEntryMeta {
+    /// Whether two versions hold the same contents.
+    pub fn same_contents(&self, other: &ArchiveEntryMeta) -> bool {
+        self.kind == other.kind
+            && self.size == other.size
+            && self.crc32 == other.crc32
+            && self.encrypted == other.encrypted
+    }
+
+    /// Whether anything besides the contents differs.
+    pub fn same_metadata(&self, other: &ArchiveEntryMeta) -> bool {
+        self.mode == other.mode
+            && self.mtime == other.mtime
+            && self.method == other.method
+            && self.owner == other.owner
+            && self.compressed == other.compressed
+    }
+}
+
+/// Corvene `1323-archive-diff`: how an entry changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ArchiveEntryStatus {
+    Added,
+    Deleted,
+    Modified,
+    /// Moved with its contents unchanged (`old_path` holds the old path).
+    Renamed,
+    /// Same contents, other permissions, time, owner or compression.
+    MetadataOnly,
+    Unchanged,
+}
+
+impl ArchiveEntryStatus {
+    /// Added, deleted, modified or renamed.
+    pub fn is_content_change(self) -> bool {
+        !matches!(
+            self,
+            ArchiveEntryStatus::MetadataOnly | ArchiveEntryStatus::Unchanged
+        )
+    }
+}
+
+/// Corvene `1323-archive-diff`: one entry of an archive diff.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveEntryChange {
+    /// The entry's path (the new one for a rename), `/`-separated, without
+    /// a leading `./` or `/` and without a directory's trailing `/`.
+    pub path: String,
+    pub status: ArchiveEntryStatus,
+    pub old_path: Option<String>,
+    pub old: Option<ArchiveEntryMeta>,
+    pub new: Option<ArchiveEntryMeta>,
+}
+
+impl ArchiveEntryChange {
+    /// The entry's version that exists, the new one first.
+    pub fn meta(&self) -> Option<&ArchiveEntryMeta> {
+        self.new.as_ref().or(self.old.as_ref())
+    }
+
+    /// The path of the old version.
+    pub fn previous_path(&self) -> &str {
+        self.old_path.as_deref().unwrap_or(&self.path)
+    }
+
+    pub fn is_dir(&self) -> bool {
+        self.meta().is_some_and(|m| m.kind == ArchiveEntryKind::Dir)
+    }
+}
+
+/// Corvene `1323-archive-diff`: a binary change of an archive read as the
+/// list of its entries. GitHub Desktop shows these as binary files
+/// (`app/src/lib/git/diff.ts` `getBinaryPaths`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveDiff {
+    pub format: ArchiveFormat,
+    /// `None` for a side that does not exist (a new or deleted file).
+    pub old: Option<ArchiveSummary>,
+    pub new: Option<ArchiveSummary>,
+    /// Every entry of both sides, sorted by path.
+    pub entries: Vec<ArchiveEntryChange>,
+    /// A single compressed file: the name of the file inside it.
+    pub single: Option<String>,
+    /// More entries or unpacked bytes than are read: the rest are left out.
+    pub truncated: bool,
+    /// A side that did not read: the diff is shown as binary, with this.
+    pub unreadable: Option<String>,
+}
+
+impl ArchiveDiff {
+    /// The entry at `path`.
+    pub fn entry(&self, path: &str) -> Option<&ArchiveEntryChange> {
+        self.entries
+            .binary_search_by(|e| e.path.as_str().cmp(path))
+            .ok()
+            .map(|ix| &self.entries[ix])
+    }
+
+    /// The number of entries with each status.
+    pub fn counts(&self) -> ArchiveCounts {
+        let mut counts = ArchiveCounts::default();
+        for entry in &self.entries {
+            if entry.is_dir()
+                && entry.status != ArchiveEntryStatus::Added
+                && entry.status != ArchiveEntryStatus::Deleted
+            {
+                continue;
+            }
+            match entry.status {
+                ArchiveEntryStatus::Added => counts.added += 1,
+                ArchiveEntryStatus::Deleted => counts.deleted += 1,
+                ArchiveEntryStatus::Modified => counts.modified += 1,
+                ArchiveEntryStatus::Renamed => counts.renamed += 1,
+                ArchiveEntryStatus::MetadataOnly => counts.metadata += 1,
+                ArchiveEntryStatus::Unchanged => counts.unchanged += 1,
+            }
+        }
+        counts
+    }
+}
+
+/// Corvene `1323-archive-diff`: entries per status.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArchiveCounts {
+    pub added: usize,
+    pub deleted: usize,
+    pub modified: usize,
+    pub renamed: usize,
+    pub metadata: usize,
+    pub unchanged: usize,
+}
+
+impl ArchiveCounts {
+    /// Added, deleted, modified and renamed entries.
+    pub fn content_changes(&self) -> usize {
+        self.added + self.deleted + self.modified + self.renamed
+    }
+}
+
 /// GHD `ISubmoduleDiff`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmoduleDiff {
@@ -2101,6 +2375,8 @@ pub enum Diff {
         previous: Option<TableBlob>,
         current: Option<TableBlob>,
     },
+    /// Corvene `1323-archive-diff`: a binary archive read as its entries.
+    Archive(Box<ArchiveDiff>),
     /// Nothing to show (e.g. empty file, mode-only change).
     Empty,
     /// `Unrenderable`: beyond what git would even hand over.

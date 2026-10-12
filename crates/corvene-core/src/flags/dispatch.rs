@@ -221,6 +221,7 @@ impl Dispatcher {
                 ids::TABLE_FILE_DIFF,
                 ids::PDF_DIFF,
                 ids::MORE_IMAGE_FORMATS,
+                ids::ARCHIVE_DIFF,
             ]
             .map(|id| flags.bool(id))
         };
@@ -230,6 +231,7 @@ impl Dispatcher {
             corvene_git::table_file::set_read_table_files(now.bool(ids::TABLE_FILE_DIFF));
             corvene_git::set_pdf_diffs(now.bool(ids::PDF_DIFF));
             crate::image_decode::set_more_image_formats(now.bool(ids::MORE_IMAGE_FORMATS));
+            corvene_git::archive::set_read_archives(now.bool(ids::ARCHIVE_DIFF));
             crate::diff_cache::clear_diffs();
             for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);

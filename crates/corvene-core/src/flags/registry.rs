@@ -8711,6 +8711,26 @@ registry! {
         upstream: &[Upstream::issue(5009), Upstream::issue(15875)],
         code: &["crates/corvene-core/src/pdf.rs", "crates/corvene-ui/src/pdf_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/diff.rs"],
     },
+    /// Archives diffed as folders of entries.
+    ARCHIVE_DIFF = 1323 "archive-diff" {
+        title: "Archive diffs as folders",
+        summary: "A changed zip-style archive (.zip, .jar, .apk, .whl, .nupkg, .vsix, .epub \
+                  and similar), tar archive (.tar, .tar.gz, .tgz, .tar.bz2, .tar.xz, .tar.zst) \
+                  or compressed file (.gz, .bz2, .xz, .zst) opens as a folder instead of \
+                  \"This binary file has changed.\": a tree of its entries marked added, \
+                  removed, modified, renamed or changed only in permissions, times or \
+                  compression, and each entry's own diff (text, image or an archive inside \
+                  the archive, with a breadcrumb back). A banner says when a rebuilt archive \
+                  holds the same contents. Entries can be stacked, saved, opened or sent to the \
+                  external diff tool. Archives over 256 MB stay binary.",
+        ghd_behaviour: "Archives are binary files: the diff only says the file changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/archive/mod.rs", "crates/corvene-core/src/archive_browse.rs", "crates/corvene-ui/src/archive_diff_view.rs"],
+    },
 
     /// Image diffs for HEIC, PSD, TIFF, camera RAW and other image files.
     MORE_IMAGE_FORMATS = 1326 "more-image-formats" {

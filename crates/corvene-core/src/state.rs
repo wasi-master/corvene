@@ -1614,6 +1614,10 @@ pub struct RepositoryState {
     /// The diffs of the files shown stacked in one list.
     pub stacked: crate::stacked_diff::StackedDiffs,
 
+    // ---- `1323-archive-diff` ----
+    /// The archive views and the file lists' archive rows.
+    pub archives: crate::archive_browse::ArchiveBrowses,
+
     // ---- `1218-compare-refs` ----
     /// The combined diff of the two compared refs.
     pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,

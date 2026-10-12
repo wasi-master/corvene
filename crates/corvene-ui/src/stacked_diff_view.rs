@@ -303,6 +303,31 @@ impl StackedDiffView {
         match self.source {
             DiffSource::WorkingDirectory => corvene_core::stacked_diff::working_stack(s, rs),
             DiffSource::Commit => corvene_core::stacked_diff::commit_stack(s, rs, &self.multi),
+            // `1323-archive-diff`: the level's changed files (archives
+            // inside it open on their own)
+            DiffSource::ArchiveEntry(surface) => {
+                let b = rs.archives.open.get(&surface)?;
+                Some(
+                    b.level()
+                        .diff
+                        .entries
+                        .iter()
+                        .filter(|e| {
+                            e.status.is_content_change()
+                                && corvene_git::archive::archive_format(&e.path).is_none()
+                                && [&e.old, &e.new]
+                                    .into_iter()
+                                    .flatten()
+                                    .all(|m| m.kind == corvene_core::ArchiveEntryKind::File)
+                        })
+                        .map(|e| StackedFile {
+                            path: e.path.clone(),
+                            kind: crate::diff_view::archive_entry_kind(e.status),
+                            old_path: e.old_path.clone(),
+                        })
+                        .collect(),
+                )
+            }
             _ => None,
         }
     }
@@ -316,6 +341,7 @@ impl StackedDiffView {
                 .read(cx)
                 .selected_state()
                 .map(Dispatcher::commit_stack_kind),
+            DiffSource::ArchiveEntry(surface) => Some(StackKind::Archive(surface)),
             _ => None,
         }
     }
@@ -451,6 +477,11 @@ impl Render for StackedDiffView {
             s.selected_state().and_then(|rs| match self.source {
                 DiffSource::WorkingDirectory => rs.selected_file.clone(),
                 DiffSource::Commit => rs.commit_selected_file.clone(),
+                DiffSource::ArchiveEntry(surface) => rs
+                    .archives
+                    .open
+                    .get(&surface)
+                    .and_then(|b| b.selected.clone()),
                 _ => None,
             })
         };
@@ -534,7 +565,13 @@ impl Render for StackedDiffView {
                         self.files
                             .iter()
                             .filter(|slot| slot.shape == StackedShape::Loading)
-                            .filter(|slot| !rs.stacked.requested(&kind, &slot.file.path))
+                            .filter(|slot| {
+                                !corvene_core::stacked_diff::stacked_requested(
+                                    rs,
+                                    &kind,
+                                    &slot.file.path,
+                                )
+                            })
                             .map(|slot| slot.file.path.clone())
                             .collect()
                     })
@@ -624,7 +661,9 @@ impl Render for StackedDiffView {
                     .skip(from)
                     .take(1 + PREFETCH)
                     .filter(|(_, _, shape)| *shape == StackedShape::Loading)
-                    .filter(|(file, _, _)| !rs.stacked.requested(&kind, &file.path))
+                    .filter(|(file, _, _)| {
+                        !corvene_core::stacked_diff::stacked_requested(rs, &kind, &file.path)
+                    })
                     .map(|(file, _, _)| file.path.clone())
                     .collect();
                 for path in wanted {

@@ -172,6 +172,8 @@ impl Dispatcher {
         crate::image_decode::set_more_image_formats(
             flags.bool(crate::flags::ids::MORE_IMAGE_FORMATS),
         );
+        // `1323-archive-diff`
+        corvene_git::archive::set_read_archives(flags.bool(crate::flags::ids::ARCHIVE_DIFF));
         let hosts = crate::hosts::HostsState::load(&store);
         let (workspaces, next_workspace_id) =
             crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
@@ -8438,6 +8440,23 @@ pub(crate) fn compute_working_diff(
         } else {
             diff
         };
+        // `1323-archive-diff`: an LFS archive's objects as an archive
+        let diff = {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            corvene_git::lfs::resolve_lfs_archive(
+                git.clone(),
+                workdir,
+                &file.path,
+                file.status.kind,
+                diff,
+                || Some(corvene_git::lfs::LfsSide::File(workdir.join(&file.path))),
+                || {
+                    corvene_git::blob_bytes(git.clone(), workdir, "HEAD", previous_path)
+                        .ok()
+                        .map(corvene_git::lfs::LfsSide::Blob)
+                },
+            )
+        };
         // `796-lfs-text-diff`: another LFS file's contents instead of its pointers
         let diff = if options.lfs_text {
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
@@ -8669,6 +8688,24 @@ pub(crate) fn compute_commit_diff(
             )
         } else {
             diff
+        };
+        // `1323-archive-diff`: an LFS archive's objects as an archive
+        let diff = {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            let blob = |rev: &str, path: &str| {
+                corvene_git::blob_bytes(git.clone(), workdir, rev, path)
+                    .ok()
+                    .map(corvene_git::lfs::LfsSide::Blob)
+            };
+            corvene_git::lfs::resolve_lfs_archive(
+                git.clone(),
+                workdir,
+                &file.path,
+                file.status.kind,
+                diff,
+                || blob(&newest, &file.path),
+                || blob(&format!("{oldest}^"), previous_path),
+            )
         };
         (
             Arc::new(diff),

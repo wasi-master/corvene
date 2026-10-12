@@ -19,6 +19,15 @@ tempfile = "3"
 # flag 1113-lfs-locks: `git lfs locks --json`
 serde.workspace = true
 serde_json.workspace = true
+# flag 1323-archive-diff: zip and tar archives and single compressed files
+# (pure Rust decoders only, so the cross builds stay free of C)
+zip = { version = "8", default-features = false, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz"] }
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.6"
+lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "xz"] }
+ruzstd = "0.9"
+crc32fast = "1"
 thiserror.workspace = true
 tracing.workspace = true
 calamine = "0.36.1"

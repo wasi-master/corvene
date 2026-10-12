@@ -89,6 +89,9 @@ fn loaded_size((diff, new, old): &LoadedDiff) -> usize {
             .flat_map(|h| &h.lines)
             .map(|l| l.text.len() + 48)
             .sum(),
+        corvene_models::Diff::Archive(archive) => {
+            archive.entries.iter().map(|e| e.path.len() + 320).sum()
+        }
         corvene_models::Diff::Image { previous, current } => {
             previous.as_ref().map_or(0, |i| i.bytes.len())
                 + current.as_ref().map_or(0, |i| i.bytes.len())
@@ -268,12 +271,50 @@ pub fn working_stamp(
     })
 }
 
+/// Corvene `1323-archive-diff`: an archive entry's diff, by the pinned
+/// versions of its archive, its path and the hide-whitespace setting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchiveEntryKey {
+    old: Option<corvene_models::ArchiveSource>,
+    new: Option<corvene_models::ArchiveSource>,
+    path: String,
+    hide_whitespace: bool,
+}
+
+impl ArchiveEntryKey {
+    pub fn new(level: &corvene_models::ArchiveDiff, path: &str, hide_whitespace: bool) -> Self {
+        Self {
+            old: level.old.as_ref().map(|s| s.source.clone()),
+            new: level.new.as_ref().map(|s| s.source.clone()),
+            path: path.to_string(),
+            hide_whitespace,
+        }
+    }
+}
+
+static ARCHIVE_ENTRIES: LazyLock<Mutex<Lru<ArchiveEntryKey, LoadedDiff>>> =
+    LazyLock::new(|| Mutex::new(Lru::new(64, 32 * MB)));
+
+pub fn archive_entry(key: &ArchiveEntryKey) -> Option<LoadedDiff> {
+    ARCHIVE_ENTRIES.lock().ok()?.get(key)
+}
+
+pub fn store_archive_entry(key: ArchiveEntryKey, diff: LoadedDiff) {
+    let size = loaded_size(&diff);
+    if let Ok(mut cache) = ARCHIVE_ENTRIES.lock() {
+        cache.insert(key, diff, size);
+    }
+}
+
 /// Forget every cached diff (a flag changed how diffs are read).
 pub fn clear_diffs() {
     if let Ok(mut cache) = COMMIT_DIFFS.lock() {
         cache.clear();
     }
     if let Ok(mut cache) = WORKING_DIFFS.lock() {
+        cache.clear();
+    }
+    if let Ok(mut cache) = ARCHIVE_ENTRIES.lock() {
         cache.clear();
     }
 }

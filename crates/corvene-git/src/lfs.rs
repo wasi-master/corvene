@@ -130,6 +130,74 @@ pub enum LfsSide {
     Blob(Vec<u8>),
 }
 
+/// The file holding one side's contents: a committed pointer's object, a
+/// working copy that is a pointer's object, or the working copy itself;
+/// `None` when it is not local or larger than `max`.
+fn side_path(git: &Arc<GitBinary>, workdir: &Path, side: LfsSide, max: u64) -> Option<PathBuf> {
+    let object = |bytes: &[u8]| {
+        let pointer = lfs_pointer(bytes)?;
+        lfs_object_path(git.clone(), workdir, &pointer)
+    };
+    let path = match side {
+        LfsSide::Blob(bytes) => object(&bytes)?,
+        LfsSide::File(path) => {
+            let meta = std::fs::metadata(&path).ok()?;
+            if meta.len() as usize <= MAX_POINTER_BYTES
+                && let Ok(bytes) = std::fs::read(&path)
+                && lfs_pointer(&bytes).is_some()
+            {
+                object(&bytes)?
+            } else {
+                path
+            }
+        }
+    };
+    let size = std::fs::metadata(&path).ok()?.len();
+    (size <= max).then_some(path)
+}
+
+/// Corvene `1323-archive-diff`: a pointer diff of an archive stored in Git
+/// LFS as the archive diff of its objects (the working copy for a working
+/// file that is not a pointer). Anything else, or a side whose object is
+/// not local, keeps `diff`.
+pub fn resolve_lfs_archive(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    path: &str,
+    kind: FileStatusKind,
+    diff: Diff,
+    current: impl FnOnce() -> Option<LfsSide>,
+    previous: impl FnOnce() -> Option<LfsSide>,
+) -> Diff {
+    if !crate::archive::read_archives()
+        || crate::archive::archive_format(path).is_none()
+        || !diff.hunks().is_some_and(is_pointer_diff)
+    {
+        return diff;
+    }
+    let max = crate::archive::MAX_ARCHIVE_BYTES;
+    let side = |wanted: bool, side: Option<LfsSide>| -> Option<Option<PathBuf>> {
+        if !wanted {
+            return Some(None);
+        }
+        Some(Some(side_path(&git, workdir, side?, max)?))
+    };
+    let (Some(new), Some(old)) = (
+        side(kind != FileStatusKind::Deleted, current()),
+        side(!kind.is_new_or_untracked(), previous()),
+    ) else {
+        return diff;
+    };
+    fn side_ref(p: &Option<PathBuf>) -> crate::archive::SideRef<'_> {
+        match p {
+            Some(p) => crate::archive::SideRef::File(p),
+            None => crate::archive::SideRef::Missing,
+        }
+    }
+    crate::archive::archive_diff(git.clone(), workdir, path, side_ref(&new), side_ref(&old))
+        .unwrap_or(diff)
+}
+
 /// Corvene `796-lfs-text-diff`: a pointer diff of a file stored in Git LFS
 /// as the diff of the contents (`git diff --no-index` of the objects, or of
 /// the working copy), marked `DiffWarnings::lfs_contents`. `current` and
@@ -147,28 +215,7 @@ pub fn resolve_lfs_text(
     if !diff.hunks().is_some_and(is_pointer_diff) {
         return diff;
     }
-    let object = |bytes: &[u8]| {
-        let pointer = lfs_pointer(bytes)?;
-        lfs_object_path(git.clone(), workdir, &pointer)
-    };
-    let file = |side: LfsSide| -> Option<PathBuf> {
-        let path = match side {
-            LfsSide::Blob(bytes) => object(&bytes)?,
-            LfsSide::File(path) => {
-                let meta = std::fs::metadata(&path).ok()?;
-                if meta.len() as usize <= MAX_POINTER_BYTES
-                    && let Ok(bytes) = std::fs::read(&path)
-                    && lfs_pointer(&bytes).is_some()
-                {
-                    object(&bytes)?
-                } else {
-                    path
-                }
-            }
-        };
-        let size = std::fs::metadata(&path).ok()?.len();
-        (size <= LFS_TEXT_DIFF_MAX_BYTES).then_some(path)
-    };
+    let file = |side: LfsSide| side_path(&git, workdir, side, LFS_TEXT_DIFF_MAX_BYTES);
     let side = |wanted: bool, side: Option<LfsSide>| -> Option<Option<PathBuf>> {
         if !wanted {
             return Some(None);

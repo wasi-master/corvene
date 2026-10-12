@@ -7,6 +7,7 @@ pub mod ahead_behind_store;
 pub mod alive;
 pub mod app_location;
 pub mod app_url;
+pub mod archive_browse;
 pub mod apply_patch;
 pub mod askpass;
 pub mod autocomplete;

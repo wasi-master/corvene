@@ -18,6 +18,10 @@ gpui_kit::actions!(
         // ← / → on a file tree's row (`1310-file-list-tree`)
         CollapseFolder,
         ExpandFolder,
+        // `1323-archive-diff`: Return opens an archive inside the archive,
+        // ⌫ goes back out
+        OpenArchiveEntry,
+        ArchiveUp,
         // View › Show Changes as Tree / as List (`1310-file-list-tree`)
         ToggleFileListTree,
         // ⌘⌫ in the changes list (`605-cmd-backspace-discards-files`)

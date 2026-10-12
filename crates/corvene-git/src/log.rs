@@ -1130,6 +1130,7 @@ fn finish_committed_diff(
             if utf16
                 && crate::diff::binary_media_type(&file.path).is_none()
                 && crate::table_file::table_format(&file.path).is_none()
+                && crate::archive::archive_format(&file.path).is_none()
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
@@ -1147,6 +1148,23 @@ fn finish_committed_diff(
                 .unwrap_or(Diff::Binary)
         }
         diff if matches!(diff, Diff::Binary) || crate::diff::pdf_as_text(&file.path, &diff) => {
+            // `1323-archive-diff`
+            use crate::archive::SideRef;
+            let new = if file.status.kind == FileStatusKind::Deleted {
+                SideRef::Missing
+            } else {
+                SideRef::Blob(newest, &file.path)
+            };
+            let old = if file.status.kind.is_new_or_untracked() {
+                SideRef::Missing
+            } else {
+                SideRef::Blob(base, previous_path)
+            };
+            if let Some(archive) =
+                crate::archive::archive_diff(git.clone(), workdir, &file.path, new, old)
+            {
+                return archive;
+            }
             crate::diff::image_diff(
                 &file.path,
                 file.status.kind,

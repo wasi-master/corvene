@@ -114,7 +114,9 @@ fn kind_of(diff: Option<&Arc<Diff>>, loading: bool) -> DiffKindVm {
         None => DiffKindVm::Loading,
         Some(Diff::Text { .. }) => DiffKindVm::Text,
         Some(Diff::LargeText { .. }) => DiffKindVm::LargeText,
-        Some(Diff::Binary | Diff::Table { .. }) => DiffKindVm::Binary,
+        // Corvene `1323-archive-diff`: the Android app shows archives as
+        // binary files
+        Some(Diff::Binary | Diff::Table { .. } | Diff::Archive(_)) => DiffKindVm::Binary,
         Some(Diff::Image { .. }) => DiffKindVm::Image,
         Some(Diff::Empty) => DiffKindVm::Empty,
         Some(Diff::TooLarge) => DiffKindVm::TooLarge,

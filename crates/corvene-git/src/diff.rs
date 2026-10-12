@@ -172,6 +172,7 @@ pub fn working_directory_diff(
         Diff::Binary
             if binary_media_type(&file.path).is_none()
                 && crate::table_file::table_format(&file.path).is_none()
+                && crate::archive::archive_format(&file.path).is_none()
                 && crate::utf16::decode_utf16() =>
         {
             use crate::utf16::Side;
@@ -199,6 +200,26 @@ pub fn working_directory_diff(
         }
         diff if matches!(diff, Diff::Binary) || pdf_as_text(&file.path, &diff) => {
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            // `1323-archive-diff`: both sides as git compared them
+            let working = workdir.join(&file.path);
+            let archive = crate::archive::archive_diff(
+                git.clone(),
+                workdir,
+                &file.path,
+                if file.status.kind == FileStatusKind::Deleted {
+                    crate::archive::SideRef::Missing
+                } else {
+                    crate::archive::SideRef::File(&working)
+                },
+                match &old_side {
+                    _ if file.status.kind.is_new_or_untracked() => crate::archive::SideRef::Missing,
+                    Some((rev, path)) => crate::archive::SideRef::Blob(rev, path),
+                    None => crate::archive::SideRef::Blob("HEAD", previous_path),
+                },
+            );
+            if let Some(archive) = archive {
+                return Ok(archive);
+            }
             image_diff(
                 &file.path,
                 file.status.kind,
@@ -208,6 +229,44 @@ pub fn working_directory_diff(
         }
         other => other,
     })
+}
+
+/// `git diff --no-index` of two versions held in memory (`None` for a
+/// side that does not exist), run in a temporary directory so none of the
+/// repository's attributes or filters apply. `None` when git did not run.
+/// Used for decoded UTF-16 files (`1306-utf16-diffs`) and archive entries
+/// (`1323-archive-diff`).
+pub(crate) fn no_index_diff(
+    git: Arc<GitBinary>,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+    hide_whitespace: bool,
+) -> Option<Diff> {
+    let dir = tempfile::tempdir().ok()?;
+    let write = |name: &str, bytes: Option<&[u8]>| -> Option<std::path::PathBuf> {
+        let Some(bytes) = bytes else {
+            return Some("/dev/null".into());
+        };
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).ok()?;
+        Some(path)
+    };
+    let old_path = write("old", old)?;
+    let new_path = write("new", new)?;
+    let mut args = vec!["diff", "--no-index", "--no-ext-diff"];
+    if hide_whitespace {
+        args.push("-w");
+    }
+    args.extend(["--patch-with-raw", "-z", "--no-color", "--"]);
+    let out = GitCommand::new(git)
+        .args(args)
+        .arg(old_path)
+        .arg(new_path)
+        .current_dir(dir.path())
+        .allow_exit_code(1)
+        .run()
+        .ok()?;
+    Some(parse_raw_diff(&out.stdout))
 }
 
 /// Corvene `762-too-large-diff-escape-hatch`: `git difftool -y` on one

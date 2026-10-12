@@ -122,6 +122,7 @@ fn kind_name(diff: &Diff) -> &'static str {
         Diff::Text { .. } => "Text",
         Diff::LargeText { .. } => "LargeText",
         Diff::Binary => "Binary",
+        Diff::Archive(_) => "Archive",
         Diff::Image { .. } => "Image",
         Diff::Table { .. } => "Table",
         Diff::Empty => "Empty",

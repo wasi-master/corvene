@@ -184,6 +184,21 @@ pub struct Settings {
     /// drawings). The diff header's Text/Image switch flips it.
     #[serde(default)]
     pub svg_text_diff: bool,
+    /// Corvene `1323-archive-diff`: the archive view lists unchanged
+    /// entries too.
+    #[serde(default)]
+    pub archive_show_unchanged: bool,
+    /// Corvene `1323-archive-diff`: the archive view lists entries whose
+    /// only change is their permissions, time, owner or compression.
+    #[serde(default)]
+    pub archive_show_metadata_only: bool,
+    /// Corvene `1323-archive-diff`: the archive view shows every changed
+    /// entry's diff in one list instead of the selected one's.
+    #[serde(default)]
+    pub archive_stacked: bool,
+    /// Corvene `1323-archive-diff`: width of the archive view's entry tree.
+    #[serde(default = "default_file_list_width")]
+    pub archive_tree_width: f32,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -536,6 +551,10 @@ impl Default for Settings {
             csv_table_diff: true,
             pdf_text_diff: false,
             svg_text_diff: false,
+            archive_show_unchanged: false,
+            archive_show_metadata_only: false,
+            archive_stacked: false,
+            archive_tree_width: 250.0,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

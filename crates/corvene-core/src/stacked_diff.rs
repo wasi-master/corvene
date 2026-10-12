@@ -36,6 +36,38 @@ pub enum StackKind {
     /// The History tab: the files of these commits (oldest first, as
     /// [`Dispatcher::ordered_selection`] lists them).
     Commit(Vec<String>),
+    /// `1323-archive-diff`: the changed entries of the archive open on a
+    /// surface (kept in [`crate::archive_browse::ArchiveBrowse::stacked`],
+    /// not in [`StackedDiffs`]).
+    Archive(crate::archive_browse::ArchiveSurface),
+}
+
+/// `path`'s diff in the stack of `kind`, wherever that stack keeps it.
+pub fn stacked_entry(rs: &RepositoryState, kind: &StackKind, path: &str) -> Option<StackedEntry> {
+    match kind {
+        StackKind::Archive(surface) => {
+            let e = rs.archives.open.get(surface)?.stacked.get(path)?;
+            Some(StackedEntry {
+                diff: e.diff.clone(),
+                contents: e.contents.clone(),
+                old_contents: e.old_contents.clone(),
+                generation: e.generation,
+            })
+        }
+        _ => rs.stacked.entry(kind, path).cloned(),
+    }
+}
+
+/// Whether `path`'s diff is loaded or loading for the stack of `kind`.
+pub fn stacked_requested(rs: &RepositoryState, kind: &StackKind, path: &str) -> bool {
+    match kind {
+        StackKind::Archive(surface) => rs
+            .archives
+            .open
+            .get(surface)
+            .is_some_and(|b| b.stacked_requested(path)),
+        _ => rs.stacked.requested(kind, path),
+    }
 }
 
 /// One file's loaded diff in a stack.
@@ -160,6 +192,11 @@ impl Dispatcher {
         force: bool,
         cx: &mut dyn Host,
     ) {
+        // `1323-archive-diff`: the archive's own stack
+        if let StackKind::Archive(surface) = kind {
+            Self::load_archive_stacked(id, surface, path, cx);
+            return;
+        }
         let skip = Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             rs.stacked.retarget(&kind);
@@ -171,6 +208,7 @@ impl Dispatcher {
         match kind {
             StackKind::Working => Self::load_stacked_working(id, path, cx),
             StackKind::Commit(shas) => Self::load_stacked_commit(id, shas, path, cx),
+            StackKind::Archive(_) => {}
         }
     }
 

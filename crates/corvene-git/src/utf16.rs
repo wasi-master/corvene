@@ -264,34 +264,15 @@ pub(crate) fn text_diff(
     let new_text = side(new)?;
     let old_text = side(old)?;
     let format = format?;
-    let dir = tempfile::tempdir().ok()?;
-    let write = |name: &str, text: Option<String>| -> Option<std::path::PathBuf> {
-        let Some(text) = text else {
-            return Some("/dev/null".into());
-        };
-        let path = dir.path().join(name);
-        std::fs::write(&path, text).ok()?;
-        Some(path)
-    };
-    let old_path = write("old", old_text)?;
-    let new_path = write("new", new_text)?;
-    let mut args = vec!["diff", "--no-index", "--no-ext-diff"];
-    if hide_whitespace {
-        args.push("-w");
-    }
-    args.extend(["--patch-with-raw", "-z", "--no-color", "--"]);
-    // outside the repository: none of its attributes or filters apply
-    let out = GitCommand::new(git)
-        .args(args)
-        .arg(old_path)
-        .arg(new_path)
-        .current_dir(dir.path())
-        .allow_exit_code(1)
-        .run()
-        .ok()?;
+    let diff = crate::diff::no_index_diff(
+        git,
+        old_text.as_deref().map(str::as_bytes),
+        new_text.as_deref().map(str::as_bytes),
+        hide_whitespace,
+    )?;
     let mode_change = header_modes(patch);
     let marker = Utf16Diff { format, old_source };
-    match crate::diff::parse_raw_diff(&out.stdout) {
+    match diff {
         Diff::Text {
             hunks,
             mut warnings,

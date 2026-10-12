@@ -107,6 +107,7 @@
 //! and Esc are unchanged.
 
 use crate::csv_table_diff::CsvTable;
+use corvene_core::archive_browse::ArchiveSurface;
 use corvene_core::csv_diff::{SheetEntry, SheetStatus};
 use corvene_core::diff_line_class::{ClassLine, ClassOptions, LineMark, classify};
 use std::cell::{Cell, RefCell};
@@ -177,6 +178,17 @@ fn file_type_name(mode: &str) -> String {
         "120000" => "a symbolic link".to_string(),
         "160000" => "a submodule".to_string(),
         other => format!("mode {other}"),
+    }
+}
+
+/// `1323-archive-diff`: the file status an archive entry's change shows as.
+pub fn archive_entry_kind(status: corvene_core::ArchiveEntryStatus) -> FileStatusKind {
+    use corvene_core::ArchiveEntryStatus as S;
+    match status {
+        S::Added => FileStatusKind::New,
+        S::Deleted => FileStatusKind::Deleted,
+        S::Renamed => FileStatusKind::Renamed,
+        S::Modified | S::MetadataOnly | S::Unchanged => FileStatusKind::Modified,
     }
 }
 
@@ -326,7 +338,7 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
 
 /// `1318-csv-table-diff`: the Text / Table switch of a CSV or TSV file's
 /// header (one setting for every such file).
-fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if corvene_core::csv_diff::table_delimiter(path).is_none()
         || !s.flags.bool(corvene_core::flags::ids::CSV_TABLE_DIFF)
@@ -368,7 +380,7 @@ fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl Into
 
 /// A two-segment switch in the diff header (`[container, left, right]`
 /// ids); `on_pick(true)` picks the right segment.
-fn view_switch(
+pub(crate) fn view_switch(
     ids: [&'static str; 3],
     labels: [&'static str; 2],
     right: bool,
@@ -471,11 +483,42 @@ pub enum DiffSource {
     Review,
     /// `1218-compare-refs`: the selected file of two refs' combined diff.
     RefCompare,
+    /// `1323-archive-diff`: the selected entry of the archive open on a
+    /// surface (read-only).
+    ArchiveEntry(ArchiveSurface),
+}
+
+impl DiffSource {
+    /// `1323-archive-diff`: the surface an archive shown by this source's
+    /// view belongs to.
+    pub fn archive_surface(self) -> ArchiveSurface {
+        match self {
+            DiffSource::WorkingDirectory => ArchiveSurface::Changes,
+            DiffSource::Commit => ArchiveSurface::History,
+            DiffSource::Stash => ArchiveSurface::Stash,
+            DiffSource::PullRequest => ArchiveSurface::PullRequest,
+            DiffSource::Review => ArchiveSurface::Review,
+            DiffSource::RefCompare => ArchiveSurface::RefCompare,
+            DiffSource::ArchiveEntry(surface) => surface,
+        }
+    }
 }
 
 /// Which "hide whitespace" setting a source uses.
 fn set_hide_whitespace(source: DiffSource, hide: bool, cx: &mut App) {
     match source {
+        // `1323-archive-diff`: the setting of the archive's own diff
+        DiffSource::ArchiveEntry(surface) => {
+            let outer = match surface {
+                ArchiveSurface::Changes => DiffSource::WorkingDirectory,
+                ArchiveSurface::History => DiffSource::Commit,
+                ArchiveSurface::Stash => DiffSource::Stash,
+                ArchiveSurface::PullRequest => DiffSource::PullRequest,
+                ArchiveSurface::Review => DiffSource::Review,
+                ArchiveSurface::RefCompare => DiffSource::RefCompare,
+            };
+            set_hide_whitespace(outer, hide, cx)
+        }
         DiffSource::WorkingDirectory => Dispatcher::set_hide_whitespace_in_diff(false, hide, cx),
         DiffSource::Commit | DiffSource::Stash => {
             Dispatcher::set_hide_whitespace_in_diff(true, hide, cx)
@@ -706,6 +749,8 @@ pub struct DiffView {
     _pdf_text_task: Option<Task<()>>,
     /// `1322-pdf-diff`: renders again when `pdf` finds the file unreadable.
     _pdf_observer: Option<Subscription>,
+    /// `1323-archive-diff`: the archive view of an archive's diff.
+    archive: Option<Entity<crate::archive_diff_view::ArchiveDiffView>>,
     context_menu: Option<Entity<ContextMenu>>,
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
@@ -811,6 +856,7 @@ impl DiffView {
             pdf_text: None,
             _pdf_text_task: None,
             _pdf_observer: None,
+            archive: None,
             context_menu: None,
             focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
@@ -978,6 +1024,21 @@ impl DiffView {
                     s.settings.hide_whitespace_in_history_diff,
                 )
             }
+            DiffSource::ArchiveEntry(surface) => {
+                let browse = rs.archives.open.get(&surface)?;
+                let entry = browse.entry.as_ref()?;
+                let change = browse.level().diff.entry(&entry.path)?;
+                let kind = archive_entry_kind(change.status);
+                (
+                    entry.path.clone(),
+                    (kind, false),
+                    DiffSelection::all(),
+                    entry.diff.clone(),
+                    entry.generation,
+                    (entry.contents.clone(), entry.old_contents.clone()),
+                    surface.hide_whitespace(s),
+                )
+            }
             DiffSource::PullRequest | DiffSource::RefCompare => {
                 let preview = if self.source == DiffSource::RefCompare {
                     rs.ref_compare_changes.as_ref()?
@@ -1011,10 +1072,20 @@ impl DiffView {
             Some(text) => (text, generation ^ PDF_TEXT_GENERATION, None, None),
             None => (diff, generation, contents, old_contents),
         };
+        // `1323-archive-diff`: rows are keyed by the entry's full name, so
+        // the same path in another archive (or level) is another diff
+        let key_path = match self.source {
+            DiffSource::ArchiveEntry(surface) => rs
+                .archives
+                .open
+                .get(&surface)
+                .map_or_else(|| path.clone(), |b| b.display_path(&path)),
+            _ => path.clone(),
+        };
         Some(Snapshot {
             repo: id,
             repo_path,
-            key: (id, path.clone(), generation),
+            key: (id, key_path, generation),
             path,
             kind,
             rename_includes_modifications,
@@ -1041,9 +1112,17 @@ impl DiffView {
         let stack = self.stacked_kind.clone()?;
         // the entry first: most files of a big stack have none yet, and
         // the file lookups below walk the status / changeset
-        let entry = rs.stacked.entry(&stack, path)?;
+        let entry = corvene_core::stacked_diff::stacked_entry(rs, &stack, path)?;
         let ((kind, rename_includes_modifications), selection, hide_whitespace) = match self.source
         {
+            DiffSource::ArchiveEntry(surface) => {
+                let change = rs.archives.open.get(&surface)?.level().diff.entry(path)?;
+                (
+                    (archive_entry_kind(change.status), false),
+                    DiffSelection::all(),
+                    surface.hide_whitespace(s),
+                )
+            }
             DiffSource::WorkingDirectory => {
                 let file = rs
                     .status
@@ -1076,10 +1155,19 @@ impl DiffView {
         };
         let as_text =
             self.source == DiffSource::WorkingDirectory && rs.diff_as_text.as_deref() == Some(path);
+        // `1323-archive-diff`: keyed by the entry's full name
+        let key_path = match self.source {
+            DiffSource::ArchiveEntry(surface) => rs
+                .archives
+                .open
+                .get(&surface)
+                .map_or_else(|| path.to_string(), |b| b.display_path(path)),
+            _ => path.to_string(),
+        };
         Some(Snapshot {
             repo: id,
             repo_path,
-            key: (id, path.to_string(), entry.generation),
+            key: (id, key_path, entry.generation),
             path: path.to_string(),
             kind,
             rename_includes_modifications,
@@ -1380,6 +1468,7 @@ impl DiffView {
             }
             _ => {}
         }
+        self.load_archive(snap, cx);
         let same_file = self
             .rows_key
             .as_ref()
@@ -2716,8 +2805,45 @@ impl DiffView {
 
     /// GHD `BinaryFile`.
     fn binary_panel(&self, snap: &Snapshot, cx: &Context<Self>) -> AnyElement {
+        // `1323-archive-diff`: an archive entry that did not read says why
+        let reason = match self.source {
+            DiffSource::ArchiveEntry(surface) => self
+                .state
+                .read(cx)
+                .repo_states
+                .get(&snap.repo)
+                .and_then(|rs| rs.archives.open.get(&surface))
+                .and_then(|b| b.entry.as_ref())
+                .and_then(|e| e.error.clone()),
+            _ => None,
+        };
+        self.binary_panel_with(snap, reason, cx)
+    }
+
+    /// [`Self::binary_panel`] with a line saying why the file could not be
+    /// shown otherwise (`1323-archive-diff`).
+    fn binary_panel_with(
+        &self,
+        snap: &Snapshot,
+        reason: Option<String>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let full_path = snap.repo_path.join(&snap.path);
+        let open: Rc<dyn Fn(&mut App)> = match self.source {
+            DiffSource::ArchiveEntry(surface) => {
+                let (repo, path) = (snap.repo, snap.path.clone());
+                let side = if snap.kind == FileStatusKind::Deleted {
+                    corvene_git::archive::EntrySide::Old
+                } else {
+                    corvene_git::archive::EntrySide::New
+                };
+                Rc::new(move |cx| {
+                    Dispatcher::open_archive_entry_externally(repo, surface, path.clone(), side, cx)
+                })
+            }
+            _ => Rc::new(move |cx| cx.open_with_system(&full_path)),
+        };
         // `749-binary-diff-as-text`
         let as_text = (self.source == DiffSource::WorkingDirectory
             && self
@@ -2752,10 +2878,19 @@ impl DiffView {
             .child(
                 div().py(SPACING_HALF()).child(
                     link_button("binary-open", "Open file in external program.", cx)
-                        .on_click(move |_, _, cx| cx.open_with_system(&full_path)),
+                        .on_click(move |_, _, cx| open(cx)),
                 ),
             )
             .children(as_text)
+            .children(reason.map(|reason| {
+                div()
+                    .py(SPACING_HALF())
+                    .max_w(zpx(520.))
+                    .text_center()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(reason)
+            }))
             .into_any_element()
     }
 
@@ -3587,7 +3722,46 @@ impl DiffView {
             // list has no room for sheet tabs)
             Diff::Table { .. } if self.stacked_kind.is_none() => return None,
             Diff::Table { .. } => self.panel("This table file has changed.", cx),
+            // `1323-archive-diff`
+            Diff::Archive(archive) => match (&archive.unreadable, self.archive.clone()) {
+                (Some(reason), _) => self.binary_panel_with(snap, Some(reason.clone()), cx),
+                (None, _) if self.stacked_path.is_some() => {
+                    crate::archive_diff_view::stacked_summary(
+                        snap.repo,
+                        &snap.path,
+                        archive,
+                        self.source,
+                        cx,
+                    )
+                }
+                (None, Some(view)) => view.into_any_element(),
+                (None, None) => self.panel("This archive has changed.", cx),
+            },
         })
+    }
+
+    /// `1323-archive-diff`: show an archive diff in the archive view (made
+    /// on first use, told which archive to open), or let the view go.
+    fn load_archive(&mut self, snap: &Snapshot, cx: &mut Context<Self>) {
+        let shows_archive = self.stacked_path.is_none()
+            && !matches!(self.source, DiffSource::ArchiveEntry(_))
+            && matches!(&*snap.diff, Diff::Archive(a) if a.unreadable.is_none());
+        let surface = self.source.archive_surface();
+        if !shows_archive {
+            if self.archive.take().is_some() {
+                let repo = snap.repo;
+                cx.defer(move |cx| Dispatcher::hide_archive(repo, surface, cx));
+            }
+            return;
+        }
+        if self.archive.is_none() {
+            let state = self.state.clone();
+            self.archive = Some(
+                cx.new(|cx| crate::archive_diff_view::ArchiveDiffView::new(state, surface, cx)),
+            );
+        }
+        let (repo, path, diff) = (snap.repo, snap.path.clone(), snap.diff.clone());
+        cx.defer(move |cx| Dispatcher::show_archive(repo, surface, path, diff, cx));
     }
 
     /// `1311-stacked-diff`: how many list items this file's body takes,

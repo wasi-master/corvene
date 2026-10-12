@@ -1,6 +1,7 @@
 //! Git engine. Reads via `gix`, writes and network via the
 //! `git` CLI so behaviour matches GitHub Desktop exactly.
 
+pub mod archive;
 pub mod bisect;
 pub mod blame;
 pub mod branch_ops;
