@@ -208,6 +208,9 @@ impl Dispatcher {
             Self::sync_repository_list_file(cx);
         }
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
+        corvene_git::set_status_timeout(
+            u32::try_from(now.number(ids::GIT_STATUS_TIMEOUT)).unwrap_or(0),
+        );
         if now.bool(ids::PROXY_CREDENTIALS) != previous.bool(ids::PROXY_CREDENTIALS) {
             Self::sync_proxy_credentials(cx);
         }

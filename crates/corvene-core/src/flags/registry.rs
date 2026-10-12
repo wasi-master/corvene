@@ -7652,6 +7652,25 @@ registry! {
         code: &["crates/corvene-store/src/lib.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// Stop a `git status` that never finishes.
+    GIT_STATUS_TIMEOUT = 911 "git-status-timeout" {
+        title: "Stop a git status that hangs",
+        summary: "Seconds a repository's `git status` may run before Corvene stops it (with the \
+                  git processes it started) and shows why. Files that exist only in the cloud \
+                  (iCloud Drive's Optimize Mac Storage, OneDrive or Dropbox on demand) make git \
+                  wait for a download that may never come, and every refresh would start one \
+                  more stuck git behind it. 0 waits forever.",
+        ghd_behaviour: "No limit: the Changes list keeps loading and each refresh adds another \
+                        waiting git process.",
+        nature: Nature::Feature,
+        kind: Kind::Number { min: 0, max: 3600, unit: Some("s") },
+        corvene: Value::Number(120), ghd: Value::Number(0),
+        familiar: Value::Number(120), max: Value::Number(120),
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/status.rs", "crates/corvene-git/src/process.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/flags/dispatch.rs"],
+    },
+
     // ---- 1000 Experimental ----
 
     /// Compile tree-sitter grammars an extension names but Corvene lacks.

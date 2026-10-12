@@ -36,6 +36,12 @@ pub enum GitError {
     /// The command was stopped through its [`crate::CancelToken`].
     #[error("git {0} was cancelled")]
     Cancelled(String),
+    /// Corvene: the command ran past its [`crate::GitCommand::timeout`] and
+    /// was stopped.
+    #[error(
+        "git {args} did not finish within {seconds} seconds and was stopped. Files that are only in the cloud (iCloud Drive, OneDrive, Dropbox) can keep git waiting for their download."
+    )]
+    TimedOut { args: String, seconds: u64 },
     /// GHD `clone`'s `isClonePathSensitive` backstop: the destination is the
     /// home directory or a credentials / configuration folder in it.
     #[error(

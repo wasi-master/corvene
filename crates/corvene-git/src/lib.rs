@@ -173,7 +173,7 @@ pub use patch_import::{
 pub use paths::git_dir;
 pub use process::{
     CancelToken, GitCommand, GitOutput, set_credential_helper, set_explain_missing_workdir,
-    set_network_stall_timeout, with_cancel_token,
+    set_network_stall_timeout, terminate_all, with_cancel_token,
 };
 pub use proxy::{
     GitProxy, GitProxySource, effective_proxy, env_for_proxy, env_for_remote_operation,
@@ -235,7 +235,8 @@ pub use stats::{
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
-    map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
+    map_status, parse_porcelain_v2, refresh_stale_index, set_status_timeout,
+    working_directory_line_stats,
 };
 pub use submodule::{
     EmbeddedRepository, SubmoduleDetails, SubmoduleEntry, SubmoduleState,

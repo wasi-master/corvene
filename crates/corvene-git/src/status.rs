@@ -10,6 +10,8 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use corvene_models::{
     AheadBehind, DiffSelection, FileStatus, FileStatusKind, GitStatusEntry,
@@ -61,6 +63,17 @@ pub enum IgnoreSubmodules {
     All,
 }
 
+/// Flag `911-git-status-timeout`: seconds `git status` may run before it
+/// is stopped (0: no limit, GHD). A file that exists only in the cloud
+/// (iCloud Drive's Optimize Mac Storage, OneDrive and Dropbox on demand)
+/// makes git wait for a download that may never come, and each refresh
+/// would start another `git status` behind the stuck one.
+static STATUS_TIMEOUT_SECS: AtomicU32 = AtomicU32::new(0);
+
+pub fn set_status_timeout(seconds: u32) {
+    STATUS_TIMEOUT_SECS.store(seconds, Ordering::Relaxed);
+}
+
 /// Run status and build the model (GHD `getStatus`). The files come with
 /// default selections; the caller carries over the previous ones
 /// (`corvene_core::changes_state::merge_changed_files`, GHD
@@ -95,10 +108,12 @@ pub fn get_status_with(
                 IgnoreSubmodules::All => args.push("--ignore-submodules=all"),
             }
             args.extend(["--branch", "--porcelain=2", "-z"]);
-            let out = GitCommand::new(git.clone())
-                .args(args)
-                .current_dir(workdir)
-                .run()?;
+            let mut cmd = GitCommand::new(git.clone()).args(args).current_dir(workdir);
+            let limit = STATUS_TIMEOUT_SECS.load(Ordering::Relaxed);
+            if limit > 0 {
+                cmd = cmd.timeout(Duration::from_secs(u64::from(limit)));
+            }
+            let out = cmd.run()?;
             parse_porcelain_v2(&out.stdout)
         }
     };

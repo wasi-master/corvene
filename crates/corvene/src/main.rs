@@ -214,8 +214,11 @@ pub(crate) fn main() {
         let sidebar_width = corvene_ui::theme::sizes::zpx(settings.sidebar_width);
         // GPUI quits through `exit`, which never drops the store: close it
         // once the windows are gone so the next launch needs no repair
+        // git keeps running when Corvene quits; a command stuck on a
+        // cloud-only file would wait forever, so stop what is still running
         let quit_store = store.clone();
         cx.on_app_quit(move |_| {
+            corvene_git::terminate_all();
             let store = quit_store.clone();
             async move { store.close() }
         })

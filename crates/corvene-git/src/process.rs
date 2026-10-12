@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::{debug, warn};
 
@@ -63,6 +63,8 @@ pub struct GitCommand {
     env_removed: Vec<OsString>,
     /// Lets another thread stop a streamed command ([`GitCommand::cancel_token`]).
     cancel: Option<CancelToken>,
+    /// [`GitCommand::timeout`]
+    timeout: Option<Duration>,
     /// Known errors that are results ([`GitCommand::expected_errors`]).
     expected_errors: Vec<KnownGitError>,
     /// The hooks it intercepts ([`GitCommand::intercept_hooks`]).
@@ -114,6 +116,9 @@ impl CancelToken {
 
     /// `pid` was started by [`own_process_group`] when `group`.
     fn attach(&self, pid: u32, group: bool) {
+        if let Ok(mut live) = LIVE.lock() {
+            live.push(self.clone());
+        }
         if let Ok(mut slot) = self.0.pid.lock() {
             *slot = Some((pid, group));
             if self.is_cancelled() {
@@ -126,6 +131,28 @@ impl CancelToken {
         if let Ok(mut slot) = self.0.pid.lock() {
             *slot = None;
         }
+        if let Ok(mut live) = LIVE.lock()
+            && let Some(ix) = live.iter().position(|token| token == self)
+        {
+            live.swap_remove(ix);
+        }
+    }
+}
+
+/// The tokens of the git processes running now ([`terminate_all`]).
+static LIVE: Mutex<Vec<CancelToken>> = Mutex::new(Vec::new());
+
+/// Stop every git process Corvene started that is still running, with the
+/// processes they started (a `git status` waits on one per submodule).
+/// For quitting: git is not tied to Corvene's lifetime, and a command stuck
+/// on a file that never arrives (a cloud-only file) would outlive it.
+pub fn terminate_all() {
+    let live = LIVE.lock().map(|live| live.clone()).unwrap_or_default();
+    if !live.is_empty() {
+        debug!(count = live.len(), "stopping running git processes");
+    }
+    for token in live {
+        token.cancel();
     }
 }
 
@@ -223,6 +250,42 @@ fn terminate(pid: u32, group: bool) {
     // and with `group` also the id of the group it leads
     unsafe {
         libc::kill(if group { -pid } else { pid }, libc::SIGTERM);
+    }
+}
+
+/// Cancels a command's token once its time is up ([`GitCommand::timeout`]).
+#[cfg(not(target_os = "android"))]
+struct Watchdog {
+    done: std::sync::mpsc::Sender<()>,
+    fired: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_os = "android"))]
+impl Watchdog {
+    fn start(limit: Duration, token: CancelToken) -> Self {
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = fired.clone();
+        let spawned = std::thread::Builder::new()
+            .name("git-timeout".into())
+            .spawn(move || {
+                if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                    finished.recv_timeout(limit)
+                {
+                    flag.store(true, Ordering::SeqCst);
+                    token.cancel();
+                }
+            });
+        if let Err(err) = spawned {
+            warn!(%err, "no timeout for git: could not start its thread");
+        }
+        Watchdog { done, fired }
+    }
+
+    /// Ends the wait; returns whether the time ran out first.
+    fn stop(self) -> bool {
+        let _ = self.done.send(());
+        self.fired.load(Ordering::SeqCst)
     }
 }
 
@@ -354,9 +417,18 @@ impl GitCommand {
             stdin: None,
             env_removed: Vec::new(),
             cancel: None,
+            timeout: None,
             expected_errors: Vec::new(),
             hooks: None,
         }
+    }
+
+    /// Corvene: [`GitCommand::run`] stops git (and what it started) after
+    /// `limit` and fails with [`GitError::TimedOut`]. GHD waits for every
+    /// command however long it takes.
+    pub fn timeout(mut self, limit: Duration) -> Self {
+        self.timeout = Some(limit);
+        self
     }
 
     /// GHD `IGitExecutionOptions.interceptHooks`: while Settings › Git ›
@@ -599,36 +671,43 @@ impl GitCommand {
             }
             child.wait_with_output().map_err(GitError::Spawn)?
         };
-        let cancel = self.effective_cancel();
+        // every command gets a token, so [`terminate_all`] reaches it
+        let cancel = Some(self.effective_cancel().unwrap_or_default());
         #[cfg(not(target_os = "android"))]
-        let output = match (&self.stdin, &cancel) {
-            (None, None) => self
-                .command()
-                .output()
-                .map_err(|err| self.spawn_error(err))?,
-            (stdin_bytes, cancel) => {
-                let mut cmd = self.command();
-                let group = cancel.is_some() && own_process_group(&mut cmd);
-                let mut child = cmd
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|err| self.spawn_error(err))?;
-                if let Some(token) = cancel {
-                    token.attach(child.id(), group);
-                }
-                if let (Some(bytes), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
-                    use std::io::Write;
-                    // git may exit early; a broken pipe is then reported via the exit code
-                    let _ = stdin.write_all(bytes);
-                }
-                let output = child.wait_with_output();
-                if let Some(token) = cancel {
-                    token.detach();
-                }
-                output.map_err(GitError::Spawn)?
+        let (output, timed_out) = {
+            let mut cmd = self.command();
+            let group = own_process_group(&mut cmd);
+            let mut child = cmd
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|err| self.spawn_error(err))?;
+            if let Some(token) = &cancel {
+                token.attach(child.id(), group);
             }
+            let watchdog = self
+                .timeout
+                .zip(cancel.clone())
+                .map(|(limit, token)| Watchdog::start(limit, token));
+            if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
+                use std::io::Write;
+                // git may exit early; a broken pipe is then reported via the exit code
+                let _ = stdin.write_all(bytes);
+            }
+            let output = child.wait_with_output();
+            if let Some(token) = &cancel {
+                token.detach();
+            }
+            let timed_out = watchdog.is_some_and(Watchdog::stop);
+            (output.map_err(GitError::Spawn)?, timed_out)
         };
+        #[cfg(target_os = "android")]
+        let timed_out = false;
+        if timed_out {
+            let seconds = self.timeout.map_or(0, |limit| limit.as_secs());
+            warn!(git = %args, seconds, "git timed out");
+            return Err(GitError::TimedOut { args, seconds });
+        }
         if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
             debug!(git = %args, "git cancelled");
             return Err(GitError::Cancelled(args));
@@ -714,11 +793,15 @@ impl GitCommand {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
-        let cancel = self.effective_cancel().or_else(default_cancel_token);
+        let cancel = Some(
+            self.effective_cancel()
+                .or_else(default_cancel_token)
+                .unwrap_or_default(),
+        );
         #[cfg(not(target_os = "android"))]
         let (mut child, group) = {
             let mut cmd = self.command();
-            let group = cancel.is_some() && own_process_group(&mut cmd);
+            let group = own_process_group(&mut cmd);
             let child = cmd
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -849,11 +932,15 @@ impl GitCommand {
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
         // a streamed run: the default token stops it too
-        let cancel = self.effective_cancel().or_else(default_cancel_token);
+        let cancel = Some(
+            self.effective_cancel()
+                .or_else(default_cancel_token)
+                .unwrap_or_default(),
+        );
         #[cfg(not(target_os = "android"))]
         let (mut child, group) = {
             let mut cmd = self.command();
-            let group = cancel.is_some() && own_process_group(&mut cmd);
+            let group = own_process_group(&mut cmd);
             let child = cmd
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -1038,6 +1125,26 @@ mod tests {
             version.cancel_token(token).run(),
             Err(GitError::Cancelled(_))
         ));
+    }
+
+    /// A git that never finishes: an alias running `sleep` in a child
+    /// process, as a `git status` waits on its submodules.
+    fn hanging(git: Arc<GitBinary>) -> GitCommand {
+        GitCommand::new(git).args(["-c", "alias.hang=!sleep 30", "hang"])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_stops_git_and_what_it_started() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let started = Instant::now();
+        let result = hanging(git).timeout(Duration::from_millis(300)).run();
+        assert!(
+            matches!(result, Err(GitError::TimedOut { .. })),
+            "{result:?}"
+        );
+        // `run` returns once the pipes close: the sleep was stopped too
+        assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[test]

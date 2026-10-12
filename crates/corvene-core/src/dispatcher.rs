@@ -156,6 +156,10 @@ impl Dispatcher {
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
         );
+        // `911-git-status-timeout`
+        corvene_git::set_status_timeout(
+            u32::try_from(flags.number(crate::flags::ids::GIT_STATUS_TIMEOUT)).unwrap_or(0),
+        );
         // `789-non-utf8-diffs`
         corvene_git::text_encoding::set_decode_legacy_text(
             flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
