@@ -18,7 +18,7 @@ use std::sync::Arc;
 use crate::host::{AsyncCtx, Host};
 use corvene_extensions::github::RepoRef;
 use corvene_extensions::importer::ImportCandidate;
-use corvene_extensions::index::Index;
+use corvene_extensions::index::{Index, IndexKeys};
 use corvene_extensions::install::{
     self, GrammarKind, Installed, Metadata, Resolution, Source, SourceKind, Status,
 };
@@ -193,10 +193,12 @@ pub struct BuildProgress {
     pub stage: Stage,
 }
 
-/// The offline index's state.
+/// The offline index's state. Only its names and suffixes stay in memory;
+/// a lookup that will find candidates reads the file again (Corvene: the
+/// whole index held about 9 MB).
 #[derive(Clone, Debug, Default)]
 pub struct IndexState {
-    pub index: Option<Arc<Index>>,
+    pub keys: Option<Arc<IndexKeys>>,
     pub refreshing: bool,
     pub error: Option<String>,
 }
@@ -545,21 +547,34 @@ impl Dispatcher {
         if query.is_empty() && !icon_themes {
             return;
         }
-        if let Some(suffix) = &suffix {
-            let from_index: Vec<Candidate> = Self::state(cx)
-                .read(cx)
-                .extensions
-                .index
-                .index
-                .as_ref()
-                .map(|i| i.lookup(suffix))
-                .unwrap_or_default();
-            if !from_index.is_empty() {
-                Self::state(cx).update(cx, |s, cx| {
-                    s.extensions.search.results = from_index;
-                    cx.notify();
-                });
-            }
+        if let Some(suffix) = suffix
+            .clone()
+            .filter(|suffix| Self::index_knows(suffix, cx))
+        {
+            spawn_bg(
+                cx,
+                move || Self::read_index_candidates(&suffix),
+                move |from_index, cx| {
+                    Self::state(cx).update(cx, |s, cx| {
+                        let search = &mut s.extensions.search;
+                        if search.generation != generation {
+                            return;
+                        }
+                        // the registries' answers, when they came first, are fresher
+                        for candidate in from_index {
+                            if !search
+                                .results
+                                .iter()
+                                .any(|c| c.registry == candidate.registry && c.id == candidate.id)
+                            {
+                                search.results.push(candidate);
+                            }
+                        }
+                        Self::sort_search_results(&mut search.results);
+                        cx.notify();
+                    });
+                },
+            );
         }
         for registry in registries {
             let (query, suffix) = (query.clone(), suffix.clone());
@@ -588,12 +603,7 @@ impl Dispatcher {
                                         search.results.push(candidate);
                                     }
                                 }
-                                search.results.sort_by(|a, b| {
-                                    a.registry
-                                        .cmp(&b.registry)
-                                        .then(b.downloads.cmp(&a.downloads))
-                                        .then(a.display_name.cmp(&b.display_name))
-                                });
+                                Self::sort_search_results(&mut search.results);
                             }
                             Err(err) => {
                                 search.errors.insert(registry, err.to_string());
@@ -625,6 +635,39 @@ impl Dispatcher {
         }
     }
 
+    /// Whether the offline index has candidates for `suffix`.
+    fn index_knows(suffix: &str, cx: &mut dyn Host) -> bool {
+        Self::state(cx)
+            .read(cx)
+            .extensions
+            .index
+            .keys
+            .as_ref()
+            .is_some_and(|keys| keys.knows(suffix))
+    }
+
+    /// The offline index's candidates for `suffix`, read from disk (none
+    /// when it does not read). Blocking.
+    fn read_index_candidates(suffix: &str) -> Vec<Candidate> {
+        match Index::load(&Self::index_path()) {
+            Ok(index) => index.lookup(suffix),
+            Err(err) => {
+                warn!(%err, "the extension index on disk could not be read");
+                Vec::new()
+            }
+        }
+    }
+
+    /// The Find tab's order: by registry, then the most downloaded.
+    fn sort_search_results(results: &mut [Candidate]) {
+        results.sort_by(|a, b| {
+            a.registry
+                .cmp(&b.registry)
+                .then(b.downloads.cmp(&a.downloads))
+                .then(a.display_name.cmp(&b.display_name))
+        });
+    }
+
     /// Where the offline index lives (`<extensions dir>/index.json.gz`).
     fn index_path() -> PathBuf {
         extensions_dir().join("index.json.gz")
@@ -637,10 +680,14 @@ impl Dispatcher {
         let refreshed_at = Self::state(cx).read(cx).extensions.prefs.index_refreshed_at;
         spawn_bg(
             cx,
-            move || path.is_file().then(|| Index::load(&path)).transpose(),
+            move || {
+                path.is_file()
+                    .then(|| Index::load(&path).map(|index| index.keys()))
+                    .transpose()
+            },
             move |result, cx| {
                 let loaded = match result {
-                    Ok(Some(index)) => Some(Arc::new(index)),
+                    Ok(Some(keys)) => Some(Arc::new(keys)),
                     Ok(None) => None,
                     Err(err) => {
                         warn!(%err, "the extension index on disk could not be read");
@@ -649,7 +696,7 @@ impl Dispatcher {
                 };
                 let age = loaded.as_ref().and_then(|i| i.age_days(install::now()));
                 Self::state(cx).update(cx, |s, cx| {
-                    s.extensions.index.index = loaded.clone();
+                    s.extensions.index.keys = loaded.clone();
                     cx.notify();
                 });
                 let stale = loaded.is_none()
@@ -678,7 +725,7 @@ impl Dispatcher {
         let path = Self::index_path();
         spawn_bg(
             cx,
-            move || -> Result<Index, String> {
+            move || -> Result<IndexKeys, String> {
                 let manifest = corvene_packs::fetch_manifest().map_err(|e| e.to_string())?;
                 let entry = manifest
                     .entry_for(
@@ -699,14 +746,16 @@ impl Dispatcher {
                     let _ = std::fs::remove_file(&path);
                     return Err("the downloaded index is corrupt (sha256 mismatch)".to_string());
                 }
-                Index::load(&path).map_err(|e| e.to_string())
+                Index::load(&path)
+                    .map(|index| index.keys())
+                    .map_err(|e| e.to_string())
             },
             |result, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.extensions.index.refreshing = false;
                     match result {
-                        Ok(index) => {
-                            s.extensions.index.index = Some(Arc::new(index));
+                        Ok(keys) => {
+                            s.extensions.index.keys = Some(Arc::new(keys));
                             s.extensions.prefs.index_refreshed_at = Some(install::now());
                         }
                         Err(err) => {
@@ -736,29 +785,7 @@ impl Dispatcher {
         {
             return;
         }
-        let from_index: Vec<Candidate> = state
-            .read(cx)
-            .extensions
-            .index
-            .index
-            .as_ref()
-            .map(|i| i.lookup(&suffix))
-            .unwrap_or_default();
-        if !from_index.is_empty() {
-            state.update(cx, |s, cx| {
-                s.extensions.hint_lookup.insert(
-                    suffix.clone(),
-                    HintResult {
-                        candidates: from_index,
-                        in_flight: false,
-                        error: None,
-                        from_index: true,
-                    },
-                );
-                cx.notify();
-            });
-            return;
-        }
+        let from_index = Self::index_knows(&suffix, cx);
         state.update(cx, |s, cx| {
             s.extensions.hint_lookup.insert(
                 suffix.clone(),
@@ -773,6 +800,12 @@ impl Dispatcher {
         spawn_bg(
             cx,
             move || {
+                if from_index {
+                    let candidates = Self::read_index_candidates(&wanted);
+                    if !candidates.is_empty() {
+                        return (candidates, Vec::new(), true);
+                    }
+                }
                 let mut candidates = Vec::new();
                 let mut errors = Vec::new();
                 for registry in Registry::ALL {
@@ -782,9 +815,9 @@ impl Dispatcher {
                     }
                 }
                 candidates.sort_by_key(|c| std::cmp::Reverse(c.downloads));
-                (candidates, errors)
+                (candidates, errors, false)
             },
-            move |(candidates, errors), cx| {
+            move |(candidates, errors, from_index), cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.extensions.hint_lookup.insert(
                         suffix,
@@ -792,7 +825,7 @@ impl Dispatcher {
                             candidates,
                             in_flight: false,
                             error: (!errors.is_empty()).then(|| errors.join("; ")),
-                            from_index: false,
+                            from_index,
                         },
                     );
                     cx.notify();
