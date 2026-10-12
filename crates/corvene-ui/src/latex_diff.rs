@@ -113,10 +113,32 @@ impl LatexDiff {
             let kind = match &*job {
                 Diff::Latex { kind, .. } => *kind,
                 Diff::Markdown { .. } => {
-                    let parse = |t: String| corvene_core::markdown_doc::parse_document(&t, mdx, math);
+                    let parse =
+                        |t: String| corvene_core::markdown_doc::parse_document(&t, mdx, math);
                     let old = parse(text(previous));
                     let new = parse(text(current));
-                    let rows = block_diff(&old, &new);
+                    let mut rows = block_diff(&old, &new);
+                    // a picture redrawn under the same name changed its block
+                    let bytes = |blob: Option<&LatexBlob>, src: &str| {
+                        blob.and_then(|b| b.images.iter().find(|(n, _)| n == src))
+                            .map(|(_, i)| i.bytes.clone())
+                    };
+                    for row in &mut rows {
+                        let (BlockStatus::Same, Some(i), Some(j)) =
+                            (row.status, row.previous, row.current)
+                        else {
+                            continue;
+                        };
+                        let srcs =
+                            corvene_core::markdown::image_sources(std::slice::from_ref(&new[j]));
+                        if srcs
+                            .iter()
+                            .any(|src| bytes(previous, src) != bytes(current, src))
+                            && old.get(i).is_some()
+                        {
+                            row.status = BlockStatus::Modified;
+                        }
+                    }
                     return Read::Document {
                         old,
                         new,
