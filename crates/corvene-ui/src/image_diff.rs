@@ -286,6 +286,15 @@ impl Side {
     }
 
     /// What `img` draws: the raster image or the drawing's latest rendering.
+    /// `794-svg-image-diff`: a drawing whose first rendering is still
+    /// being made (the first one in a session also loads the system
+    /// fonts, which takes seconds).
+    fn rendering(&self) -> bool {
+        self.image.is_none()
+            && self.error.is_none()
+            && self.svg.as_ref().is_some_and(|s| s.render.is_none())
+    }
+
     fn source(&self) -> Option<ImageSource> {
         if let Some(image) = &self.image {
             return Some(image.clone().into());
@@ -906,6 +915,9 @@ impl ImageDiff {
                             .size_full()
                             .object_fit(ObjectFit::Contain)
                             .into_any_element(),
+                        None if side.rendering() => {
+                            rendering_placeholder(Some(cx.ghd().text_secondary), cx.ghd().link)
+                        }
                         None => div().into_any_element(),
                     },
                     cx,
@@ -962,6 +974,9 @@ impl ImageDiff {
                 .w(image_size.width)
                 .h(image_size.height)
                 .when_some(border, |d, color| d.border_1().border_color(color))
+                .when(side.rendering(), |d| {
+                    d.child(rendering_placeholder(None, border.unwrap_or(gpui::white())))
+                })
                 .into_any_element(),
         };
         div()
@@ -1683,6 +1698,27 @@ fn blend_difference(backdrop: [u8; 4], source: [u8; 4]) -> [u8; 4] {
     }
     out[3] = (ao * 255.).round() as u8;
     out
+}
+
+/// `794-svg-image-diff`: what a drawing's box shows until its first
+/// rendering arrives: a sweeping bar under "Drawing…" (`label` colour; no
+/// label in the overlaid modes).
+fn rendering_placeholder(label: Option<Hsla>, bar: Hsla) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(SPACING_HALF())
+        .children(label.map(|color| {
+            div()
+                .text_size(FONT_SIZE_SM())
+                .text_color(color)
+                .child("Drawing\u{2026}")
+        }))
+        .child(crate::progress_bar::indeterminate_bar(bar, zpx(120.)))
+        .into_any_element()
 }
 
 #[cfg(test)]

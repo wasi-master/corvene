@@ -1,5 +1,6 @@
 //! Corvene: a determinate progress bar for long reads (Blame's attribution,
-//! Insights' history pass). GitHub Desktop has neither view.
+//! Insights' history pass), and an indeterminate one for work that reports
+//! no progress (drawing an SVG picture). GitHub Desktop has neither.
 //!
 //! Progress arrives in bursts (a publish every so often), so the fill eases
 //! towards the reported fraction instead of jumping: an exponential approach
@@ -101,4 +102,41 @@ pub fn progress_bar(
     .flex_none()
     .w(width)
     .h(zpx(4.))
+}
+
+/// How long the indeterminate bar's segment takes to cross, in seconds.
+const SWEEP: f32 = 1.2;
+
+/// A `width` wide, 4 px high bar for work of unknown length: a third of
+/// it, in `color`, sweeps across a fainter track, one animation frame at
+/// a time while it is drawn.
+pub fn indeterminate_bar(color: Hsla, width: Pixels) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            window.request_animation_frame();
+            let radius = bounds.size.height / 2.;
+            window.paint_quad(fill(bounds, color.opacity(0.25)).corner_radii(radius));
+            let t = START.with(|start| start.elapsed().as_secs_f32()) % SWEEP / SWEEP;
+            let segment = bounds.size.width / 3.;
+            // from fully left of the track to fully right of it, clipped
+            let left = (bounds.size.width + segment) * t - segment;
+            let x0 = left.max(px(0.));
+            let x1 = (left + segment).min(bounds.size.width);
+            if x1 > x0 {
+                let filled = Bounds {
+                    origin: point(bounds.origin.x + x0, bounds.origin.y),
+                    size: size(x1 - x0, bounds.size.height),
+                };
+                window.paint_quad(fill(filled, color).corner_radii(radius));
+            }
+        },
+    )
+    .flex_none()
+    .w(width)
+    .h(zpx(4.))
+}
+
+thread_local! {
+    static START: Instant = Instant::now();
 }
