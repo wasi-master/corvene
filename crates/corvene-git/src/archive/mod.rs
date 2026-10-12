@@ -1,8 +1,11 @@
 //! Corvene `1323-archive-diff`: a binary change of an archive (zip and its
 //! relatives, tar with or without compression) or of a single compressed
 //! file (`.gz`, `.bz2`, `.xz`, `.zst`) read as the list of its entries,
-//! each of which diffs on its own: text through `git diff --no-index`,
-//! images as image diffs, archives inside archives as archives again.
+//! each of which diffs on its own the way the same file outside an archive
+//! would: text through `git diff --no-index`, then the rich diffs (images,
+//! PDF, tables, fonts, documents, notebooks, LaTeX, Markdown, media,
+//! lockfiles and the other inspected kinds, converted files), archives
+//! inside archives as archives again.
 //! GitHub Desktop shows all of these as binary files
 //! (`app/src/lib/git/diff.ts` `getBinaryPaths`,
 //! `app/src/ui/diff/binary-file.tsx`).
@@ -13,7 +16,9 @@
 //! Each side is pinned when the archive is listed (a blob's object id, or
 //! a file's size and mtime), so entry diffs read later see the same bytes.
 //! Listed archives are cached ([`CACHE_BUDGET`]); entries are unpacked on
-//! demand and never written anywhere.
+//! demand. Only the media diff writes them out (into its cache, so the
+//! player can open them); the inspected diffs read them from a temporary
+//! directory removed as soon as they are read.
 
 mod compare;
 mod more;
@@ -474,8 +479,12 @@ pub fn archive_diff(
         name: path.to_string(),
         chain: Vec::new(),
     };
-    let new = pin(&git, workdir, &new, MAX_ARCHIVE_BYTES).ok()?.map(source);
-    let old = pin(&git, workdir, &old, MAX_ARCHIVE_BYTES).ok()?.map(source);
+    let new = pin(&git, workdir, &new, MAX_ARCHIVE_BYTES)
+        .ok()?
+        .map(source);
+    let old = pin(&git, workdir, &old, MAX_ARCHIVE_BYTES)
+        .ok()?
+        .map(source);
     if new.is_none() && old.is_none() {
         return None;
     }
@@ -586,6 +595,57 @@ pub fn entry_diff(
         ArchiveEntryStatus::Deleted => FileStatusKind::Deleted,
         _ => FileStatusKind::Modified,
     };
+    // `1335-video-diff` / `1336-audio-diff`
+    if crate::media_file::media_diff_kind(path).is_some()
+        && matches!(
+            diff,
+            Diff::Binary | Diff::Text { .. } | Diff::LargeText { .. }
+        )
+    {
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin")
+            .to_ascii_lowercase();
+        let file =
+            |bytes: Option<&[u8]>| bytes.and_then(|b| crate::media_file::entry_file(b, &ext));
+        let (new_file, old_file) = (file(new.as_deref()), file(old.as_deref()));
+        if let Some(media) = crate::media_file::media_diff(
+            git.clone(),
+            workdir,
+            path,
+            kind,
+            side_ref(&new_file),
+            side_ref(&old_file),
+        ) {
+            return Ok(EntryDiff {
+                diff: media,
+                new_lines: None,
+                old_lines: None,
+            });
+        }
+    }
+    // `1338-lockfile-diff` / `1339-pretty-diff` / `1340-tensor-diff` /
+    // `1341-signing-material-diff`
+    let diff = match inspect_entry(
+        git,
+        workdir,
+        path,
+        kind,
+        old.as_deref(),
+        new.as_deref(),
+        diff,
+        hide_whitespace,
+    ) {
+        Ok(diff) => {
+            return Ok(EntryDiff {
+                diff,
+                new_lines: None,
+                old_lines: None,
+            });
+        }
+        Err(diff) => diff,
+    };
     let diff = match diff {
         Diff::Binary => binary_entry(
             git,
@@ -594,6 +654,16 @@ pub fn entry_diff(
             old.as_deref(),
             new.as_deref(),
             hide_whitespace,
+        ),
+        diff @ (Diff::Text { .. } | Diff::LargeText { .. }) => text_entry(
+            git,
+            workdir,
+            level,
+            path,
+            kind,
+            old.as_deref(),
+            new.as_deref(),
+            diff,
         ),
         other => other,
     };
@@ -607,8 +677,115 @@ pub fn entry_diff(
     })
 }
 
-/// A binary entry: an image diff for images (and PDF files), a table diff
-/// for spreadsheets and databases, a UTF-16 text diff while
+/// A version written out for a diff that reads files.
+fn side_ref(file: &Option<PathBuf>) -> SideRef<'_> {
+    file.as_deref().map_or(SideRef::Missing, SideRef::File)
+}
+
+/// An entry the inspected diffs read (`crate::inspect`), handed to them as
+/// files in a temporary directory; `Err` gives `diff` back untouched.
+#[allow(clippy::too_many_arguments, clippy::result_large_err)]
+fn inspect_entry(
+    git: &Arc<GitBinary>,
+    workdir: &Path,
+    path: &str,
+    kind: FileStatusKind,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+    diff: Diff,
+    hide_whitespace: bool,
+) -> Result<Diff, Diff> {
+    if !crate::inspect::is_inspected(path) {
+        return Err(diff);
+    }
+    let Ok(dir) = tempfile::Builder::new().prefix("corvene-entry-").tempdir() else {
+        return Err(diff);
+    };
+    let write = |name: &str, bytes: Option<&[u8]>| -> Option<Option<PathBuf>> {
+        let Some(bytes) = bytes else {
+            return Some(None);
+        };
+        let file = dir.path().join(name);
+        std::fs::write(&file, bytes).ok()?;
+        Some(Some(file))
+    };
+    let (Some(new_file), Some(old_file)) = (write("new", new), write("old", old)) else {
+        return Err(diff);
+    };
+    crate::inspect::inspect_diff(
+        git,
+        workdir,
+        path,
+        kind,
+        side_ref(&new_file),
+        side_ref(&old_file),
+        diff,
+        hide_whitespace,
+    )
+}
+
+/// A text entry: an RTF or flat OpenDocument file read into blocks
+/// (`1324-document-diff`), a notebook read into cells or a LaTeX or
+/// Markdown file shown rendered (`1331-notebook-diff`, `1332-latex-diff`,
+/// `1334-markdown-preview-diff`) with the files it links to read from the
+/// same archive, else git's own diff.
+#[allow(clippy::too_many_arguments)]
+fn text_entry(
+    git: &Arc<GitBinary>,
+    workdir: &Path,
+    level: &ArchiveDiff,
+    path: &str,
+    kind: FileStatusKind,
+    old: Option<&[u8]>,
+    new: Option<&[u8]>,
+    diff: Diff,
+) -> Diff {
+    let current = || new.map(<[u8]>::to_vec);
+    let previous = || old.map(<[u8]>::to_vec);
+    if crate::document_file::is_text_document(path) {
+        return crate::document_file::document_diff(
+            path,
+            kind,
+            current,
+            previous,
+            Some(diff.clone()),
+        )
+        .unwrap_or(diff);
+    }
+    let linked = |side: crate::linked_files::Side, rel: &str| {
+        let side = match side {
+            crate::linked_files::Side::Current => EntrySide::New,
+            crate::linked_files::Side::Previous => EntrySide::Old,
+        };
+        let entry = level.entry(rel)?;
+        let size = match side {
+            EntrySide::New => entry.new.as_ref(),
+            EntrySide::Old => entry.old.as_ref(),
+        }?
+        .size;
+        if size > crate::diff::LINKED_FILE_MAX_BYTES as u64 {
+            return None;
+        }
+        entry_bytes(git, workdir, level, rel, side)
+            .ok()
+            .map(|b| b.to_vec())
+    };
+    let source = diff.clone();
+    if crate::notebook_file::is_notebook(path) {
+        crate::notebook_file::notebook_diff(path, kind, current, previous, source, linked)
+    } else if crate::markdown_file::is_markdown(path) {
+        crate::markdown_file::markdown_diff(path, kind, current, previous, source, linked)
+    } else if crate::latex_file::is_latex(path) {
+        crate::latex_file::latex_diff(path, kind, current, previous, source, linked)
+    } else {
+        None
+    }
+    .unwrap_or(diff)
+}
+
+/// A binary entry: what the same file outside an archive shows (an image
+/// or PDF diff, a table diff for spreadsheets and databases, a font or
+/// document diff, `crate::diff::image_diff`), a UTF-16 text diff while
 /// `1306-utf16-diffs` is on, else binary.
 fn binary_entry(
     git: &Arc<GitBinary>,
@@ -618,23 +795,14 @@ fn binary_entry(
     new: Option<&[u8]>,
     hide_whitespace: bool,
 ) -> Diff {
-    // spreadsheets and databases while `1321-table-file-diff` is on
-    if let Some(table) = crate::table_file::table_diff(
+    let rich = crate::diff::image_diff(
         path,
         kind,
         || new.map(<[u8]>::to_vec),
         || old.map(<[u8]>::to_vec),
-    ) {
-        return table;
-    }
-    // images, and PDF files while `1322-pdf-diff` is on
-    if let Some(media_type) = crate::diff::binary_media_type(path) {
-        return crate::diff::image_diff_as(
-            media_type,
-            kind,
-            || new.map(<[u8]>::to_vec),
-            || old.map(<[u8]>::to_vec),
-        );
+    );
+    if !matches!(rich, Diff::Binary) {
+        return rich;
     }
     if crate::utf16::decode_utf16() {
         let decode = |bytes: Option<&[u8]>| -> Option<Option<String>> {

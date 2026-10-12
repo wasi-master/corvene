@@ -497,3 +497,37 @@ fn a_textconv_driver_keeps_its_text() {
     let diff = crate::working_directory_diff(git, path, file, false, false, false, None).unwrap();
     assert!(matches!(diff, Diff::Text { .. }), "{diff:?}");
 }
+
+#[test]
+fn entries_get_the_rich_diffs_of_plain_files() {
+    crate::font_file::set_read_font_files(true);
+    crate::document_file::set_read_document_files(true);
+    crate::markdown_file::set_read_markdown_files(true);
+    let dir = tempfile::tempdir().unwrap();
+    let git = git();
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../corvene-fonts/tests/fixtures");
+    let font_old = std::fs::read(format!("{fixtures}/var-v1.ttf")).unwrap();
+    let font_new = std::fs::read(format!("{fixtures}/var-v2.ttf")).unwrap();
+    let old = zip_of(&[
+        ("fonts/a.ttf", &font_old),
+        ("notes.rtf", br"{\rtf1\ansi Hello\par}"),
+        ("README.md", b"# Title\n\nOne\n"),
+    ]);
+    let new = zip_of(&[
+        ("fonts/a.ttf", &font_new),
+        ("notes.rtf", br"{\rtf1\ansi Hello there\par}"),
+        ("README.md", b"# Title\n\nTwo\n"),
+    ]);
+    let diff = diff_sources(
+        &git,
+        dir.path(),
+        Some(source(dir.path(), "a.zip", &old)),
+        Some(source(dir.path(), "b.zip", &new)),
+    );
+    let font = entry_diff(&git, dir.path(), &diff, "fonts/a.ttf", false).unwrap();
+    assert!(matches!(font.diff, Diff::Font { .. }), "{:?}", font.diff);
+    let rtf = entry_diff(&git, dir.path(), &diff, "notes.rtf", false).unwrap();
+    assert!(matches!(rtf.diff, Diff::Document { .. }), "{:?}", rtf.diff);
+    let md = entry_diff(&git, dir.path(), &diff, "README.md", false).unwrap();
+    assert!(matches!(md.diff, Diff::Markdown { .. }), "{:?}", md.diff);
+}

@@ -183,6 +183,24 @@ fn locate(
     }
 }
 
+/// One version of an archive entry written into the media cache under its
+/// blob id, so the prober and the player can open it like a committed
+/// version (`1323-archive-diff`).
+pub(crate) fn entry_file(bytes: &[u8], ext: &str) -> Option<PathBuf> {
+    let oid = gix::objs::compute_hash(gix::hash::Kind::Sha1, gix::objs::Kind::Blob, bytes).ok()?;
+    let dir = cache_dir();
+    let file = dir.join(format!("{oid}.{ext}"));
+    if std::fs::metadata(&file).is_ok_and(|m| m.len() == bytes.len() as u64) {
+        return Some(file);
+    }
+    std::fs::create_dir_all(&dir).ok()?;
+    let partial = dir.join(format!(".{oid}.{}.part", std::process::id()));
+    std::fs::write(&partial, bytes).ok()?;
+    std::fs::rename(&partial, &file).ok()?;
+    prune(&dir);
+    Some(file)
+}
+
 /// Removes the least recently written files past [`CACHE_BYTES`].
 fn prune(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
