@@ -237,7 +237,7 @@ enum Effective {
 }
 
 /// The header's switch while the diff is a notebook or LaTeX diff.
-pub(super) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn rich_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     let source = view.read(cx).rich.source.clone()?;
     if view.read(cx).stacked_path.is_some() {

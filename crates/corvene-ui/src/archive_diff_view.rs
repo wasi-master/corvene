@@ -1196,6 +1196,19 @@ impl ArchiveDiffView {
                 .child(diff_options_button(&self.entry_view, cx))
         });
         let full_name = b.display_path(&change.path);
+        let switches = change.status.is_content_change().then(|| {
+            let view = &self.entry_view;
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .children(crate::diff_view::svg_switch(&change.path, cx))
+                .children(crate::diff_view::csv_switch(&change.path, cx))
+                .children(crate::diff_view::pdf_switch(&change.path, view, cx))
+                .children(crate::diff_view::font_source_switch(&change.path, cx))
+                .children(crate::diff_view::document_switch(view, cx))
+                .children(crate::diff_view::rich_text::rich_switch(view, cx))
+        });
         div()
             .id("archive-entry-header")
             .h(zpx(30.))
@@ -1233,7 +1246,8 @@ impl ArchiveDiffView {
                     .child(delta)
             }))
             .child(div().flex_1())
-            .children(crate::diff_view::csv_switch(&change.path, cx))
+            // the switches the same file outside an archive gets
+            .children(switches)
             .children(gear)
             .child(menu)
             .child(div().ml(SPACING_HALF()).child(octicon(icon, color)))

@@ -336,7 +336,7 @@ fn blame_button(
 
 /// `794-svg-image-diff`: the Text / Image switch of an SVG file's header
 /// (one setting for every SVG file).
-fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if !corvene_git::is_svg(path) || !s.flags.bool(corvene_core::flags::ids::SVG_IMAGE_DIFF) {
         return None;
@@ -352,7 +352,7 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
 
 /// `1330-font-source-preview`: the Text / Glyphs switch of a font source's
 /// header (one setting for every such file, like the SVG switch).
-fn font_source_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn font_source_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if corvene_models::font_source_kind(path).is_none()
         || !s.flags.bool(corvene_core::flags::ids::FONT_SOURCE_PREVIEW)
@@ -392,7 +392,7 @@ pub(crate) fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<
 
 /// `1322-pdf-diff`: the Pages / Text switch of a PDF file's header (one
 /// setting for every PDF file), when its diff shows pages.
-fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if !corvene_git::is_pdf(path) || !s.flags.bool(corvene_core::flags::ids::PDF_DIFF) {
         return None;
@@ -417,7 +417,7 @@ fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl Into
 /// `1324-document-diff`: the Rendered / Text (/ Pages) switch of a
 /// document file's header (one setting for every document), while its diff
 /// is a document diff.
-fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
     use corvene_core::DocumentDiffView as V;
     let s = AppState::try_global(cx)?.read(cx);
     view.read(cx).document_source.as_ref()?;
@@ -5681,7 +5681,7 @@ fn selection_of_lines(lines: &[u32]) -> DiffSelection {
 }
 
 /// `1331-notebook-diff` / `1332-latex-diff`
-mod rich_text;
+pub(crate) mod rich_text;
 
 /// Which of a table diff's rows changed.
 fn csv_changed(table: &CsvTable) -> Vec<bool> {
