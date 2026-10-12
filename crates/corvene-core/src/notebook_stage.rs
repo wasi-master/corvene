@@ -143,11 +143,9 @@ pub fn staged_text(old: &str, hunks: &[DiffHunk], selection: &DiffSelection) -> 
                     }
                     next_old += 1;
                 }
-                DiffLineKind::Add => {
-                    if selection.is_selected(abs) {
-                        out.push_str(&l.text);
-                        out.push_str(newline);
-                    }
+                DiffLineKind::Add if selection.is_selected(abs) => {
+                    out.push_str(&l.text);
+                    out.push_str(newline);
                 }
                 _ => {}
             }

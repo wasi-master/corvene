@@ -292,15 +292,12 @@ fn compare(
         }
         (Render::Text(x), Render::Text(y)) => text_diff(x, y, "txt", cx),
         (Render::Json(x), Render::Json(y)) => text_diff(x, y, "json", cx),
-        (Render::Html(x), Render::Html(y)) if x.len() + y.len() < 64 * 1024 => {
-            let rendered = old_new(
-                html(shared, ix, k, 0, x, cx),
-                html(shared, ix, k, 1, y, cx),
-                shared.split,
-                &t,
-            );
-            rendered
-        }
+        (Render::Html(x), Render::Html(y)) if x.len() + y.len() < 64 * 1024 => old_new(
+            html(shared, ix, k, 0, x, cx),
+            html(shared, ix, k, 1, y, cx),
+            shared.split,
+            &t,
+        ),
         (
             Render::Image {
                 mime: ma,
@@ -414,8 +411,7 @@ fn text_lines(
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
-    let styled: Vec<(String, Vec<(std::ops::Range<usize>, HighlightStyle)>)> = if has_escapes(text)
-    {
+    let styled: Vec<crate::terminal::StyledLine> = if has_escapes(text) {
         crate::terminal::ansi_lines(text, ANSI_COLS)
     } else {
         corvene_core::notebook_diff::text::lines(text)

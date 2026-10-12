@@ -155,7 +155,7 @@ impl TerminalBuffer {
 
     /// Every line as text with its styled runs (`1331-notebook-diff`:
     /// notebook streams and tracebacks), trailing blank lines dropped.
-    pub fn styled_lines(&self) -> Vec<(String, Vec<(std::ops::Range<usize>, HighlightStyle)>)> {
+    pub fn styled_lines(&self) -> Vec<StyledLine> {
         let mut out: Vec<_> = self.lines.iter().map(|l| line_runs(l)).collect();
         for (text, runs) in &mut out {
             let trimmed = text.trim_end().len();
@@ -697,6 +697,20 @@ impl Render for Terminal {
 /// `--spacing`.
 const SPACING_PX: f32 = 10.;
 
+/// A line of terminal text and its styled runs.
+pub type StyledLine = (String, Vec<(std::ops::Range<usize>, HighlightStyle)>);
+
+/// `1331-notebook-diff`: text with ANSI escapes (a notebook stream or
+/// traceback) as styled lines, carriage returns overwriting their line as
+/// in a terminal (progress bars collapse to their last state).
+pub fn ansi_lines(text: &str, cols: usize) -> Vec<StyledLine> {
+    let mut buffer = TerminalBuffer::new(cols, 1);
+    // a notebook's newlines are line feeds without carriage returns
+    let bytes = text.replace("\r\n", "\n").replace('\n', "\r\n");
+    buffer.write(bytes.as_bytes());
+    buffer.styled_lines()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,18 +773,4 @@ mod tests {
         assert_eq!(screen(b"keep\nwipe this\x1b[2K\rnew"), "keep\nnew");
         assert_eq!(screen(b"a\nb\x1b[2J"), "");
     }
-}
-
-/// `1331-notebook-diff`: text with ANSI escapes (a notebook stream or
-/// traceback) as styled lines, carriage returns overwriting their line as
-/// in a terminal (progress bars collapse to their last state).
-pub fn ansi_lines(
-    text: &str,
-    cols: usize,
-) -> Vec<(String, Vec<(std::ops::Range<usize>, HighlightStyle)>)> {
-    let mut buffer = TerminalBuffer::new(cols, 1);
-    // a notebook's newlines are line feeds without carriage returns
-    let bytes = text.replace("\r\n", "\n").replace('\n', "\r\n");
-    buffer.write(bytes.as_bytes());
-    buffer.styled_lines()
 }

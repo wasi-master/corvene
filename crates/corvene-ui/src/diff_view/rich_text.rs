@@ -25,6 +25,9 @@ const JSON_GENERATION: u64 = 1 << 60;
 const SCRIPT_GENERATION: u64 = 1 << 59;
 const LATEX_PAGES_GENERATION: u64 = 1 << 58;
 
+/// A LaTeX diff and its pages (or why they could not be drawn).
+type PagesOf = (Arc<Diff>, Result<Arc<Diff>, String>);
+
 /// The diff view's state for notebook and LaTeX diffs.
 #[derive(Default)]
 pub(super) struct RichPane {
@@ -39,7 +42,7 @@ pub(super) struct RichPane {
     script: Option<(Arc<Diff>, PdfText)>,
     _script_task: Option<Task<()>>,
     /// A LaTeX document's pages.
-    pages: Option<(Arc<Diff>, Result<Arc<Diff>, String>)>,
+    pages: Option<PagesOf>,
     _pages_task: Option<Task<()>>,
     pages_running: bool,
 }
