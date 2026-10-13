@@ -161,7 +161,8 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
 
 /// A character reference at the start of `s`: its text and byte length.
 fn entity(s: &str) -> Option<(String, usize)> {
-    let semi = s[..s.len().min(12)].find(';')?;
+    // Bytes, not a str slice: byte 12 can fall inside a multi-byte char.
+    let semi = s.bytes().take(12).position(|b| b == b';')?;
     let body = &s[1..semi];
     let text = if let Some(num) = body.strip_prefix('#') {
         let code = match num.strip_prefix(['x', 'X']) {
@@ -218,5 +219,10 @@ mod tests {
             to_text(html),
             "Hello world & friends\n\n- one\n- two\n\nSee the docs <https://e.com/a?b=1&c=2>.\nBye 👋"
         );
+    }
+
+    #[test]
+    fn ampersand_before_multibyte_text() {
+        assert_eq!(to_text("<p>a &أهلاًبك;</p>"), "a &أهلاًبك;");
     }
 }

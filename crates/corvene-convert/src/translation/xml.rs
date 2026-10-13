@@ -35,7 +35,8 @@ fn decode_entities(s: &str) -> String {
     while let Some(amp) = rest.find('&') {
         out.push_str(&rest[..amp]);
         let tail = &rest[amp..];
-        let Some(semi) = tail[..tail.len().min(10)].find(';') else {
+        // Bytes, not a str slice: byte 10 can fall inside a multi-byte char.
+        let Some(semi) = tail.bytes().take(10).position(|b| b == b';') else {
             out.push('&');
             rest = &tail[1..];
             continue;
@@ -179,6 +180,13 @@ mod tests {
         );
         assert_eq!(rows[3], vec!["files (one)", "%d file", ""]);
         assert_eq!(rows[6], vec!["days[1]", "Tue", ""]);
+    }
+
+    #[test]
+    fn entities_next_to_multibyte_text() {
+        assert_eq!(decode_entities("&amp; أهلاً بك"), "& أهلاً بك");
+        assert_eq!(decode_entities("a &أهلاً بك; b"), "a &أهلاً بك; b");
+        assert_eq!(decode_entities("&#1571;&lt;"), "أ<");
     }
 
     #[test]
