@@ -113,7 +113,16 @@ pub fn inspect_diff(
     if PRETTY.load(Ordering::Relaxed)
         && let Some(language) = corvene_pretty::Language::of_path(path)
     {
-        return pretty_diff(git, workdir, path, language, &new, &old, diff, hide_whitespace);
+        return pretty_diff(
+            git,
+            workdir,
+            path,
+            language,
+            &new,
+            &old,
+            diff,
+            hide_whitespace,
+        );
     }
     Err(diff)
 }
@@ -135,7 +144,9 @@ fn side_bytes(
             }
             std::fs::read(path).ok()?
         }
-        SideRef::Blob(rev, path) => crate::diff::blob_bytes(git.clone(), workdir, rev, path).ok()?,
+        SideRef::Blob(rev, path) => {
+            crate::diff::blob_bytes(git.clone(), workdir, rev, path).ok()?
+        }
     };
     (bytes.len() <= max).then_some(Some(bytes))
 }
@@ -252,7 +263,11 @@ pub fn unlock_signing_file(path: &str, file: &SigningFile, password: &str) -> Op
 
 /// Where a weight file's bytes are: an LFS side becomes its local object.
 /// `Some(None)` for a missing side; `None` when it cannot be read.
-fn tensor_root(git: &Arc<GitBinary>, workdir: &Path, side: &SideRef) -> Option<Option<ArchiveRoot>> {
+fn tensor_root(
+    git: &Arc<GitBinary>,
+    workdir: &Path,
+    side: &SideRef,
+) -> Option<Option<ArchiveRoot>> {
     let file_root = |path: &Path| -> Option<ArchiveRoot> {
         let meta = std::fs::symlink_metadata(path).ok()?;
         meta.is_file().then(|| ArchiveRoot::File {
@@ -308,7 +323,11 @@ impl TensorSource {
     /// The source behind `root`; `Err` when the file changed on disk.
     pub fn open(git: &Arc<GitBinary>, workdir: &Path, root: &ArchiveRoot) -> Result<Self, String> {
         match root {
-            ArchiveRoot::File { path, len, mtime_ns } => {
+            ArchiveRoot::File {
+                path,
+                len,
+                mtime_ns,
+            } => {
                 let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
                 if !meta.is_file()
                     || meta.len() != *len
