@@ -26,8 +26,14 @@
 //! Deviation (flag `clear-lost-github-association`): when refreshing the
 //! API record answers 404 (the repository was deleted, or the account lost
 //! access), the stored GitHub association is dropped and the repository is
-//! handled as a plain git repository (re-adding it matches it again); GHD's
-//! `repositoryWithRefreshedGitHubRepository` keeps the stale record forever.
+//! handled as a plain git repository (the next launch or sign-in matches its
+//! remote again); GHD's `repositoryWithRefreshedGitHubRepository` keeps the
+//! stale record forever.
+//!
+//! Deviation: a repository with a GitHub association keeps it as stored and
+//! only one without is matched again, once a session when its remotes are
+//! first read and after signing in. GHD matches the default remote on every
+//! selection (`app-store.ts#matchGitHubRepository`).
 //!
 //! Deviation (flag `353-fork-tracks-upstream`, desktop#19457): a fork set up
 //! to contribute to its parent (Choose Fork Settings, Repository Settings, or
@@ -185,14 +191,33 @@ impl Dispatcher {
         if Self::needs_account_lookup(Self::state(cx).read(cx), id) {
             return Self::resolve_repository_account(id, cx);
         }
-        let Some(github) = Self::state(cx)
+        let stored = Self::state(cx)
             .read(cx)
             .repository(id)
-            .and_then(|r| r.github.clone())
-        else {
-            return;
+            .and_then(|r| r.github.clone());
+        // GHD matches the default remote on every refresh; Corvene keeps the
+        // stored record and matches only a repository without one, once a
+        // session (its remotes must have been read)
+        let (github, matched) = match stored {
+            Some(github) => (github, false),
+            None => {
+                let matched = Self::state(cx).update(cx, |s, _| {
+                    let info = s.repo_states.get(&id)?.info.clone()?;
+                    s.repo_state_mut(id).github_rematched = true;
+                    Self::match_github_repository(s, &info)
+                });
+                match matched {
+                    Some(github) => (github, true),
+                    None => return,
+                }
+            }
         };
         let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
+            // signed out (`331-github-without-account`): the match is all
+            // there is
+            if matched {
+                Self::set_matched_github_repository(id, github, cx);
+            }
             return;
         };
         let (owner, name) = (github.owner.clone(), github.name.clone());
@@ -204,21 +229,32 @@ impl Dispatcher {
             cx,
             move || Client::new(endpoint, token).repository(&owner, &name),
             move |result, cx| match result {
+                // GHD: a failed request still associates the skeleton
+                // repository from the match
+                Err(corvene_github::GitHubError::Api { status: 404, .. })
+                    if matched && clear_lost => {}
+                Err(err) if matched => {
+                    warn!(id, %err, "could not read the matched GitHub repository");
+                    Self::set_matched_github_repository(id, github, cx);
+                }
                 Ok(fresh) => {
-                    let changed = Self::state(cx).update(cx, |s, cx| {
+                    let (changed, associated) = Self::state(cx).update(cx, |s, cx| {
                         let Some(repo) = s.repository(id).cloned() else {
-                            return false;
+                            return (false, false);
                         };
                         if repo.github.as_ref() == Some(&fresh) {
-                            return false;
+                            return (false, false);
                         }
                         info!(id, permissions = ?fresh.permissions, "refreshed GitHub repository");
+                        let associated = repo.github.is_none();
                         // GHD `RepositoriesStore.setGitHubRepository`
                         s.repositories_store().set_github_repository(&repo, fresh);
                         cx.notify();
-                        true
+                        (true, associated)
                     });
-                    if changed {
+                    if associated {
+                        Self::github_repository_associated(id, cx);
+                    } else if changed {
                         Self::refresh_branch_protection(id, cx);
                     }
                 }
@@ -240,6 +276,48 @@ impl Dispatcher {
                 Err(err) => warn!(id, %err, "could not refresh the GitHub repository"),
             },
         );
+    }
+
+    /// GHD `matchGitHubRepository` (`app-store.ts`): the GitHub repository
+    /// the default remote names, on the signed-in accounts' hosts plus
+    /// github.com when signed out (`331-github-without-account`).
+    pub(crate) fn match_github_repository(
+        s: &crate::state::AppState,
+        info: &corvene_models::RepositoryInfo,
+    ) -> Option<GitHubRepository> {
+        let wiki_not_github = s.flags.bool(crate::flags::ids::WIKI_NOT_GITHUB);
+        let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
+        let hosts = corvene_models::github_hosts(&s.accounts, dotcom);
+        corvene_git::find_default_remote(&info.remotes)
+            .and_then(|r| corvene_models::github_from_remote(&r.url, &hosts))
+            .filter(|gh| !(wiki_not_github && gh.is_wiki()))
+    }
+
+    /// `upsertGitHubRepositoryFromMatch` + `setGitHubRepository`, unless
+    /// the repository got a record meanwhile.
+    fn set_matched_github_repository(id: u64, github: GitHubRepository, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            let Some(repo) = s.repository(id).cloned() else {
+                return;
+            };
+            if repo.github.is_some() {
+                return;
+            }
+            info!(id, repo = %github.full_name(), "matched GitHub repository");
+            s.repositories_store().set_github_repository(&repo, github);
+            cx.notify();
+        });
+        Self::github_repository_associated(id, cx);
+    }
+
+    /// What selecting the repository skipped while it had no GitHub
+    /// repository.
+    fn github_repository_associated(id: u64, cx: &mut dyn Host) {
+        Self::refresh_branch_protection(id, cx);
+        Self::ensure_pull_requests(id, cx);
+        Self::refresh_autolinks(id, cx);
+        Self::load_issue_trackers(id, cx);
+        Self::restart_pull_request_updater(cx);
     }
 
     /// With `fork-offer-respects-allow-forking`, a repository whose owner

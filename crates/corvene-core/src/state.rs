@@ -1276,6 +1276,9 @@ pub struct RepositoryState {
     /// `isTrustingPath`: `safe.directory` is being added.
     pub trusting_path: bool,
     pub last_refresh: Option<Instant>,
+    /// A repository without a GitHub association had its default remote
+    /// matched this session (`Dispatcher::refresh_github_repository`).
+    pub github_rematched: bool,
     pub section: Section,
     /// `git status` result (`IChangesState.workingDirectory`). Shared: a
     /// refresh hands it to the next one and views key caches on the

@@ -17,7 +17,7 @@ use crate::state::{
     AppState, AuthenticationFlow, AuthenticationStep, CloneState, ErrorMessage, Foldout,
     LastCommit, Popup, RepositoryState, RetryAction,
 };
-use corvene_models::{DiffSelectionType, Section, WorkingDirectoryFileChange, github_from_remote};
+use corvene_models::{DiffSelectionType, Section, WorkingDirectoryFileChange};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const RECENT_REPOSITORIES_LENGTH: usize = 3;
@@ -1059,16 +1059,7 @@ impl Dispatcher {
                         if let Some(existing) = s.repositories_store().find_by_path(&info.workdir) {
                             return (existing.id, false);
                         }
-                        let wiki_not_github = s.flags.bool(crate::flags::ids::WIKI_NOT_GITHUB);
-                        // GHD `matchGitHubRepository`: the signed-in accounts'
-                        // hosts, plus github.com when signed out
-                        // (`331-github-without-account`)
-                        let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
-                        let hosts = corvene_models::github_hosts(&s.accounts, dotcom);
-                        let github = info
-                            .remote("origin")
-                            .and_then(|r| github_from_remote(&r.url, &hosts))
-                            .filter(|gh| !(wiki_not_github && gh.is_wiki()));
+                        let github = Self::match_github_repository(s, &info);
                         let mut repositories = s.repositories_store();
                         let repo = repositories.add_repository(&info.workdir);
                         if let Some(github) = github {
@@ -1816,11 +1807,12 @@ impl Dispatcher {
                 return;
             };
             cx.update(|cx| {
-                Self::state(cx).update(cx, |s, cx| {
+                let rematch = Self::state(cx).update(cx, |s, cx| {
                     let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
+                    let unmatched = s.repository(id).is_some_and(|r| r.github.is_none());
                     let rs = s.repo_state_mut(id);
                     if rs.refresh_started != Some(started) {
-                        return;
+                        return false;
                     }
                     if !slash_remotes {
                         forget_remote_names(&mut info);
@@ -1830,7 +1822,13 @@ impl Dispatcher {
                     if changed {
                         cx.notify();
                     }
-                })
+                    unmatched && !rs.github_rematched
+                });
+                // a repository listed before its remote pointed at GitHub
+                // (or before signing in) is matched once its remotes are read
+                if rematch {
+                    Self::refresh_github_repository(id, cx);
+                }
             });
         })
         .detach();
@@ -7959,7 +7957,13 @@ impl Dispatcher {
                         return;
                     }
                 }
-                // `refreshSelectedRepositoryAfterAccountChange`
+                // `refreshSelectedRepositoryAfterAccountChange`; the new
+                // account's host may match a repository that had none
+                Self::state(cx).update(cx, |s, _| {
+                    for rs in s.repo_states.values_mut() {
+                        rs.github_rematched = false;
+                    }
+                });
                 for id in Self::state(cx).read(cx).visible_repositories() {
                     Self::refresh_github_repository(id, cx);
                 }
