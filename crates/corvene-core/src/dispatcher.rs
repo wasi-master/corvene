@@ -7301,6 +7301,24 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.markdown_diff_view = view);
     }
 
+    /// Corvene `1361-merge-editor`: the toolbar's layout switch.
+    pub fn set_merge_editor_layout(
+        layout: crate::persistence::MergeEditorLayout,
+        cx: &mut dyn Host,
+    ) {
+        Self::update_settings(cx, |s| s.merge_editor_layout = layout);
+    }
+
+    /// Corvene `1361-merge-editor`: the toolbar's Base toggle.
+    pub fn set_merge_editor_show_base(show: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.merge_editor_show_base = show);
+    }
+
+    /// Corvene `1361-merge-editor`: the toolbar's whitespace toggle.
+    pub fn set_merge_editor_ignore_whitespace(ignore: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.merge_editor_ignore_whitespace = ignore);
+    }
+
     /// Corvene `1352`-`1355`: the diff header's switch between a converted
     /// view (Table, Picture, Map, Message) and git's own diff, one setting
     /// per kind.

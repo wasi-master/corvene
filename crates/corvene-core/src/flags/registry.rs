@@ -9326,6 +9326,30 @@ registry! {
         code: &["crates/corvene-convert/src/compiled/summary.rs", "crates/corvene-ui/src/compiled_diff.rs"],
     },
 
+    /// Conflicted files open in a three-way merge editor in the diff area.
+    MERGE_EDITOR = 1361 "merge-editor" {
+        title: "Merge editor for conflicted files",
+        summary: "Selecting a conflicted text file shows a merge editor where the diff is: \
+                  Ours, Result and Theirs side by side with ribbons between matching chunks \
+                  (an optional Base column), or Current and Incoming above the Result. Each \
+                  conflict can take ours, theirs, both in either order, the base or neither, \
+                  and the Result stays editable with undo. Conflicts that only differ in \
+                  separate words or in whitespace can be resolved in one click. An overview \
+                  ruler marks every conflict, F7 and Shift-F7 move between them, and hovering \
+                  a chunk shows the commit that changed it on that side. Edits are saved to \
+                  the file as you go, with markers kept for unresolved conflicts, and Mark as \
+                  Resolved stages it. Binary and delete/modify conflicts get a side picker. \
+                  The conflicts dialog gets a Resolve button for each file.",
+        ghd_behaviour: "Conflicted files show \"The file is in conflict and must be resolved \
+                        via the command line\" and are resolved in an external editor.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16957), Upstream::issue(22516)],
+        code: &["crates/corvene-merge/src/lib.rs", "crates/corvene-git/src/merge_file.rs", "crates/corvene-core/src/merge_editor.rs", "crates/corvene-ui/src/merge_editor/mod.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -239,6 +239,17 @@ pub struct Settings {
     /// Listing switch).
     #[serde(default)]
     pub compiled_listing: bool,
+    /// Corvene `1361-merge-editor`: three panes side by side or Current and
+    /// Incoming above the Result.
+    #[serde(default)]
+    pub merge_editor_layout: MergeEditorLayout,
+    /// Corvene `1361-merge-editor`: the Base column beside the three panes.
+    #[serde(default)]
+    pub merge_editor_show_base: bool,
+    /// Corvene `1361-merge-editor`: chunks that differ only in whitespace
+    /// count as equal.
+    #[serde(default)]
+    pub merge_editor_ignore_whitespace: bool,
     /// Corvene `1338-lockfile-diff`: Dependencies or Source.
     #[serde(default)]
     pub lockfile_diff_view: InspectDiffView,
@@ -609,6 +620,16 @@ pub enum MarkdownDiffView {
     Preview,
 }
 
+/// Corvene `1361-merge-editor`: how the merge editor lays out its panes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MergeEditorLayout {
+    /// Ours, Result and Theirs side by side.
+    #[default]
+    ThreePane,
+    /// Current and Incoming above the Result.
+    Stacked,
+}
+
 /// Corvene `1338-lockfile-diff`, `1339-pretty-diff`,
 /// `1341-signing-material-diff`: the diff header's switch between the
 /// file read into something legible and git's own diff.
@@ -724,6 +745,9 @@ impl Default for Settings {
             markdown_diff_view: MarkdownDiffView::Source,
             converted_source: Vec::new(),
             compiled_listing: false,
+            merge_editor_layout: MergeEditorLayout::ThreePane,
+            merge_editor_show_base: false,
+            merge_editor_ignore_whitespace: false,
             lockfile_diff_view: InspectDiffView::Read,
             pretty_diff_view: InspectDiffView::Source,
             signing_diff_view: InspectDiffView::Read,
