@@ -21,6 +21,7 @@ corvene-convert = { path = "crates/corvene-convert" }
 corvene-extensions = { path = "crates/corvene-extensions" }
 corvene-fonts = { path = "crates/corvene-fonts" }
 corvene-math = { path = "crates/corvene-math" }
+corvene-merge = { path = "crates/corvene-merge" }
 corvene-keys = { path = "crates/corvene-keys" }
 corvene-lockfiles = { path = "crates/corvene-lockfiles" }
 corvene-pretty = { path = "crates/corvene-pretty" }

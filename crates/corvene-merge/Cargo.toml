@@ -1,0 +1,16 @@
+[package]
+name = "corvene-merge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Three-way merges, git conflict markers and merge editor state"
+
+[dependencies]
+thiserror.workspace = true
+similar.workspace = true
+
+[dev-dependencies]
+# git-compatible text merge, the oracle for the differential tests
+gix-merge = { version = "0.21", features = ["sha1"] }
+gix-imara-diff = "0.3"
+proptest = "1.11"

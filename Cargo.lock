@@ -2113,6 +2113,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvene-merge"
+version = "0.1.0"
+dependencies = [
+ "gix-imara-diff",
+ "gix-merge",
+ "proptest",
+ "similar",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "corvene-models"
 version = "0.1.0"
 dependencies = [
