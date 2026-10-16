@@ -827,6 +827,7 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         scopes: vec!["repo".to_string(), "workflow".to_string()],
         plan: Some("free".to_string()),
         private_primary_email: false,
+        from_gh_cli: false,
     };
     if with_account {
         corvene_platform::keychain::inject_token(&account.host(), &login, "stub-token");

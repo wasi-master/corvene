@@ -48,6 +48,7 @@ fn account(login: &str, endpoint: &str) -> Account {
         scopes: Vec::new(),
         plan: Some("free".to_string()),
         private_primary_email: false,
+        from_gh_cli: false,
     }
 }
 

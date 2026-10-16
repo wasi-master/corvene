@@ -138,6 +138,11 @@ pub fn answer_with(prompt: &str, logins: HashMap<String, String>) -> Option<Stri
                         .ok()
                         .flatten()
                 })
+                // `529-gh-cli-account`: an account borrowed from `gh`
+                .or_else(|| {
+                    std::env::var_os("CORVENE_ASKPASS_GH_CLI")
+                        .and_then(|_| corvene_platform::gh_cli::token(&host, Some(&login)))
+                })
         }
     }
 }

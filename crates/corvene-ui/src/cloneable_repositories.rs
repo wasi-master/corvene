@@ -1019,6 +1019,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email: false,
+            from_gh_cli: false,
         };
         let accounts = vec![account("first"), account("work"), account("other")];
         let login = |logins: &str| preferred_account(&accounts, logins).map(|a| a.login.as_str());

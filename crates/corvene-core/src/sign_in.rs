@@ -449,6 +449,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email: false,
+            from_gh_cli: false,
         };
         let accounts = Rc::new(RefCell::new(vec![existing.clone()]));
         let mut store = SignInStore::new(accounts);
@@ -486,6 +487,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email: false,
+            from_gh_cli: false,
         });
         assert_eq!(store.get_state().map(|s| s.kind), Some(SignInStep::Success));
         // GHD's dialog resets the store once it sees Success, and the

@@ -1145,6 +1145,7 @@ impl Client {
             scopes,
             plan: user.plan.map(|p| p.name),
             private_primary_email,
+            from_gh_cli: false,
         })
     }
 

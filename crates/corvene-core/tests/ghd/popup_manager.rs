@@ -282,6 +282,7 @@ fn update_popup_updates_the_given_popup() {
         scopes: Vec::new(),
         plan: Some("free".to_string()),
         private_primary_email: false,
+        from_gh_cli: false,
     };
     let popup_tutorial = Popup::CreateTutorialRepository {
         account: mock_account.clone(),

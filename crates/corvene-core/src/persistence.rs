@@ -1311,8 +1311,10 @@ impl StoreExt for Store {
         self.set("generic_git_logins", logins)
     }
 
+    /// `529-gh-cli-account`: the accounts borrowed from `gh` stay out.
     fn save_accounts(&self, accounts: &[Account]) -> Result<()> {
-        self.set("accounts", accounts)
+        let own: Vec<&Account> = accounts.iter().filter(|a| !a.from_gh_cli).collect();
+        self.set("accounts", &own)
     }
 
     fn enterprise_oauth_apps(&self) -> Result<std::collections::HashMap<String, String>> {
@@ -1393,6 +1395,28 @@ mod tests {
     }
 
     #[test]
+    fn accounts_borrowed_from_gh_are_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in(dir.path().join("store")).unwrap();
+        let account = |login: &str, from_gh_cli: bool| Account {
+            endpoint: "https://api.github.com".into(),
+            id: 1,
+            login: login.into(),
+            name: None,
+            avatar_url: None,
+            emails: Vec::new(),
+            scopes: Vec::new(),
+            plan: None,
+            private_primary_email: false,
+            from_gh_cli,
+        };
+        store
+            .save_accounts(&[account("own", false), account("gh", true)])
+            .unwrap();
+        assert_eq!(store.accounts().unwrap(), vec![account("own", false)]);
+    }
+
+    #[test]
     fn ghe_com_endpoints_move_to_the_api_subdomain() {
         let account = Account {
             endpoint: "https://whatever.ghe.com/api/v3".into(),
@@ -1404,6 +1428,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email: false,
+            from_gh_cli: false,
         };
         let migrated = migrated_ghe_accounts(std::slice::from_ref(&account)).unwrap();
         assert_eq!(migrated[0].endpoint, "https://api.whatever.ghe.com/");

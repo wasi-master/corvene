@@ -466,6 +466,7 @@ pub(crate) fn main() {
                             scopes: Vec::new(),
                             plan: None,
                             private_primary_email: false,
+                            from_gh_cli: false,
                         });
                     }
                 }
@@ -1356,6 +1357,7 @@ pub(crate) fn main() {
         // connection the sleep broke is stopped
         cx.on_system_wake(|cx| Dispatcher::system_woke(cx)).detach();
         Dispatcher::refresh_accounts(cx);
+        Dispatcher::sync_gh_cli_account(cx);
         // Alive subscriptions for pull request notifications (GHD AliveStore)
         Dispatcher::start_alive(cx);
         // `354-pull-request-event-notifications` (idle while the flag is off)

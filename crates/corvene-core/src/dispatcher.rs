@@ -8072,6 +8072,13 @@ impl Dispatcher {
     /// Repositories that used it keep its login, so they use it again
     /// after signing back in, and the endpoint's first account meanwhile.
     pub fn sign_out_account(endpoint: String, login: String, cx: &mut dyn Host) {
+        if let Some(account) = Self::state(cx)
+            .read(cx)
+            .account_with_login(&endpoint, &login)
+            .cloned()
+        {
+            Self::remember_gh_cli_sign_out(&account, cx);
+        }
         let failed = Self::state(cx).update(cx, |s, cx| {
             let account = s.account_with_login(&endpoint, &login).cloned()?;
             let removed = crate::accounts::remove_account(

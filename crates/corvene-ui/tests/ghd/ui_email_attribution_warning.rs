@@ -35,6 +35,7 @@ fn create_account(email: &str) -> Account {
         scopes: Vec::new(),
         plan: None,
         private_primary_email: false,
+        from_gh_cli: false,
     }
 }
 

@@ -163,6 +163,7 @@ pub fn new_account(
         scopes: Vec::new(),
         plan: Some(plan.to_string()),
         private_primary_email: false,
+        from_gh_cli: false,
     }
 }
 

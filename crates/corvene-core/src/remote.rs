@@ -263,7 +263,8 @@ impl Dispatcher {
                 .iter()
                 .map(|(host, user)| format!("{host}={user}")),
         );
-        AskpassEnv::current_exe(logins.join(";"))
+        let gh_cli = s.accounts.iter().any(|a| a.from_gh_cli);
+        AskpassEnv::current_exe(logins.join(";")).map(|env| AskpassEnv { gh_cli, ..env })
     }
 
     /// Corvene (`1102-repository-credential-helper`): repository `id` signs
@@ -3143,6 +3144,7 @@ fn without_accounts_of(askpass: &AskpassEnv, accounts: &[String], host: &str) ->
     AskpassEnv {
         program: askpass.program.clone(),
         logins: logins.join(";"),
+        gh_cli: askpass.gh_cli,
     }
 }
 
@@ -3174,6 +3176,7 @@ fn with_account_of(
     AskpassEnv {
         program: askpass.program.clone(),
         logins: logins.join(";"),
+        gh_cli: askpass.gh_cli,
     }
 }
 
@@ -3237,6 +3240,7 @@ mod tests {
         let askpass = AskpassEnv {
             program: "/x".into(),
             logins: "github.com=octocat;ghe.corp=me;github.com=saved".into(),
+            gh_cli: false,
         };
         let accounts = ["github.com=octocat".to_string(), "ghe.corp=me".to_string()];
         let env = without_accounts_of(&askpass, &accounts, "github.com");
@@ -3248,6 +3252,7 @@ mod tests {
         let askpass = AskpassEnv {
             program: "/x".into(),
             logins: "github.com=me;ghe.corp=work".into(),
+            gh_cli: false,
         };
         let accounts = [
             "github.com=me".to_string(),

@@ -447,6 +447,9 @@ pub fn remote_failure(err: &GitError) -> RemoteFailure {
 pub struct AskpassEnv {
     pub program: std::path::PathBuf,
     pub logins: String,
+    /// Corvene (`529-gh-cli-account`): passwords the keychain lacks may
+    /// come from the GitHub CLI (`CORVENE_ASKPASS_GH_CLI`).
+    pub gh_cli: bool,
 }
 
 impl AskpassEnv {
@@ -458,10 +461,19 @@ impl AskpassEnv {
         let program = std::env::var_os("CORVENE_ASKPASS_PROGRAM").map(std::path::PathBuf::from);
         #[cfg(not(target_os = "android"))]
         let program = std::env::current_exe().ok();
-        program.map(|program| Self { program, logins })
+        program.map(|program| Self {
+            program,
+            logins,
+            gh_cli: false,
+        })
     }
 
     pub(crate) fn apply(&self, cmd: GitCommand) -> GitCommand {
+        let cmd = if self.gh_cli {
+            cmd.env("CORVENE_ASKPASS_GH_CLI", "1")
+        } else {
+            cmd
+        };
         cmd.env("GIT_ASKPASS", &self.program)
             .env("CORVENE_ASKPASS", "1")
             .env("CORVENE_ASKPASS_LOGINS", &self.logins)

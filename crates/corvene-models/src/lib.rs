@@ -419,6 +419,11 @@ pub struct Account {
     /// (`visibility: "private"` in `/user/emails`).
     #[serde(default)]
     pub private_primary_email: bool,
+    /// Corvene (`529-gh-cli-account`): borrowed from the GitHub CLI's
+    /// sign-in for this run; its token comes from `gh` and it is never
+    /// saved.
+    #[serde(skip)]
+    pub from_gh_cli: bool,
 }
 
 impl Account {
@@ -660,6 +665,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email,
+            from_gh_cli: false,
         }
     }
 

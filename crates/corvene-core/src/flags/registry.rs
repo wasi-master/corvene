@@ -4006,6 +4006,21 @@ registry! {
         upstream: &[Upstream::issue(10026)],
         code: &["crates/corvene-core/src/proxy.rs", "crates/corvene-platform/src/proxy.rs", "crates/corvene-git/src/proxy.rs", "crates/corvene-core/src/askpass.rs", "crates/corvene-ui/src/dialogs/proxy_authentication.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
     },
+    /// Signed out of GitHub.com but the GitHub CLI is signed in.
+    GH_CLI_ACCOUNT = 529 "gh-cli-account" {
+        title: "Use the GitHub CLI's sign-in",
+        summary: "When no GitHub.com account is signed in and the GitHub CLI (gh) is, Corvene \
+                  uses gh's account and token for GitHub and for fetching and pushing, without \
+                  saving the token. Signing in to Corvene takes over; signing out of the \
+                  borrowed account stops using it until gh signs in to another one.",
+        ghd_behaviour: "Ignores the GitHub CLI: GitHub Desktop has to be signed in on its own.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/gh_cli_account.rs", "crates/corvene-platform/src/gh_cli.rs", "crates/corvene-core/src/askpass.rs", "crates/corvene-core/src/persistence.rs"],
+    },
 
     // ---- 600 Keyboard & accessibility ----
 

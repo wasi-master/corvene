@@ -3647,6 +3647,7 @@ mod tests {
             scopes: Vec::new(),
             plan: None,
             private_primary_email: false,
+            from_gh_cli: false,
         };
         assert_eq!(
             Banner::for_git_email(&account, Some("mona@example.com")),
