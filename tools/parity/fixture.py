@@ -1123,7 +1123,7 @@ def _documents(repo: Path) -> None:
 # metadata; legacy.ipynb (4.4, no ids) an edited markdown cell with math;
 # paper.tex an edited sentence, a new numbered equation and a figure
 # caption; refs.bib an edited and an added entry.
-def _png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+def _solid_png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
     """A solid-colour PNG with a diagonal stripe (stdlib only)."""
     import struct
     import zlib
@@ -1200,7 +1200,7 @@ def _notebook(cells: list, ids: bool = True) -> str:
 def _analysis(edited: bool) -> str:
     rows = [("apples", 12, 0.4), ("pears", 9, 0.3), ("plums", 9, 0.3)]
     rows2 = [("apples", 14, 0.45), ("pears", 9, 0.29), ("plums", 8, 0.26)]
-    plot = _png(48, 32, (31, 111, 235) if not edited else (218, 54, 51))
+    plot = _solid_png(48, 32, (31, 111, 235) if not edited else (218, 54, 51))
     tb = ["\x1b[0;31m---------------------------------------------------------------------------\x1b[0m",
           "\x1b[0;31mZeroDivisionError\x1b[0m                         Traceback (most recent call last)",
           "Cell \x1b[0;32mIn[6], line 1\x1b[0m\n\x1b[0;32m----> 1\x1b[0m \x1b[38;5;241m1\x1b[39m\x1b[38;5;241m/\x1b[39m\x1b[38;5;241m0\x1b[39m",
@@ -1228,7 +1228,7 @@ def _analysis(edited: bool) -> str:
                                      "output_type": "error", "traceback": tb}])
     new_note = _md("c9", "## Next steps\n\n- Ask **two** more shops\n- Plot the shares over time\n\n"
                          "![logo](attachment:logo.png)",
-                   {"logo.png": {"image/png": _b64(_png(16, 16, (46, 160, 67)))}})
+                   {"logo.png": {"image/png": _b64(_solid_png(16, 16, (46, 160, 67)))}})
     if not edited:
         cells = [title, helper, imports, load, table, chart, formula, old_note]
     else:
@@ -1333,7 +1333,7 @@ def _notebooks(repo: Path) -> None:
     (nbs / "legacy.ipynb").write_text(_legacy(False))
     (paper / "paper.tex").write_text(_PAPER)
     (paper / "refs.bib").write_text(_BIB)
-    (paper / "fig.png").write_bytes(_png(64, 40, (130, 80, 223)))
+    (paper / "fig.png").write_bytes(_solid_png(64, 40, (130, 80, 223)))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "Add the fruit survey notebooks and paper",
          date="2026-09-28T09:00:00+00:00")
