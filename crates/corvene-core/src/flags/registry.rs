@@ -9350,6 +9350,24 @@ registry! {
         code: &["crates/corvene-merge/src/lib.rs", "crates/corvene-git/src/merge_file.rs", "crates/corvene-core/src/merge_editor.rs", "crates/corvene-ui/src/merge_editor/mod.rs"],
     },
 
+    /// Android vector and shape drawables can be shown as images.
+    ANDROID_DRAWABLE_DIFF = 1362 "android-drawable-diff" {
+        title: "Android drawables as images",
+        summary: "An XML file in a drawable or mipmap folder that is a vector, animated \
+                  vector or shape drawable gets the SVG Text / Image switch: Image draws \
+                  the old and new drawable with the image diff modes, with its groups, clip \
+                  paths, gradients and tint, or the shape's fill, stroke and corners. Colors \
+                  and dimensions are read from the module's values folder; theme attributes \
+                  draw gray. Other drawables (selectors, layer lists) keep the text diff.",
+        ghd_behaviour: "Android drawables only show their XML diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/android_drawable.rs", "crates/corvene-core/src/stacked_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

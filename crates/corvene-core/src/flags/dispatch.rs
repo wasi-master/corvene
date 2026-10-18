@@ -230,6 +230,7 @@ impl Dispatcher {
                 ids::ARCHIVE_DIFF,
                 ids::FONT_DIFF,
                 ids::FONT_SOURCE_PREVIEW,
+                ids::ANDROID_DRAWABLE_DIFF,
                 ids::DOCUMENT_DIFF,
                 ids::NOTEBOOK_DIFF,
                 ids::LATEX_DIFF,

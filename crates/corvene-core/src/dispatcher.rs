@@ -2284,18 +2284,29 @@ impl Dispatcher {
 
     /// `749-binary-diff-as-text`: "Show diff anyway" on a binary file
     /// reloads its diff with `git diff --text`.
-    /// `794-svg-image-diff`: whether `path`'s diff shows as images.
+    /// `794-svg-image-diff`: whether `path`'s diff shows as images
+    /// (`1362-android-drawable-diff`: an Android drawable's too, when it is
+    /// one that can be drawn).
     pub fn svg_shown_as_image(s: &AppState, path: &str) -> bool {
-        corvene_git::is_svg(path)
-            && !s.settings.svg_text_diff
-            && s.flags.bool(crate::flags::ids::SVG_IMAGE_DIFF)
+        Self::has_svg_switch(s, path) && !s.settings.svg_text_diff
+    }
+
+    /// `794-svg-image-diff` / `1362-android-drawable-diff`: whether `path`
+    /// has the Text / Image switch.
+    pub fn has_svg_switch(s: &AppState, path: &str) -> bool {
+        corvene_git::is_svg(path) && s.flags.bool(crate::flags::ids::SVG_IMAGE_DIFF)
+            || corvene_git::android_drawable::is_android_drawable(path)
+                && s.flags.bool(crate::flags::ids::ANDROID_DRAWABLE_DIFF)
     }
 
     /// `794-svg-image-diff`: show SVG files as images, or as text, in
     /// Changes and History (the diff header's Text/Image switch).
     pub fn set_svg_image_diff(as_image: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.svg_text_diff = !as_image);
-        Self::reload_diffs_of(corvene_git::is_svg, cx);
+        Self::reload_diffs_of(
+            |p| corvene_git::is_svg(p) || corvene_git::android_drawable::is_android_drawable(p),
+            cx,
+        );
     }
 
     /// `1330-font-source-preview`: whether `path` (a UFO glyph, Glyphs file
@@ -2495,7 +2506,8 @@ impl Dispatcher {
             let basis = rs.selection_bases.get(path).cloned();
             // `794-svg-image-diff`: the image view of a text file keeps the
             // line selection made on its text
-            let svg_image = corvene_git::is_svg(path)
+            let svg_image = (corvene_git::is_svg(path)
+                || corvene_git::android_drawable::is_android_drawable(path))
                 && matches!(rs.diff.as_deref(), Some(corvene_models::Diff::Image { .. }));
             // `1330-font-source-preview`: so does the glyph view of a source
             let svg_image = svg_image
@@ -3481,11 +3493,18 @@ impl Dispatcher {
         let svg_image = svg_image || font_glyphs;
         if svg_image {
             let key = (ordered.clone(), file.path.clone());
+            let diff_options = CommitDiffOptions::of(Self::state(cx).read(cx));
             let task = cx.background_executor().spawn(async move {
                 if font_glyphs {
                     crate::stacked_diff::font_source_diff(git, &workdir, &ordered, &file)
                 } else {
-                    crate::stacked_diff::svg_image_diff(git, &workdir, &ordered, &file)
+                    crate::stacked_diff::svg_image_diff(
+                        git,
+                        &workdir,
+                        &ordered,
+                        &file,
+                        diff_options,
+                    )
                 }
             });
             cx.spawn(async move |cx: &mut AsyncCtx| {
@@ -8646,7 +8665,20 @@ pub(crate) fn compute_working_diff(
                 corvene_git::blob_lines(git, workdir, "HEAD", old_path)
             })
         });
-        if options.svg_as_image {
+        // `1362-android-drawable-diff`: a vector or shape drawable as SVG
+        // images (another drawable falls through to its text)
+        if options.svg_as_image && corvene_git::android_drawable::is_android_drawable(&file.path) {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            if let Some(diff) = corvene_git::android_drawable::drawable_image_diff(
+                &file.path,
+                previous_path,
+                file.status.kind,
+                |p| std::fs::read(workdir.join(p)).ok(),
+                |p| corvene_git::blob_bytes(git.clone(), workdir, "HEAD", p).ok(),
+            ) {
+                return (Arc::new(diff), None, None);
+            }
+        } else if options.svg_as_image {
             // `794-svg-image-diff`: the committed and working images, no lines
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
             let diff = corvene_git::image_diff_as(

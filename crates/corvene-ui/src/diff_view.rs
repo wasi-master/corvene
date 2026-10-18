@@ -335,10 +335,11 @@ fn blame_button(
 }
 
 /// `794-svg-image-diff`: the Text / Image switch of an SVG file's header
-/// (one setting for every SVG file).
+/// (one setting for every SVG file; `1362-android-drawable-diff`: and every
+/// Android drawable).
 pub(crate) fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
-    if !corvene_git::is_svg(path) || !s.flags.bool(corvene_core::flags::ids::SVG_IMAGE_DIFF) {
+    if !Dispatcher::has_svg_switch(s, path) {
         return None;
     }
     Some(view_switch(

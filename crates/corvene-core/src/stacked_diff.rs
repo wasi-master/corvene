@@ -307,7 +307,7 @@ impl Dispatcher {
                 if corvene_models::font_source_kind(&file.path).is_some() {
                     return font_source_diff(git, &workdir, &shas, &file);
                 }
-                return svg_image_diff(git, &workdir, &shas, &file);
+                return svg_image_diff(git, &workdir, &shas, &file, options);
             }
             let loaded = compute_commit_diff(git, &workdir, &shas, &file, options);
             crate::diff_cache::store_commit_diff(
@@ -464,12 +464,14 @@ pub(crate) fn remerge_diff(
 }
 
 /// `794-svg-image-diff`: an SVG file's before and after as images. Shared
-/// with `Dispatcher::load_commit_diff`.
+/// with `Dispatcher::load_commit_diff`. `1362-android-drawable-diff`: an
+/// Android drawable's as SVG, or its text diff when it cannot be drawn.
 pub(crate) fn svg_image_diff(
     git: Arc<corvene_git::GitBinary>,
     workdir: &std::path::Path,
     ordered: &[String],
     file: &CommittedFileChange,
+    options: CommitDiffOptions,
 ) -> LoadedDiff {
     let newest = match ordered {
         [_, .., newest] => newest.clone(),
@@ -480,6 +482,18 @@ pub(crate) fn svg_image_diff(
         .cloned()
         .unwrap_or_else(|| file.commitish.clone());
     let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+    if corvene_git::android_drawable::is_android_drawable(&file.path) {
+        return match corvene_git::android_drawable::drawable_image_diff(
+            &file.path,
+            previous_path,
+            file.status.kind,
+            |p| corvene_git::blob_bytes(git.clone(), workdir, &newest, p).ok(),
+            |p| corvene_git::blob_bytes(git.clone(), workdir, &format!("{oldest}^"), p).ok(),
+        ) {
+            Some(diff) => (Arc::new(diff), None, None),
+            None => compute_commit_diff(git, workdir, ordered, file, options),
+        };
+    }
     let diff = corvene_git::image_diff_as(
         corvene_git::SVG_MEDIA_TYPE,
         file.status.kind,

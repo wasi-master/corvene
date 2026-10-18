@@ -897,6 +897,39 @@ def _images(repo: Path, edited: bool) -> None:
     _sips(_png(300, 200, _marks_picture(not edited)), "tiff", art / "scan.tiff")
     (art / "logo.svg").write_text(_LOGO_SVG.format(
         fill="#2da44e" if edited else "#0969da", label="Corvene 2" if edited else "Corvene"))
+    # `1362-android-drawable-diff`: a vector icon and a button shape whose
+    # colors come from the module's values (sorted after `art/`)
+    res = repo / "res"
+    (res / "drawable").mkdir(parents=True, exist_ok=True)
+    (res / "values").mkdir(exist_ok=True)
+    (res / "values" / "colors.xml").write_text(
+        '<resources>\n    <color name="brand">#0969da</color>\n'
+        '    <color name="accent">#bf3989</color>\n</resources>\n')
+    (res / "drawable" / "bg_button.xml").write_text(_BUTTON_SHAPE.format(
+        fill="@color/accent" if edited else "@color/brand", radius=24 if edited else 8))
+    (res / "drawable" / "ic_star.xml").write_text(_STAR_VECTOR.format(
+        fill="#FFBF8700" if edited else "#FF1A7F37", rotation=36 if edited else 0))
+
+
+_BUTTON_SHAPE = """<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <size android:width="240dp" android:height="96dp" />
+    <solid android:color="{fill}" />
+    <stroke android:width="4dp" android:color="#1f2328" android:dashWidth="12dp" android:dashGap="6dp" />
+    <corners android:radius="{radius}dp" />
+</shape>
+"""
+
+_STAR_VECTOR = """<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp" android:height="96dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <group android:rotation="{rotation}" android:pivotX="12" android:pivotY="12">
+        <path android:fillColor="{fill}"
+            android:pathData="M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z" />
+    </group>
+</vector>
+"""
 
 
 # `repo-media` (`1335-video-diff`, `1336-audio-diff`): a short test-pattern

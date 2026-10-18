@@ -1,12 +1,13 @@
 # More image formats, sharp SVG drawings and zoom (1326-more-image-formats,
 # 794-svg-image-diff, 1327-image-diff-zoom): Corvene shows an edited SVG
 # with text as drawings, a HEIC photo and a TIFF scan as images and zooms
-# in; GitHub Desktop shows the SVG's text and "This binary
+# in, then two Android drawables (1362-android-drawable-diff) as drawings;
+# GitHub Desktop shows the SVG's and drawables' text and "This binary
 # file has changed." for the others (deviations.md › Image diffs).
 name: image-formats
 description: An edited SVG, HEIC and TIFF in the image diff, then zoomed in (Corvene only)
 setup: repo-images
-corvene_flags: 1326-more-image-formats=on, 794-svg-image-diff=on, 1327-image-diff-zoom=on
+corvene_flags: 1326-more-image-formats=on, 794-svg-image-diff=on, 1327-image-diff-zoom=on, 1362-android-drawable-diff=on
 steps:
   - click: [125, 185]
     wait: 2000
@@ -39,3 +40,9 @@ steps:
     corvene: {click: [1288, 134]}
     wait: 2000
   - snap: {name: svg-zoomed, corvene_only: true, note: "794-svg-image-diff: the drawing redrawn sharp at the new zoom"}
+  - click: [125, 272]
+    wait: 2000
+  - snap: {name: drawable-shape, corvene_only: true, note: "1362-android-drawable-diff: a shape with @color fills from values/colors.xml"}
+  - click: [125, 301]
+    wait: 2000
+  - snap: {name: drawable-vector, corvene_only: true, note: "1362-android-drawable-diff: a vector drawable recolored and rotated"}
