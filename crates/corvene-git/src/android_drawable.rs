@@ -90,11 +90,7 @@ fn side(path: &str, read: &impl Fn(&str) -> Option<Vec<u8>>) -> Option<Option<St
         return None;
     }
     let text = std::str::from_utf8(&bytes).ok()?;
-    let res = if text.contains("@color/") || text.contains("@dimen/") {
-        Resources::of(path, read)
-    } else {
-        Resources::default()
-    };
+    let res = Resources::of(path, text, read);
     to_svg(text, &res).map(Some)
 }
 
@@ -108,16 +104,19 @@ pub struct Resources {
 impl Resources {
     /// The `values/colors.xml` and `values/dimens.xml` next to the
     /// drawable's folder.
-    fn of(path: &str, read: &impl Fn(&str) -> Option<Vec<u8>>) -> Self {
+    fn of(path: &str, text: &str, read: &impl Fn(&str) -> Option<Vec<u8>>) -> Self {
         let mut res = Self::default();
         let mut parts = path.rsplitn(3, '/');
         let (_, _, root) = (parts.next(), parts.next(), parts.next());
-        let values = |name: &str| match root {
-            Some(root) => format!("{root}/values/{name}"),
-            None => format!("values/{name}"),
-        };
-        for name in ["colors.xml", "dimens.xml"] {
-            if let Some(text) = read(&values(name)).and_then(|b| String::from_utf8(b).ok()) {
+        // only the files the drawable refers to (a missing one costs a
+        // failed git read)
+        let wanted = [("@color/", "colors.xml"), ("@dimen/", "dimens.xml")];
+        for (_, name) in wanted.iter().filter(|(r, _)| text.contains(r)) {
+            let values = match root {
+                Some(root) => format!("{root}/values/{name}"),
+                None => format!("values/{name}"),
+            };
+            if let Some(text) = read(&values).and_then(|b| String::from_utf8(b).ok()) {
                 res.add(&text);
             }
         }
