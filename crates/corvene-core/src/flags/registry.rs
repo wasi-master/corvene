@@ -9368,6 +9368,21 @@ registry! {
         code: &["crates/corvene-git/src/android_drawable.rs", "crates/corvene-core/src/stacked_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// A button that grows the commit description over the file list.
+    EXPANDABLE_COMMIT_MESSAGE = 1363 "expandable-commit-message" {
+        title: "Expandable commit description",
+        summary: "A button at the right of the description's action bar expands the commit \
+                  form over the changes list, so the description fills the sidebar's height; \
+                  the button, Escape in the description or a commit puts it back.",
+        ghd_behaviour: "The description box is 80 px tall and scrolls.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

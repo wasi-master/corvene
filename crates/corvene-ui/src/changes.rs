@@ -89,6 +89,8 @@
 //!   "Reset to my identity" (`783-amend-author`).
 //! - the commit form's top edge drags the description box taller
 //!   (`114-resizable-commit-message`).
+//! - a button in the description's action bar expands the commit form over
+//!   the changes list (`1363-expandable-commit-message`).
 //! - an untracked folder that is a repository has "Add as Submodule…"
 //!   (`785-embedded-repo-commit`, `corvene_core::commit_checks`).
 //! - the commit options gear has "Commit to New Branch…"
@@ -315,6 +317,9 @@ pub struct ChangesSidebar {
     /// the height it set, until it is saved on release.
     description_drag: Option<(Pixels, Pixels)>,
     dragged_description_height: Option<Pixels>,
+    /// `1363-expandable-commit-message`: the description fills the sidebar
+    /// and the changes list keeps only its header.
+    description_expanded: bool,
     /// `783-amend-author`: the amended commit's author as `Name <email>`, and
     /// that text as loaded (an unchanged field keeps the commit's author).
     amend_author: Entity<InputState>,
@@ -1198,6 +1203,7 @@ impl ChangesSidebar {
             amend_author_original: String::new(),
             description_drag: None,
             dragged_description_height: None,
+            description_expanded: false,
             visible_cache: RefCell::new(None),
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
@@ -4634,6 +4640,8 @@ impl ChangesSidebar {
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
+        // `1363-expandable-commit-message`: back to the file list
+        self.description_expanded = false;
         let summary = self.summary_or_placeholder(cx);
         let description = self.description.read(cx).value().to_string();
         let unknown = self.unknown_co_authors(cx);
@@ -6457,11 +6465,39 @@ impl ChangesSidebar {
             .unwrap_or_else(|| zpx(s.settings.commit_description_height.unwrap_or(80.)))
     }
 
+    /// `1363-expandable-commit-message`: whether the commit form is expanded
+    /// over the changes list (never in a short window).
+    fn description_expanded(&self, cx: &App) -> bool {
+        self.description_expanded
+            && !crate::theme::short()
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::EXPANDABLE_COMMIT_MESSAGE)
+    }
+
+    fn set_description_expanded(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.description_expanded != expanded {
+            self.description_expanded = expanded;
+            if expanded {
+                window.focus(&self.description_focus, cx);
+            }
+            cx.notify();
+        }
+    }
+
     /// `114-resizable-commit-message`: a strip over the commit form's top
     /// edge that drags the description box taller or shorter (the file
     /// list above gives up or takes back the height); saved on release.
     fn description_resize_handle(&self, cx: &Context<Self>) -> Option<AnyElement> {
         if crate::theme::short()
+            || self.description_expanded(cx)
             || !self
                 .state
                 .read(cx)
@@ -6549,6 +6585,13 @@ impl ChangesSidebar {
             .is_some_and(|rs| rs.committing);
         let description_box_focused = self.description_focus.is_focused(window)
             || self.commit_options_focus.is_focused(window);
+        let expanded = self.description_expanded(cx);
+        let can_expand = !crate::theme::short()
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::EXPANDABLE_COMMIT_MESSAGE);
         let (is_github, co_authors_visible) = {
             let s = self.state.read(cx);
             let is_github = s
@@ -6630,9 +6673,13 @@ impl ChangesSidebar {
                     }
                 }),
             )
-            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.autocomplete.take().is_some() {
                     cx.notify();
+                    cx.stop_propagation();
+                } else if this.description_expanded(cx) && this.description_focus.is_focused(window)
+                {
+                    this.set_description_expanded(false, window, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -6663,7 +6710,13 @@ impl ChangesSidebar {
             .children(popup)
             .relative()
             .children(self.description_resize_handle(cx))
-            .flex_none()
+            .map(|d| {
+                if expanded {
+                    d.flex_1().min_h_0()
+                } else {
+                    d.flex_none()
+                }
+            })
             .flex()
             .flex_col()
             .p(SPACING())
@@ -6721,6 +6774,7 @@ impl ChangesSidebar {
                 div()
                     .flex()
                     .flex_col()
+                    .when(expanded, |d| d.flex_1().min_h_0())
                     .when(!co_authors_visible, |d| d.mb(SPACING()))
                     .border_1()
                     .border_color(if description_box_focused {
@@ -6747,6 +6801,7 @@ impl ChangesSidebar {
                         let menu = self.input_menu(CommitField::Description, cx);
                         div()
                             .relative()
+                            .when(expanded, |d| d.flex_1().min_h_0())
                             .child(
                                 Textarea::new(&self.description)
                                     .appearance(false)
@@ -6760,10 +6815,14 @@ impl ChangesSidebar {
                                     .text_size(FONT_SIZE())
                                     // a short window (a phone on its
                                     // side) keeps one line of it
-                                    .h(if crate::theme::short() {
-                                        zpx(22.)
-                                    } else {
-                                        self.description_height(cx)
+                                    .map(|d| {
+                                        if expanded {
+                                            d.h_full()
+                                        } else if crate::theme::short() {
+                                            d.h(zpx(22.))
+                                        } else {
+                                            d.h(self.description_height(cx))
+                                        }
                                     })
                                     .context_menu(move |m, window, cx| menu(m, window, cx)),
                             )
@@ -6831,7 +6890,38 @@ impl ChangesSidebar {
                                         this.open_commit_options_menu(ev.position(), window, cx)
                                     }))
                                     .child(octicon(Octicon::Gear, t.text_secondary)),
-                            ),
+                            )
+                            .when(can_expand, |d| {
+                                let label = if expanded {
+                                    mac_or("Collapse Description", "Collapse description")
+                                } else {
+                                    mac_or("Expand Description", "Expand description")
+                                };
+                                let (icon, color) = if expanded {
+                                    (Octicon::ScreenNormal, t.link)
+                                } else {
+                                    (Octicon::ScreenFull, t.text_secondary)
+                                };
+                                let hover = if expanded { t.link_hover } else { t.text };
+                                d.child(
+                                    div()
+                                        .id("commit-description-expand")
+                                        .ml_auto()
+                                        .size(zpx(18.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_pointer()
+                                        .text_color(color)
+                                        .hover(move |s| s.text_color(hover))
+                                        .a11y_button(label)
+                                        .ghd_tooltip(label)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.set_description_expanded(!expanded, window, cx)
+                                        }))
+                                        .child(octicon(icon, color)),
+                                )
+                            }),
                     ),
             )
             .when(co_authors_visible, |d| {
@@ -7229,6 +7319,7 @@ impl Render for ChangesSidebar {
         // a phone's sidebar can be lower than the commit form: the list
         // keeps two rows and the column scrolls
         let tight = crate::theme::compact(window) || crate::theme::short();
+        let expanded = self.description_expanded(cx);
         div()
             .id("changes-sidebar")
             .size_full()
@@ -7319,12 +7410,13 @@ impl Render for ChangesSidebar {
                             Dispatcher::select_all_files(id, paths, cx);
                         }
                     }))
-                    .flex_1()
                     .map(|d| {
-                        if tight {
-                            d.min_h(zpx(124.))
+                        if expanded {
+                            d.flex_none()
+                        } else if tight {
+                            d.flex_1().min_h(zpx(124.))
                         } else {
-                            d.min_h_0()
+                            d.flex_1().min_h_0()
                         }
                     })
                     .flex()
@@ -7336,8 +7428,11 @@ impl Render for ChangesSidebar {
                         }),
                     )
                     .child(self.header(window, cx))
-                    .child(self.list(window, cx))
-                    .children(self.stash_section(cx)),
+                    // `1363-expandable-commit-message`: the header only
+                    .when(!expanded, |d| {
+                        d.child(self.list(window, cx))
+                            .children(self.stash_section(cx))
+                    }),
             )
             .children(self.hidden_changes_warning(cx))
             .child(
