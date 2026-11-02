@@ -1308,6 +1308,17 @@ pub(crate) fn main() {
                 Dispatcher::show_compare_refs(id, None, head, cx);
             }
         });
+        // `356-stacked-pull-requests`
+        on_menu_action(cx, move |_: &CreateStackedPullRequests, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_create_stacked_pull_requests(id, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &PushStackedBranches, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::push_stacked_branches(id, cx);
+            }
+        });
         // `1105-clean-untracked-files`
         on_menu_action(cx, move |_: &CleanUntrackedFiles, cx| {
             if let Some(id) = selected(cx) {

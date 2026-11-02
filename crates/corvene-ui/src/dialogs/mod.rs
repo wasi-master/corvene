@@ -10,6 +10,7 @@ pub mod actions_view;
 mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
+mod add_ssh_host;
 mod app_dialogs;
 mod apply_patch;
 pub(crate) mod branch_dialogs;
@@ -20,6 +21,7 @@ mod choose_repository_account;
 mod ci_check_run_rerun;
 mod clean_untracked_files;
 pub(crate) mod clone_repository;
+pub mod command_palette;
 mod compare_refs;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
@@ -30,9 +32,11 @@ mod crash_report_found;
 mod create_release;
 mod create_repository;
 mod create_ssh_key;
+mod create_stacked_pull_requests;
 mod delete_branches;
 mod discard_changes;
 mod discard_selection;
+mod edit_line;
 mod flags;
 mod fork_dialogs;
 mod history_dialogs;
@@ -49,6 +53,7 @@ mod new_issue;
 pub(crate) mod open_pull_request;
 mod oversized_files;
 mod preferences;
+mod prompt_ssh_secret;
 mod proxy_authentication;
 mod pull_request_notifications;
 mod push_branch_commits;
@@ -65,10 +70,6 @@ mod sign_in;
 pub mod sign_in_host;
 mod simple;
 mod sparse_checkout;
-mod add_ssh_host;
-pub mod command_palette;
-mod edit_line;
-mod prompt_ssh_secret;
 mod ssh_key_passphrase;
 mod start_bisect;
 mod stash_list_dialogs;
@@ -859,6 +860,15 @@ impl DialogHost {
                         branches.clone(),
                         update_refs.clone(),
                         op.clone(),
+                    )
+                })
+                .into(),
+            // `356-stacked-pull-requests`
+            Popup::CreateStackedPullRequests { repo } => cx
+                .new(|_| {
+                    create_stacked_pull_requests::CreateStackedPullRequestsDialog::new(
+                        state.clone(),
+                        *repo,
                     )
                 })
                 .into(),

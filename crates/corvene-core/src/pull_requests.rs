@@ -426,6 +426,7 @@ impl Dispatcher {
                 }
                 Self::prune_forked_remotes(id, cx);
                 Self::subscribe_current_pull_request_status(id, cx);
+                Self::check_stack_base(id, cx);
             },
         );
     }

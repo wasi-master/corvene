@@ -1994,6 +1994,72 @@ impl Client {
             .collect())
     }
 
+    /// Corvene (`356-stacked-pull-requests`): open a pull request from
+    /// `head` (a branch of this repository) into `base`.
+    pub fn create_pull_request(
+        &self,
+        owner: &str,
+        name: &str,
+        title: &str,
+        head: &str,
+        base: &str,
+        draft: bool,
+    ) -> Result<ApiPullRequest> {
+        self.post_json(
+            &format!(
+                "repos/{}/{}/pulls",
+                encode_path_component(owner),
+                encode_path_component(name)
+            ),
+            &serde_json::json!({ "title": title, "head": head, "base": base, "draft": draft }),
+        )
+    }
+
+    /// Corvene (`356-stacked-pull-requests`): point pull request `number` at
+    /// another base branch.
+    pub fn update_pull_request_base(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        base: &str,
+    ) -> Result<ApiPullRequest> {
+        let url = self.endpoint.api(&format!(
+            "repos/{}/{}/pulls/{number}",
+            encode_path_component(owner),
+            encode_path_component(name)
+        ));
+        debug!(%url, "PATCH");
+        let mut response = self
+            .agent
+            .patch(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send_json(serde_json::json!({ "base": base }))?;
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        Ok(response.body_mut().read_json()?)
+    }
+
+    /// Corvene (`356-stacked-pull-requests`): the pull requests whose head
+    /// is `branch` of this repository; `state` is `open` or `closed`.
+    pub fn pull_requests_with_head(
+        &self,
+        owner: &str,
+        name: &str,
+        branch: &str,
+        state: &str,
+    ) -> Result<Vec<ApiPullRequest>> {
+        self.get_json(&format!(
+            "repos/{0}/{1}/pulls?state={state}&head={0}:{2}&per_page=30",
+            encode_path_component(owner),
+            encode_path_component(name),
+            encode_path_component(branch)
+        ))
+    }
+
     /// Corvene (`336-request-reviewers`): ask `add` for a review of pull
     /// request `number` (`POST …/pulls/{number}/requested_reviewers`) and
     /// withdraw the request from `remove` (`DELETE`, same path). A refusal

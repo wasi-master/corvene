@@ -528,9 +528,41 @@ pub enum Banner {
     },
     /// Corvene (`797-stash-list`): after that Undo.
     StashRestored,
+    /// Corvene (`356-stacked-pull-requests`): pull request `number` of
+    /// `branch`, a lower branch of the stack, merged. Update Stack moves the
+    /// rest from `old_base` onto `onto`.
+    StackBaseMerged {
+        repo: u64,
+        branch: String,
+        number: u64,
+        old_base: String,
+        onto: String,
+    },
+    /// Corvene (`356-stacked-pull-requests`): the stack moved; Push Stack.
+    StackUpdated {
+        repo: u64,
+    },
+    /// Corvene (`356-stacked-pull-requests`): `done` of `total` branches
+    /// pushed so far; goes away when the push ends.
+    StackPushing {
+        done: usize,
+        total: usize,
+    },
+    /// Corvene (`356-stacked-pull-requests`): all branches pushed.
+    StackPushed {
+        total: usize,
+    },
+    /// Corvene (`356-stacked-pull-requests`): the pull requests exist.
+    StackedPullRequestsCreated {
+        created: usize,
+        updated: usize,
+    },
     /// Corvene `1115-ssh-security-key-notice`: ssh waits for a touch on the
     /// security key `key`; goes away when it moves on.
-    SecurityKeyTouch { id: u64, key: String },
+    SecurityKeyTouch {
+        id: u64,
+        key: String,
+    },
     /// Corvene (`1315-discard-stash-file`): "Discarded <path> from the
     /// stash" + Undo, which puts stash commit `sha` back with `message` at
     /// `position`, in place of `replacing` (the rewritten entry; `None`
@@ -602,10 +634,15 @@ impl Banner {
             | Banner::ReorderUndone { .. }
             | Banner::BranchRestored { .. }
             | Banner::BranchesRestored { .. }
+            | Banner::StackPushed { .. }
+            | Banner::StackedPullRequestsCreated { .. }
             | Banner::StashRestored => Some(Duration::from_secs(5)),
             Banner::RepositoryMoved { .. } => Some(Duration::from_secs(15)),
             // goes away when ssh moves on
-            Banner::SecurityKeyTouch { .. } => None,
+            Banner::SecurityKeyTouch { .. }
+            | Banner::StackBaseMerged { .. }
+            | Banner::StackUpdated { .. }
+            | Banner::StackPushing { .. } => None,
             Banner::PatchApplied { conflicts, .. } => {
                 (*conflicts == 0).then(|| Duration::from_secs(5))
             }
@@ -932,7 +969,10 @@ impl Dispatcher {
             .bool(crate::flags::ids::CHERRY_PICK_KEEPS_MESSAGES)
     }
 
-    fn working_directory_files(id: u64, cx: &dyn Host) -> Vec<WorkingDirectoryFileChange> {
+    pub(crate) fn working_directory_files(
+        id: u64,
+        cx: &dyn Host,
+    ) -> Vec<WorkingDirectoryFileChange> {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -1571,6 +1611,60 @@ impl Dispatcher {
                     Some(target_for_result),
                     cx,
                 );
+            },
+        );
+    }
+
+    /// Corvene (`356-stacked-pull-requests`): move `old_base..target` onto
+    /// `onto` with the rebase dialog; conflicts continue as in any rebase.
+    pub(crate) fn run_stack_rebase(
+        id: u64,
+        onto: String,
+        old_base: String,
+        target: String,
+        cx: &mut dyn Host,
+    ) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let tip = Self::branch_by_name(id, &target, cx).and_then(|b| b.tip);
+        Self::init_mco(
+            id,
+            McoDetail::Rebase {
+                base_branch: Some(onto.clone()),
+                commits: Vec::new(),
+            },
+            Some(target.clone()),
+            tip,
+            McoStep::ShowProgress,
+            cx,
+        );
+        Self::show_mco_popup(id, cx);
+        let (their, ours) = (onto.clone(), target.clone());
+        let keep_messages = Self::rebase_keeps_messages(cx);
+        Self::run_with_progress(
+            id,
+            cx,
+            move |on_progress| {
+                let result = corvene_git::rebase_onto(
+                    git.clone(),
+                    &workdir,
+                    &onto,
+                    &old_base,
+                    &target,
+                    &[],
+                    keep_messages,
+                    on_progress,
+                );
+                let status = corvene_git::get_status(git, &workdir).ok();
+                (result, status)
+            },
+            move |(result, status), cx| {
+                let moved = matches!(result, RebaseResult::CompletedWithoutError);
+                Self::process_rebase_result(id, result, status, 0, Some(their), Some(ours), cx);
+                if moved {
+                    Self::set_banner(Banner::StackUpdated { repo: id }, cx);
+                }
             },
         );
     }

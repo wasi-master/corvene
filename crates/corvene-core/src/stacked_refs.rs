@@ -44,6 +44,9 @@ pub struct StackedRefs {
     /// Commits of the range other local branches point at, with their
     /// names (sorted).
     pub tips: HashMap<String, Vec<String>>,
+    /// The commits of [`Self::range`], newest first
+    /// (`356-stacked-pull-requests` orders a stack with it).
+    pub order: Vec<String>,
     /// The first History row of the default branch below the range
     /// ([`corvene_git::StackRange::boundary`]).
     pub boundary: Option<String>,
@@ -77,7 +80,8 @@ pub(crate) fn read(
     if range.shas.is_empty() {
         return None;
     }
-    let shas: HashSet<String> = range.shas.into_iter().collect();
+    let order = range.shas;
+    let shas: HashSet<String> = order.iter().cloned().collect();
     let mut tips: HashMap<String, Vec<String>> = HashMap::new();
     for b in &info.branches {
         if b.kind != BranchKind::Local || Some(b.full_name.as_str()) == current {
@@ -95,6 +99,7 @@ pub(crate) fn read(
         base_at_boundary: range.boundary.is_some() && base.tip == range.boundary,
         boundary: range.boundary,
         range: shas,
+        order,
         tips,
     })
 }

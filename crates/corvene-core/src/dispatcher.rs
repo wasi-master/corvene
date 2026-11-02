@@ -1406,7 +1406,8 @@ impl Dispatcher {
                 ),
                 (
                     s.flags.bool(crate::flags::ids::REMOTE_MANAGER),
-                    s.flags.bool(crate::flags::ids::STACKED_BRANCH_REFS),
+                    s.flags.bool(crate::flags::ids::STACKED_BRANCH_REFS)
+                        || s.flags.bool(crate::flags::ids::STACKED_PULL_REQUESTS),
                 ),
             )
         };

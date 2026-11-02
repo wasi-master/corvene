@@ -3106,6 +3106,25 @@ registry! {
         upstream: &[],
         code: &["crates/corvene-core/src/github_links.rs", "crates/corvene-ui/src/markdown.rs"],
     },
+    STACKED_PULL_REQUESTS = 356 "stacked-pull-requests" {
+        title: "Stacked pull requests",
+        summary: "Branch > Create Stacked Pull Requests… publishes the branches between the \
+                  default branch and HEAD and opens one pull request per branch, each based on \
+                  the branch below it. The pull request list, its quick view and the branch \
+                  badge show the position in the stack (2 of 3), found from the pull requests' \
+                  bases, so stacks made elsewhere show too. When a lower pull request merged, a \
+                  banner offers to retarget the next one and rebase the rest onto the default \
+                  branch with no merge commit. Branch > Push Stacked Branches pushes them all \
+                  with force with lease.",
+        ghd_behaviour: "Pull requests are made one at a time on GitHub's compare page, and \
+                        nothing knows about stacks.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22660)],
+        code: &["crates/corvene-core/src/stacked_prs.rs", "crates/corvene-ui/src/dialogs/create_stacked_pull_requests.rs", "crates/corvene-github/src/api.rs"],
+    },
 
     // ---- 400 Window & menus ----
 

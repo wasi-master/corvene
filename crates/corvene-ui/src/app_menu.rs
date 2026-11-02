@@ -161,6 +161,7 @@ pub struct MenuExtras {
     pub insights: bool,
     /// Flag `1218-compare-refs`: Branch › Compare….
     pub compare_refs: bool,
+    pub stacked_pull_requests: bool,
     /// Flag `1219-tag-manager`: Branch › Tags….
     pub tags: bool,
     /// Flag `1223-checkout-from-fork`: Branch › Check Out from Fork….
@@ -242,6 +243,7 @@ impl MenuExtras {
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
             insights: flags.bool(ids::REPOSITORY_INSIGHTS),
             compare_refs: flags.bool(ids::COMPARE_REFS),
+            stacked_pull_requests: flags.bool(ids::STACKED_PULL_REQUESTS),
             tags: flags.bool(ids::TAG_MANAGER),
             checkout_from_fork: flags.bool(ids::CHECKOUT_FROM_FORK),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
@@ -1062,6 +1064,22 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     if extras.compare_refs {
         branch.push(item(l("Compare…", "Comp&are…"), CompareRefs));
     }
+    // Corvene (`356-stacked-pull-requests`)
+    if extras.stacked_pull_requests {
+        branch.extend([
+            item(
+                l(
+                    "Create Stacked Pull Requests…",
+                    "Create stac&ked pull requests…",
+                ),
+                CreateStackedPullRequests,
+            ),
+            item(
+                l("Push Stacked Branches", "Push stacked branc&hes"),
+                PushStackedBranches,
+            ),
+        ]);
+    }
     branch.extend([
         item(
             l("Merge into Current Branch…", "&Merge into current branch…"),
@@ -1520,6 +1538,7 @@ mod tests {
                     recent_activity: true,
                     insights: true,
                     compare_refs: true,
+                    stacked_pull_requests: true,
                     tags: true,
                     checkout_from_fork: true,
                     clean_untracked: true,

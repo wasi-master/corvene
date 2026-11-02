@@ -1112,6 +1112,11 @@ impl Dispatcher {
             },
             move |result, cx| {
                 let fetched = result.is_ok();
+                // `356-stacked-pull-requests`: a lower pull request may have
+                // merged (the pull request cache refreshes at most every two minutes)
+                if fetched {
+                    Self::check_stack_base(id, cx);
+                }
                 Self::note_remote_not_found(id, result.as_ref().err(), cx);
                 if let Err(err) = result {
                     Self::handle_remote_error(

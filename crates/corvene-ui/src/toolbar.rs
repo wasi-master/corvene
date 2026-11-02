@@ -187,6 +187,8 @@ pub struct PrBadge {
     /// `None`: the current branch's own checks (`334-branch-ci-status`).
     /// `#12`, or `!12` on GitLab (flag `342-gitlab`).
     pub number: Option<String>,
+    /// `2 of 3` (`356-stacked-pull-requests`).
+    pub stack_position: Option<String>,
     /// On GitHub: the badge has GitHub's reviewer menu.
     pub github: bool,
     pub status: Option<(
@@ -318,6 +320,9 @@ pub fn toolbar_models(
     let pr_badge = current_pr
         .map(|pr| PrBadge {
             number: Some(pr.number_label()),
+            stack_position: repo
+                .and_then(|r| state.stack_position(r.id, pr))
+                .map(|p| p.label()),
             github: pr.host_kind() == corvene_core::HostKind::GitHub,
             status: state.commit_status_summary(pr),
             bounds: pr_badge_bounds.clone(),
@@ -328,6 +333,7 @@ pub fn toolbar_models(
             let status = repo.and_then(|r| state.branch_ci_summary(r.id))?;
             Some(PrBadge {
                 number: None,
+                stack_position: None,
                 github: false,
                 status: Some(status),
                 bounds: pr_badge_bounds.clone(),
@@ -1016,6 +1022,15 @@ pub fn toolbar_button(
                                 .text_size(FONT_SIZE_SM())
                                 .line_height(zpx(22.))
                                 .child(number),
+                        )
+                    })
+                    // `356-stacked-pull-requests`
+                    .when_some(badge.stack_position.clone(), |d, position| {
+                        d.child(
+                            div()
+                                .ml(SPACING_HALF())
+                                .text_size(FONT_SIZE_XS())
+                                .child(position),
                         )
                     })
                     .when_some(badge.status, |d, (status, conclusion)| {

@@ -153,6 +153,10 @@ gpui_kit::actions!(
         ShowInsights,
         // Branch › Compare… (`1218-compare-refs`)
         CompareRefs,
+        // Branch › Create Stacked Pull Requests…, Push Stacked Branches
+        // (`356-stacked-pull-requests`)
+        CreateStackedPullRequests,
+        PushStackedBranches,
         // Branch › Tags… (`1219-tag-manager`)
         ShowTags,
         // Branch › Check Out from Fork… (`1223-checkout-from-fork`)

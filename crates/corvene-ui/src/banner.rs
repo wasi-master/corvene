@@ -180,6 +180,34 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 .unwrap_or_else(|| "stash".to_string())),
         ],
         Banner::StashRestored => vec![t("Restored stash")],
+        // `356-stacked-pull-requests`
+        Banner::StackBaseMerged { branch, number, .. } => vec![
+            t(&format!("Pull request #{number} of\u{a0}")),
+            b(branch),
+            t("\u{a0}merged"),
+        ],
+        Banner::StackUpdated { .. } => vec![t("Moved the stack")],
+        Banner::StackPushing { done, total } => {
+            vec![t(&format!(
+                "Pushing the stack ({done} of {total} branches)"
+            ))]
+        }
+        Banner::StackPushed { total } => vec![t(&match total {
+            1 => "Pushed the branch".to_string(),
+            n => format!("Pushed {n} branches"),
+        })],
+        Banner::StackedPullRequestsCreated { created, updated } => {
+            let count = |n: usize| match n {
+                1 => "1 pull request".to_string(),
+                n => format!("{n} pull requests"),
+            };
+            vec![t(&match (created, updated) {
+                (0, 0) => "The pull requests are up to date".to_string(),
+                (n, 0) => format!("Created {}", count(*n)),
+                (0, n) => format!("Changed the base of {}", count(*n)),
+                (c, u) => format!("Created {} and changed the base of {u}", count(*c)),
+            })]
+        }
         Banner::SecurityKeyTouch { key, .. } => {
             vec![t(&format!("Touch your security key ({key}) to continue"))]
         }
@@ -482,14 +510,75 @@ pub fn banner_bar(
         | Banner::SuccessfulSquash { repo, .. }
         | Banner::SuccessfulReorder { repo, .. } => {
             let repo = *repo;
+            // `356-stacked-pull-requests`: the rewrite moved other branches
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let moved_stack = s
+                .flags
+                .bool(corvene_core::flags::ids::STACKED_PULL_REQUESTS)
+                && s.repo_states
+                    .get(&repo)
+                    .and_then(|r| r.mco_undo.as_ref())
+                    .is_some_and(|u| !u.moved_branches.is_empty());
             Some(
-                link_button("banner-undo", "Undo", cx)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(
+                        link_button("banner-undo", "Undo", cx)
+                            .when_some(first, |d, first| d.track_focus(first))
+                            .ml(SPACING_HALF())
+                            .on_click(move |_, _, cx| {
+                                Dispatcher::clear_banner(cx);
+                                Dispatcher::undo_mco(repo, cx);
+                            }),
+                    )
+                    .when(moved_stack, |d| {
+                        d.child(
+                            link_button("banner-push-stack", "Push Stack", cx)
+                                .ml(SPACING_HALF())
+                                .on_click(move |_, _, cx| {
+                                    Dispatcher::push_stacked_branches(repo, cx)
+                                }),
+                        )
+                    })
+                    .into_any_element(),
+            )
+        }
+        // `356-stacked-pull-requests`
+        Banner::StackBaseMerged {
+            repo,
+            branch,
+            old_base,
+            onto,
+            ..
+        } => {
+            let repo = *repo;
+            let (branch, old_base, onto) = (branch.clone(), old_base.clone(), onto.clone());
+            Some(
+                link_button("banner-update-stack", "Update Stack", cx)
                     .when_some(first, |d, first| d.track_focus(first))
                     .ml(SPACING_HALF())
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
-                        Dispatcher::undo_mco(repo, cx);
+                        Dispatcher::update_stack(
+                            repo,
+                            branch.clone(),
+                            old_base.clone(),
+                            onto.clone(),
+                            cx,
+                        );
                     })
+                    .into_any_element(),
+            )
+        }
+        Banner::StackUpdated { repo } => {
+            let repo = *repo;
+            Some(
+                link_button("banner-push-stack", "Push Stack", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| Dispatcher::push_stacked_branches(repo, cx))
                     .into_any_element(),
             )
         }

@@ -68,6 +68,34 @@ pub fn subtitle(pr: &PullRequest) -> String {
     }
 }
 
+/// `356-stacked-pull-requests`: the quick view's "Stack 2 of 3" with links to
+/// the pull requests below and above on GitHub.
+fn stack_links(stack: corvene_core::stacked_prs::StackPosition, cx: &App) -> Div {
+    let t = cx.ghd();
+    let link = |id: &'static str, word: &str, pr: PullRequest| {
+        crate::widgets::link_button(id, format!("{word} {}", pr.number_label()), cx)
+            .on_click(move |_, _, cx| Dispatcher::open_pull_request(&pr, cx))
+    };
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(SPACING())
+        .pb(SPACING())
+        .text_size(FONT_SIZE_SM())
+        .child(
+            div()
+                .text_color(t.text_secondary)
+                .child(format!("Stack {}", stack.label())),
+        )
+        .when_some(stack.below, |d, pr| {
+            d.child(link("quick-view-stack-below", "Below", pr))
+        })
+        .when_some(stack.above, |d, pr| {
+            d.child(link("quick-view-stack-above", "Above", pr))
+        })
+}
+
 /// The filter list matches the title or the subtitle (GHD `match` over
 /// `text: [pr.title, getSubtitle(pr)]`).
 pub fn matches_filter(pr: &PullRequest, query: &str) -> bool {
@@ -141,6 +169,10 @@ pub fn pull_request_row(
     } else {
         t.pr_open_icon
     };
+    // `356-stacked-pull-requests`
+    let stack_position = corvene_core::AppState::global(cx)
+        .read(cx)
+        .stack_position(id, pr);
     let pr_for_click = pr.clone();
     let pr_for_menu = pr.clone();
     let pr_for_review = pr.clone();
@@ -320,7 +352,12 @@ pub fn pull_request_row(
                         } else {
                             t.text_secondary
                         })
-                        .child(subtitle(pr)),
+                        .child(match stack_position.as_ref() {
+                            Some(position) => {
+                                format!("{} • {}", subtitle(pr), position.label())
+                            }
+                            None => subtitle(pr),
+                        }),
                 ),
         )
         .child(
@@ -389,6 +426,10 @@ pub fn quick_view(
         t.pr_open_icon
     };
     let pr_for_view = pr.clone();
+    let stack = {
+        let s = corvene_core::AppState::global(cx).read(cx);
+        s.selected.and_then(|id| s.stack_position(id, pr))
+    };
     let (border, background) = (t.box_border, t.background);
     // `301` / `302`: the "opened … by" line and the width rule
     let (show_opened_by, fixed_width) = {
@@ -553,6 +594,8 @@ pub fn quick_view(
                                         }),
                                 ),
                         )
+                        // `356-stacked-pull-requests`
+                        .when_some(stack, |d, stack| d.child(stack_links(stack, cx)))
                         .child(crate::markdown::markdown(
                             "quick-view-body",
                             body,

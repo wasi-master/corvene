@@ -734,6 +734,65 @@ pub fn rebase(
     result
 }
 
+/// Corvene (`356-stacked-pull-requests`): `git rebase --onto <onto> <upstream>
+/// <target> --update-refs`, for a stack whose lower branch landed: the commits
+/// of `upstream..target` move onto `onto`, and local branches among them move
+/// along.
+#[allow(clippy::too_many_arguments)]
+pub fn rebase_onto(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    onto: &str,
+    upstream: &str,
+    target_branch: &str,
+    commits: &[CommitOneLine],
+    keep_messages: bool,
+    mut on_progress: impl FnMut(McoProgress),
+) -> RebaseResult {
+    let result = GitCommand::new(git)
+        .args(cleanup_config(keep_messages))
+        .args([
+            "-c",
+            "rebase.backend=merge",
+            "rebase",
+            "--update-refs",
+            "--onto",
+            onto,
+            upstream,
+            target_branch,
+        ])
+        .env("GIT_EDITOR", ":")
+        .current_dir(workdir)
+        .run_streaming(|line| {
+            if let Some(p) = parse_rebase_progress(line, commits) {
+                on_progress(p);
+            }
+        });
+    let result = classify_rebase(workdir, result);
+    mark_kept_messages(workdir, keep_messages, &result);
+    result
+}
+
+/// Whether commit `ancestor` is in `descendant`'s history.
+pub fn is_ancestor(git: Arc<GitBinary>, workdir: &Path, ancestor: &str, descendant: &str) -> bool {
+    GitCommand::new(git)
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(workdir)
+        .run()
+        .is_ok()
+}
+
+/// The subject line of commit `rev`.
+pub fn commit_subject(git: Arc<GitBinary>, workdir: &Path, rev: &str) -> Result<String> {
+    Ok(GitCommand::new(git)
+        .args(["log", "-1", "--format=%s", rev])
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?
+        .trim()
+        .to_string())
+}
+
 /// GHD `abortRebase`
 pub fn abort_rebase(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
     GitCommand::new(git)
@@ -969,11 +1028,8 @@ pub fn rebase_interactive(
         return RebaseResult::Error("temporary todo path contains a quote".into());
     }
     if options.keep_untracked
-        && let Err(err) = crate::rewrite_untracked::set_aside_for_rewrite(
-            git.clone(),
-            workdir,
-            last_retained_ref,
-        )
+        && let Err(err) =
+            crate::rewrite_untracked::set_aside_for_rewrite(git.clone(), workdir, last_retained_ref)
     {
         return RebaseResult::Error(err.to_string());
     }
@@ -2002,6 +2058,69 @@ mod tests {
             binary_paths(git, path, "HEAD", &["a.txt".into(), "z.bin".into()]).unwrap(),
             ["new.bin", "z.bin", "a.txt"]
         );
+    }
+
+    #[test]
+    fn rebase_onto_moves_the_stack_past_a_squashed_branch() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        let file = |name: &str| {
+            std::fs::write(path.join(name), name).unwrap();
+            run(&["add", "."]);
+            run(&["commit", "-qm", name]);
+        };
+        run(&["checkout", "-qb", "low"]);
+        file("low.txt");
+        let old_base = |rev: &str| {
+            String::from_utf8(
+                std::process::Command::new("git")
+                    .args(["rev-parse", rev])
+                    .current_dir(path)
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim()
+            .to_string()
+        };
+        let merged = old_base("low");
+        run(&["checkout", "-qb", "middle"]);
+        file("middle.txt");
+        run(&["checkout", "-qb", "top"]);
+        file("top.txt");
+        // GitHub squashes `low` into the default branch
+        run(&["checkout", "-q", "main"]);
+        run(&["merge", "-q", "--squash", "low"]);
+        run(&["commit", "-qm", "low squashed"]);
+        run(&["checkout", "-q", "top"]);
+        let result = rebase_onto(
+            git.clone(),
+            path,
+            "main",
+            &merged,
+            "top",
+            &[],
+            false,
+            |_| {},
+        );
+        assert!(matches!(result, RebaseResult::CompletedWithoutError));
+        assert!(is_ancestor(git.clone(), path, "main", "top"));
+        // `middle` moved along, `low` stayed, and no merge commit came in
+        assert!(is_ancestor(git.clone(), path, "main", "middle"));
+        assert!(is_ancestor(git.clone(), path, "middle", "top"));
+        assert!(!is_ancestor(git.clone(), path, "low", "top"));
+        assert_eq!(commit_subject(git, path, "top").unwrap(), "top.txt");
     }
 
     #[test]

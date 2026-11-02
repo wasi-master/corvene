@@ -149,13 +149,16 @@ class Run:
         # `repo-utf16`: with an edited UTF-16 MQL5 file (`1306-utf16-diffs`)
         # `repo-stacked`: `stack/top` checked out on `stack/base` on main, no
         # working changes (`1221-stacked-branch-refs`)
+        # `repo-stack-remote`: `repo-stacked` with main pushed, the stack not
+        # (`356-stacked-pull-requests`)
         # `repo-forks`: `repo-remote` plus alice's and bob's forks beside it,
         # served by the stub API (`1223-checkout-from-fork`)
         # `repo-mismatch`: `repo-remote` with `issue-134` checked out off
         # main, tracking `origin/main` (`1222-push-target-guard`)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
                              "repo-reflog", "repo-tools", "repo-structure", "repo-remotes",
-                             "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks",
+                             "repo-pull-request", "repo-utf16", "repo-stacked", "repo-stack-remote",
+                             "repo-forks",
                              "repo-mismatch", "repo-codeowners", "repo-diff-marks",
                              "repo-pdf", "repo-images",
                              "repo-archives", "repo-documents", "repo-notebooks",
@@ -165,7 +168,9 @@ class Run:
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
-        remote = setup in ("repo-remote", "repo-remotes") or pull_request or forks or mismatch
+        stack_remote = setup == "repo-stack-remote"
+        remote = setup in ("repo-remote", "repo-remotes") or pull_request or forks or mismatch \
+            or stack_remote
         remotes = setup == "repo-remotes"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
@@ -174,7 +179,7 @@ class Run:
         tools = setup == "repo-tools"
         structure = setup == "repo-structure"
         utf16 = setup == "repo-utf16"
-        stacked = setup == "repo-stacked"
+        stacked = setup == "repo-stacked" or stack_remote
         # `repo-codeowners`: `.github/CODEOWNERS` committed (`1314-code-owners`)
         codeowners = setup == "repo-codeowners"
         # `repo-diff-marks`: moved and reformatted lines, a CSV, a mode-only
@@ -248,7 +253,8 @@ class Run:
         # `github: stub` step; with the pull request fixture it serves the
         # fixture branch as pull request #7
         self.stub = github_stub.start(repo_c if pull_request else None,
-                                      repo_c.parent if forks else None) if sc.get("github_stub") else None
+                                      repo_c.parent if forks else None,
+                                      repo_c if stack_remote else None) if sc.get("github_stub") else None
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))

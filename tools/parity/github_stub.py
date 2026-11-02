@@ -721,6 +721,12 @@ class _Handler(BaseHTTPRequestHandler):
                 if r["tag_name"] == tag:
                     return self._send(200, r)
             return self._send(404, {"message": "Not Found"})
+        # `356-stacked-pull-requests`
+        if self.server.stack_repo is not None and path == f"{repo}/pulls":
+            state, head = params.get("state", "open"), _unquote(params.get("head", ""))
+            return self._send(200, [p for p in reversed(self.server.stack_pulls)
+                                    if state in ("all", p["state"])
+                                    and head in ("", f"{OWNER}:{p['head']['ref']}")])
         pr = self.server.pull_request
         if pr is not None:
             if path == f"{repo}/pulls":
@@ -813,6 +819,8 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         self.server.posts.append((path, body))
         self.server.requests.append((self._login(), "POST", path))
+        if path == f"{repo}/pulls" and self.server.stack_repo is not None:
+            return self._send(201, self.server.create_stack_pull(body))
         if path == f"{repo}/issues":
             number = 101 + len(self.server.created_issues)
             issue = _issue(number, body.get("title", ""), "open", "2024-05-01T10:00:00Z",
@@ -904,6 +912,13 @@ def _patch(self):  # noqa: N802
     body = self._body()
     self.server.posts.append((f"PATCH {path}", body))
     self.server.requests.append((self._login(), "PATCH", path))
+    m = re.fullmatch(rf"{re.escape(repo)}/pulls/(\d+)", path)
+    pull = self.server.stack_pull(int(m[1])) if m else None
+    if pull is not None:
+        # `356-stacked-pull-requests`
+        pull["base"] = {**pull["base"], "ref": body["base"]}
+        pull["updated_at"] = "2024-05-03T10:00:00Z"
+        return self._send(200, pull)
     m = re.fullmatch(rf"{re.escape(repo)}/issues/(\d+)", path)
     issue = self.server.issue(int(m[1])) if m else None
     if issue is None:
@@ -1136,6 +1151,10 @@ class Stub(HTTPServer):
         self.not_modified = 0
         # `348-pull-request-review`: pull request #7 over the fixture
         self.pull_request = PullRequestFixture(repo) if repo else None
+        # `356-stacked-pull-requests`: the fixture whose pushed branches get
+        # pull requests, and the pull requests made
+        self.stack_repo: Path | None = None
+        self.stack_pulls: list[dict] = []
         # `354-pull-request-event-notifications`
         self.pr_events = PullRequestEvents()
         self.pr_events.base = f"http://127.0.0.1:{self.server_address[1]}"
@@ -1145,6 +1164,32 @@ class Stub(HTTPServer):
 
     def issue(self, number: int) -> dict | None:
         return next((i for i in self.created_issues + self.issues if i["number"] == number), None)
+
+    def stack_pull(self, number: int) -> dict | None:
+        return next((p for p in self.stack_pulls if p["number"] == number), None)
+
+    def create_stack_pull(self, body: dict) -> dict:
+        """`POST /pulls` over the fixture's pushed branches."""
+        clone_url = _git(self.stack_repo, "remote", "get-url", "origin")
+        repo = {"name": NAME, "owner": _user(OWNER), "html_url": WEB, "clone_url": clone_url,
+                "default_branch": "main", "private": False, "fork": False, "parent": None,
+                "node_id": "R_stub", "permissions": {"admin": True, "push": True, "pull": True}}
+        number = 21 + len(self.stack_pulls)
+        def side(ref: str) -> dict:
+            return {"ref": ref, "sha": _git(self.stack_repo, "rev-parse", f"origin/{ref}"), "repo": repo}
+        pull = {"number": number, "title": body["title"], "state": "open", "draft": body.get("draft", False),
+                "created_at": "2024-05-01T10:00:00Z", "updated_at": f"2024-05-01T10:00:{number:02}Z",
+                "user": _user(OWNER), "body": "", "head": side(body["head"]), "base": side(body["base"]),
+                "assignees": [], "requested_reviewers": [], "merged_at": None,
+                "html_url": f"{WEB}/pull/{number}"}
+        self.stack_pulls.append(pull)
+        return pull
+
+    def merge_stack_pull(self, number: int) -> None:
+        """As if pull request `number` merged on GitHub."""
+        pull = self.stack_pull(number)
+        pull["state"] = "closed"
+        pull["merged_at"] = pull["updated_at"] = "2024-05-02T10:00:00Z"
 
     def run(self, rid: int) -> dict | None:
         return next((r for r in self.runs if r["id"] == rid), None)
@@ -1170,8 +1215,11 @@ class Stub(HTTPServer):
         self.server_close()
 
 
-def start(repo: Path | None = None, forks_dir: Path | None = None) -> Stub:
-    return Stub(repo, forks_dir).start()
+def start(repo: Path | None = None, forks_dir: Path | None = None,
+          stack_repo: Path | None = None) -> Stub:
+    stub = Stub(repo, forks_dir)
+    stub.stack_repo = stack_repo
+    return stub.start()
 
 
 if __name__ == "__main__":

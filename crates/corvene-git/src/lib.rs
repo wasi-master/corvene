@@ -18,6 +18,7 @@ pub mod detect;
 pub mod diff;
 pub mod document_file;
 pub mod error;
+pub mod file_browser;
 pub mod font_file;
 pub mod git_errors;
 pub mod handle;
@@ -45,7 +46,6 @@ pub mod patch_import;
 pub mod paths;
 pub mod process;
 pub mod proxy;
-pub mod file_browser;
 pub mod rebase_ops;
 pub mod reflog;
 pub mod refs;
@@ -97,11 +97,12 @@ pub use branch_ops::{
 };
 pub use clean::{clean_dry_run, clean_paths, parse_clean_dry_run, unquote_c_path};
 pub use commit::{
-    CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
-    commit_with_terminal_output, delete_worktree_paths, discard_changes, discard_leftovers, DiscardLeftovers, format_message, head_sha,
-    hook_exists, large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha,
-    restore_mode_changes, set_assume_unchanged, stage_files, stage_files_with_progress,
-    staged_mode_changes, undo_last_commit, unstage_all,
+    CommitAuthor, CommitOptions, DiscardLeftovers, RECEIVE_LIMIT, add_paths,
+    assume_unchanged_paths, commit, commit_with_terminal_output, delete_worktree_paths,
+    discard_changes, discard_leftovers, format_message, head_sha, hook_exists, large_file_paths,
+    merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
+    set_assume_unchanged, stage_files, stage_files_with_progress, staged_mode_changes,
+    undo_last_commit, unstage_all,
 };
 pub use config::{
     IssueTracker, add_safe_directory, boolean_config_value, branch_merge_base,
@@ -187,13 +188,13 @@ pub use proxy::{
 pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot, UpdateRefs,
     abort_cherry_pick, abort_rebase, abort_squash_merge, autosquash, autosquash_pairs,
-    binary_paths, cherry_pick, cherry_pick_head_found, cherry_pick_snapshot, commits_between,
-    commits_in_range, conflict_marker_counts, continue_cherry_pick, continue_rebase,
-    continue_squash_rebase, create_merge_commit, determine_mergeability, fixup_todo,
-    merge_commits_exist_after, merge_head_set, merge_tree_conflicts, open_merge_tool,
-    parse_merge_tree_names, rebase, rebase_head_set, rebase_internal_state, rebase_snapshot,
-    reorder, restore_branch_tips, reword, reword_head, reword_todo, squash, squash_msg_set,
-    stage_manual_conflict_resolution, stash_tip, with_update_refs,
+    binary_paths, cherry_pick, cherry_pick_head_found, cherry_pick_snapshot, commit_subject,
+    commits_between, commits_in_range, conflict_marker_counts, continue_cherry_pick,
+    continue_rebase, continue_squash_rebase, create_merge_commit, determine_mergeability,
+    fixup_todo, is_ancestor, merge_commits_exist_after, merge_head_set, merge_tree_conflicts,
+    open_merge_tool, parse_merge_tree_names, rebase, rebase_head_set, rebase_internal_state,
+    rebase_onto, rebase_snapshot, reorder, restore_branch_tips, reword, reword_head, reword_todo,
+    squash, squash_msg_set, stage_manual_conflict_resolution, stash_tip, with_update_refs,
 };
 pub use reflog::{
     CommitKind, RebaseStep, ReflogAction, ReflogEntry, parse_action as parse_reflog_action,
@@ -201,7 +202,7 @@ pub use reflog::{
 };
 pub use refs::{delete_ref, format_as_local_ref, get_symbolic_ref};
 pub use remote_ops::{
-    set_ssh_prompt_server, with_signing_askpass, AskpassEnv, FastForward, FetchOptions, GitProgressEvent, ProgressLine, ProgressParser,
+    AskpassEnv, FastForward, FetchOptions, GitProgressEvent, ProgressLine, ProgressParser,
     PushProgress, PushSize, RemoteFailure, TrackingBranch, add_remote, classify_remote_failure,
     cloned_at, commits_not_on_remote, config_value, delete_remote_tag,
     fast_forward_branch_from_remote, fast_forward_branches, fast_forward_branches_with,
@@ -214,8 +215,9 @@ pub use remote_ops::{
     previous_tag, prune_remote, pull, pull_merge_started, pull_with_rebase, push, push_size,
     push_tag, push_with_progress, remote_branches_containing, remote_failure, remote_head_resolves,
     remote_name_is_valid, remote_read_failure_cause, remote_repository_missing, remove_remote,
-    rename_remote, set_remote_url, strip_vt_control_characters, track_in_lfs, update_remote_head,
-    update_submodules, upstream_tip_in_reflog,
+    rename_remote, set_remote_url, set_ssh_prompt_server, strip_vt_control_characters,
+    track_in_lfs, update_remote_head, update_submodules, upstream_tip_in_reflog,
+    with_signing_askpass,
 };
 pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,

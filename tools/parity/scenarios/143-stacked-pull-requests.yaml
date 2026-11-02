@@ -1,0 +1,26 @@
+# Corvene's stacked pull requests (flag 356-stacked-pull-requests, off in the
+# GitHub Desktop preset). GHD has no such surface, so the snaps are recorded,
+# not compared. The `repo-stack-remote` fixture has `stack/top` checked out on
+# `stack/base`, with main pushed and the stack not; the stub GitHub API serves
+# what Create makes.
+name: stacked-pull-requests
+description: Branch › Create Stacked Pull Requests…, the pull requests made, their positions in the list and the badge
+setup: repo-stack-remote
+github_stub: true
+corvene_flags: 356-stacked-pull-requests=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 1500
+  - ghd: {skip: true}
+    corvene: {action: "corvene::CreateStackedPullRequests"}
+    wait: 800
+  - snap: {name: dialog, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [892, 508]}
+    wait: 4000
+  - snap: {name: created, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowPullRequestsList"}
+    wait: 1200
+  - snap: {name: positions, corvene_only: true}

@@ -624,6 +624,24 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("op", format!("{op:?}")).list("branches", branches);
         }
+        // `1116-ssh-prompts`: the Android port runs no ssh
+        Popup::AddSshHost { request, info: _ } => {
+            f.put("request", *request);
+        }
+        Popup::SshSecret {
+            request,
+            kind: _,
+            subject,
+            wrong,
+        } => {
+            f.put("request", *request)
+                .put("subject", subject)
+                .put("wrong", *wrong);
+        }
+        // `356-stacked-pull-requests`
+        Popup::CreateStackedPullRequests { repo: r } => {
+            repo = Some(*r);
+        }
         Popup::Preferences { tab } => {
             f.put("tab", format!("{tab:?}"));
         }
@@ -886,6 +904,13 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
             f.put("sha", sha).put("message", message);
         }
         Banner::StashRestored | Banner::SecurityKeyTouch { .. } => {}
+        // `356-stacked-pull-requests`
+        Banner::StackBaseMerged { repo: r, .. } | Banner::StackUpdated { repo: r } => {
+            repo = Some(*r);
+        }
+        Banner::StackPushing { .. }
+        | Banner::StackPushed { .. }
+        | Banner::StackedPullRequestsCreated { .. } => {}
         Banner::StashFileDiscarded {
             repo: r,
             path,

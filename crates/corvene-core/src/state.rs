@@ -787,6 +787,11 @@ pub enum Popup {
         update_refs: corvene_git::UpdateRefs,
         op: crate::stacked_refs::StackedOp,
     },
+    /// Corvene `356-stacked-pull-requests`: Branch › Create Stacked Pull
+    /// Requests…
+    CreateStackedPullRequests {
+        repo: u64,
+    },
     /// `Preferences` (Settings…), opened on a tab.
     Preferences {
         tab: PreferencesTab,
@@ -922,6 +927,7 @@ impl Popup {
             | Self::GenericGitAuthentication { repo, .. }
             | Self::SquashCommitMessage { repo, .. }
             | Self::WarnStackedBranches { repo, .. }
+            | Self::CreateStackedPullRequests { repo }
             | Self::RepositorySettings { repo, .. }
             | Self::ConfirmRemoveRepository { repo, .. }
             | Self::MoveToSharedStorage { repo, .. }
@@ -1545,6 +1551,9 @@ pub struct RepositoryState {
     /// summary's counts; everything else dims.
     pub highlighted_shas: Vec<String>,
     pub mco_undo: Option<crate::mco::McoUndo>,
+    /// Corvene (`356-stacked-pull-requests`): the merged commit the last
+    /// Update Stack offer was about (the offer comes once per session).
+    pub stack_base_offered: Option<String>,
     /// Flag `828`: the message of a squash that failed, keyed by its commits
     /// (onto, then the squashed ones), offered again by the next squash of them.
     pub squash_draft: Option<(Vec<String>, String)>,
