@@ -21,6 +21,8 @@ use crate::widgets::{GhdTooltip, button, button_disabled, primary_button, small_
 const RIBBON_GUTTER_WIDTH: f32 = 42.;
 /// The overview ruler's width.
 const RULER_WIDTH: f32 = 12.;
+/// Under this pane width the accept bar shortens its longest labels.
+const NARROW_BAR_WIDTH: f32 = 360.;
 /// A pane header's height.
 const HEADER_HEIGHT: f32 = 24.;
 
@@ -331,6 +333,7 @@ impl MergeEditorView {
             return Vec::new();
         };
         let stacked = layout == MergeEditorLayout::Stacked;
+        let narrow = file.pane(PaneId::Result).body.get().size.width < zpx(NARROW_BAR_WIDTH);
         let mut bars = Vec::new();
         for (chunk, live) in file.doc.chunks.iter().zip(&file.live.chunks) {
             if chunk.kind != ChunkKind::Conflict {
@@ -378,11 +381,21 @@ impl MergeEditorView {
                         cx,
                     ))
                     .child(action("Both", "both", Resolution::OursThenTheirs, cx))
-                    .child(action("Both ↑", "both-rev", Resolution::TheirsThenOurs, cx));
+                    .child(action(
+                        if narrow { "⇅" } else { "Both ↑" },
+                        "both-rev",
+                        Resolution::TheirsThenOurs,
+                        cx,
+                    ));
                 if file.doc.has_base {
                     bar = bar.child(action("Base", "base", Resolution::Base, cx));
                 }
-                bar = bar.child(action("Ignore", "ignore", Resolution::Ignore, cx));
+                bar = bar.child(action(
+                    if narrow { "✕" } else { "Ignore" },
+                    "ignore",
+                    Resolution::Ignore,
+                    cx,
+                ));
                 if let Some(auto) = &chunk.auto {
                     bar = bar.child(action("Auto", "auto", auto.resolution, cx));
                 }

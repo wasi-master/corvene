@@ -7,9 +7,9 @@ setup: repo-conflicts
 corvene_flags: 1361-merge-editor=on
 steps:
   - ghd: {skip: true}
-    corvene: {click: {text: "Resolve", within: "dialog"}}
+    corvene: {click: [747, 456]}
     wait: 1000
   - ghd: {skip: true}
-    corvene: {click: {text: "Stacked"}}
+    corvene: {click: [1083, 131]}
     wait: 600
   - snap: {name: stacked, corvene_only: true}

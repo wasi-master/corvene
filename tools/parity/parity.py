@@ -274,7 +274,9 @@ class Run:
 
             def setup_ghd():
                 ghd.configure(cfg["width"], page_height(cfg["height"]), cv.scale, ls, freeze=not self.args.no_freeze)
-                if repo_g and not ghd.add_repository(repo_g):
+                # `repo-conflicts`: GHD's conflicts dialog covers what
+                # `add_repository` looks for; its snaps are Corvene only anyway
+                if repo_g and not ghd.add_repository(repo_g) and setup != "repo-conflicts":
                     raise RuntimeError("GHD: could not add the fixture repository")
                 time.sleep(1.2)
 

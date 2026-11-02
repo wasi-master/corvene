@@ -7,10 +7,10 @@ setup: repo-conflicts
 corvene_flags: 1361-merge-editor=on
 steps:
   - ghd: {skip: true}
-    corvene: {click: {text: "Resolve", within: "dialog"}}
+    corvene: {click: [747, 456]}
     wait: 1000
   - snap: {name: three-pane, corvene_only: true, note: "ribbons, accept bars and the ruler"}
   - ghd: {skip: true}
-    corvene: {click: {text: "Base"}}
+    corvene: {click: [1133, 131]}
     wait: 600
   - snap: {name: with-base, corvene_only: true}

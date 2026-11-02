@@ -2,8 +2,12 @@
 # deviations.md > Diff viewer). GHD says the file must be resolved via the
 # command line.
 name: conflicts-dialog-resolve
-description: The dialog with a Resolve button on the text conflict
+description: The dialog with a Resolve button on the text conflict, and the side picker behind it
 setup: repo-conflicts
 corvene_flags: 1361-merge-editor=on
 steps:
   - snap: {name: dialog, corvene_only: true, note: "a Resolve button beside Open in editor"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 800
+  - snap: {name: side-picker, corvene_only: true, note: "the binary conflict selected"}
