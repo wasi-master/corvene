@@ -32,6 +32,9 @@ pub struct BlameOptions {
     /// Pass `.git-blame-ignore-revs` when it exists and the configuration
     /// names no `blame.ignoreRevsFile`.
     pub ignore_revs_file: bool,
+    /// `-L <first>,<last>`: only these lines, 1-based and inclusive
+    /// (Corvene `1361-merge-editor`'s chunk blame).
+    pub line_range: Option<(u32, u32)>,
 }
 
 impl Default for BlameOptions {
@@ -41,6 +44,7 @@ impl Default for BlameOptions {
             detect_moves: false,
             detect_copies: false,
             ignore_revs_file: true,
+            line_range: None,
         }
     }
 }
@@ -208,6 +212,9 @@ pub fn blame(
         && !configures_ignore_revs_file(workdir)
     {
         cmd = cmd.args(["--ignore-revs-file", IGNORE_REVS_FILE]);
+    }
+    if let Some((first, last)) = options.line_range {
+        cmd = cmd.args(["-L".to_string(), format!("{first},{last}")]);
     }
     if let Some(rev) = rev {
         cmd = cmd.arg(rev);

@@ -36,6 +36,7 @@ pub mod log;
 mod log_gix;
 pub mod markdown_file;
 pub mod media_file;
+pub mod merge_file;
 pub mod notebook_file;
 pub mod ops;
 pub mod partial_stash;

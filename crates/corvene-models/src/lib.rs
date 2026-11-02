@@ -1042,6 +1042,18 @@ pub enum ManualConflictResolution {
     Theirs,
 }
 
+/// Corvene `1361-merge-editor`: one index entry of a conflicted path, an
+/// `ls-files -u` record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnmergedEntry {
+    /// 1 the merge base, 2 ours, 3 theirs.
+    pub stage: u8,
+    /// Octal file mode (`100644`, `100755`, `120000`, `160000`).
+    pub mode: String,
+    pub oid: String,
+    pub path: String,
+}
+
 /// GHD `CommitOneLine`
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitOneLine {

@@ -668,15 +668,38 @@ pub fn unmerged_paths(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<String>
 /// `ls-files -u -z` records: `<mode> <sha> <stage>\t<path>` NUL.
 pub fn parse_unmerged_paths(stdout: &[u8]) -> Vec<String> {
     let mut paths: Vec<String> = Vec::new();
-    for record in stdout.split(|b| *b == 0) {
-        let record = String::from_utf8_lossy(record);
-        if let Some((_, path)) = record.split_once('\t')
-            && paths.last().map(String::as_str) != Some(path)
-        {
-            paths.push(path.to_string());
+    for entry in parse_unmerged_entries(stdout) {
+        if paths.last() != Some(&entry.path) {
+            paths.push(entry.path);
         }
     }
     paths
+}
+
+/// `ls-files -u -z` records with their stages (Corvene `1361-merge-editor`).
+pub fn parse_unmerged_entries(stdout: &[u8]) -> Vec<corvene_models::UnmergedEntry> {
+    let mut entries = Vec::new();
+    for record in stdout.split(|b| *b == 0) {
+        let record = String::from_utf8_lossy(record);
+        let Some((head, path)) = record.split_once('\t') else {
+            continue;
+        };
+        let mut fields = head.split(' ');
+        let (Some(mode), Some(oid), Some(stage)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let Ok(stage) = stage.parse::<u8>() else {
+            continue;
+        };
+        entries.push(corvene_models::UnmergedEntry {
+            stage,
+            mode: mode.to_string(),
+            oid: oid.to_string(),
+            path: path.to_string(),
+        });
+    }
+    entries
 }
 
 /// `774-stash-conflict-flow` › Mark as Resolved: `git reset -q -- <paths>`.

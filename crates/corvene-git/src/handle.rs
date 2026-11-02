@@ -98,6 +98,15 @@ pub fn blob_bytes(workdir: &Path, rev: &str, path: &str) -> Option<Vec<u8>> {
     (object.kind == gix::object::Kind::Blob).then(|| object.detach().data)
 }
 
+/// An object's bytes by id, read in-process; `None` when gitoxide cannot
+/// find it (Corvene `1361-merge-editor` reads conflict stages this way).
+pub fn object_bytes(workdir: &Path, oid: &str) -> Option<Vec<u8>> {
+    let repo = open(workdir).ok()?;
+    let id = gix::ObjectId::from_hex(oid.as_bytes()).ok()?;
+    let object = repo.find_object(id).ok()?;
+    (object.kind == gix::object::Kind::Blob).then(|| object.detach().data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
