@@ -1,0 +1,9 @@
+# The conflicts dialog's Resolve button (1361-merge-editor, Corvene only, off in the GitHub Desktop preset;
+# deviations.md > Diff viewer). GHD says the file must be resolved via the
+# command line.
+name: conflicts-dialog-resolve
+description: The dialog with a Resolve button on the text conflict
+setup: repo-conflicts
+corvene_flags: 1361-merge-editor=on
+steps:
+  - snap: {name: dialog, corvene_only: true, note: "a Resolve button beside Open in editor"}

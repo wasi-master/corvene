@@ -15,6 +15,7 @@ corvene-hosts.workspace = true
 corvene-models.workspace = true
 # `1335-video-diff` / `1336-audio-diff`
 corvene-media.workspace = true
+corvene-merge.workspace = true
 corvene-platform.workspace = true
 corvene-store.workspace = true
 gpui-kit = { workspace = true, default-features = false, optional = true }

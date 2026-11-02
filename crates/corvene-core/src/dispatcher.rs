@@ -2079,6 +2079,8 @@ impl Dispatcher {
                 }
                 // `1311-stacked-diff`: the stacked files' diffs too
                 Self::refresh_stacked_working(id, cx);
+                // `1361-merge-editor`
+                Self::merge_editors_after_refresh(id, cx);
                 // `1328-archive-entries-in-file-list`
                 Self::refresh_archive_listings(id, cx);
                 // GHD `GitStore.loadFilesForCurrentStashEntry`, run with every

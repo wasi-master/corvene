@@ -1,0 +1,15 @@
+# The merge editor's stacked layout (1361-merge-editor, Corvene only, off in the GitHub Desktop preset;
+# deviations.md > Diff viewer). GHD says the file must be resolved via the
+# command line.
+name: merge-editor-stacked
+description: Current and Incoming above the Result
+setup: repo-conflicts
+corvene_flags: 1361-merge-editor=on
+steps:
+  - ghd: {skip: true}
+    corvene: {click: {text: "Resolve", within: "dialog"}}
+    wait: 1000
+  - ghd: {skip: true}
+    corvene: {click: {text: "Stacked"}}
+    wait: 600
+  - snap: {name: stacked, corvene_only: true}

@@ -13,6 +13,7 @@ corvene-extensions.workspace = true
 corvene-fonts.workspace = true
 corvene-math.workspace = true
 corvene-highlight.workspace = true
+corvene-merge.workspace = true
 corvene-packs.workspace = true
 corvene-git.workspace = true
 corvene-github.workspace = true

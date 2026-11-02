@@ -99,6 +99,16 @@ pub fn stash_conflicts_block(state: &Entity<AppState>, cx: &App) -> Option<AnyEl
                 crate::native_menu::show_context_menu(items, position, window, cx);
             }
         };
+        // `1361-merge-editor`
+        let merge_editor = corvene_core::merge_editor::enabled(state.read(cx)).then(|| {
+            let path = path.clone();
+            small_button(
+                SharedString::from(format!("stash-conflict-merge-{path}")),
+                "Resolve",
+                cx,
+            )
+            .on_click(move |_, _, cx| Dispatcher::resolve_in_app(id, path.clone(), cx))
+        });
         let resolve_id = SharedString::from(format!("stash-conflict-resolve-{path}"));
         let resolve_label = mac_or("Mark as Resolved", "Mark as resolved");
         let resolve = if resolvable {
@@ -128,7 +138,8 @@ pub fn stash_conflicts_block(state: &Entity<AppState>, cx: &App) -> Option<AnyEl
                     .items_center()
                     .gap(SPACING_HALF())
                     .child(octicon(Octicon::FileCode, t.text))
-                    .child(div().flex_1().min_w_0().truncate().child(path.clone())),
+                    .child(div().flex_1().min_w_0().truncate().child(path.clone()))
+                    .children(merge_editor),
             )
             .child(
                 div()

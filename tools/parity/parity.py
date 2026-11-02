@@ -160,7 +160,7 @@ class Run:
                              "repo-pdf", "repo-images",
                              "repo-archives", "repo-documents", "repo-notebooks",
                              "repo-markdown", "repo-media", "repo-inspect", "repo-converted",
-                             "repo-markdown-edits", "repo-page-strip",
+                             "repo-markdown-edits", "repo-page-strip", "repo-conflicts",
                              "repo-compiled")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
@@ -200,6 +200,9 @@ class Run:
         # `repo-markdown-edits`: a guide edited inside its alert, quote,
         # details, list item and long paragraph (`1334-markdown-preview-diff`)
         markdown_edits = setup == "repo-markdown-edits"
+        # `repo-conflicts`: a merge stopped on text, binary and delete/modify
+        # conflicts (`1361-merge-editor`)
+        conflicts = setup == "repo-conflicts"
         # `repo-media`: an edited video, WAVE tone and AAC song
         # (`1335-video-diff`, `1336-audio-diff`)
         media = setup == "repo-media"
@@ -225,14 +228,14 @@ class Run:
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
-                               converted=converted, markdown_edits=markdown_edits,
+                               converted=converted, markdown_edits=markdown_edits, conflicts=conflicts,
                                page_strip=page_strip, compiled=compiled) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks, pdf, images=images, archives=archives,
                                documents=documents, notebooks=notebooks,
                                markdown=markdown, media=media, inspect=inspect,
-                               converted=converted, markdown_edits=markdown_edits,
+                               converted=converted, markdown_edits=markdown_edits, conflicts=conflicts,
                                page_strip=page_strip, compiled=compiled) if with_repo else None
         # `tags: {name: rev}`: lightweight tags added to both fixtures before
         # either app opens them

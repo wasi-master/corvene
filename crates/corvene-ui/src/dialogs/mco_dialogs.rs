@@ -1087,6 +1087,10 @@ fn unmerged_file_row(
     let path = file.path.clone();
     let status = file.status.clone();
     let unresolved = status.has_unresolved_conflicts(resolution);
+    let merge_editor = corvene_core::AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::MERGE_EDITOR);
     let full_path = workdir.map(|w| w.join(&file.path));
     let resolution_items = || -> Vec<MenuItem> {
         let (p1, p2) = (path.clone(), path.clone());
@@ -1165,6 +1169,7 @@ fn unmerged_file_row(
             let items = resolution_items();
             let menu_path = full_path.clone();
             let rel_path = file.path.clone();
+            let resolve_path = file.path.clone();
             row.child(
                 path_text.child(
                     div()
@@ -1182,6 +1187,20 @@ fn unmerged_file_row(
                     .flex()
                     .flex_row()
                     .flex_none()
+                    // `1361-merge-editor`
+                    .when(merge_editor, |d| {
+                        d.child(
+                            button(
+                                SharedString::from(format!("resolve-in-app-{}", file.path)),
+                                "Resolve",
+                                cx,
+                            )
+                            .mr(SPACING_HALF())
+                            .on_click(move |_, _, cx| {
+                                Dispatcher::resolve_in_app(repo, resolve_path.clone(), cx)
+                            }),
+                        )
+                    })
                     .child(
                         button(
                             SharedString::from(format!("open-editor-{}", file.path)),

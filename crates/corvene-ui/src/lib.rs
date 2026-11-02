@@ -55,6 +55,7 @@ pub mod link_menu;
 pub mod markdown;
 pub mod markdown_editor;
 pub mod math;
+pub mod merge_editor;
 pub mod media_diff;
 #[cfg(not(target_os = "macos"))]
 pub mod menu_bar;

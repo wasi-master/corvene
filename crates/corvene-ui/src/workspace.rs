@@ -95,6 +95,7 @@ pub struct Workspace {
     stash_view: Entity<StashDiffViewer>,
     /// `798-blame`: shown in place of the diff while a blame is open.
     blame_view: Entity<crate::blame_view::BlameView>,
+    merge_editor: Entity<crate::merge_editor::MergeEditorView>,
     /// `345-issues` / `346-releases`: shown in place of the commit view
     /// while those lists are open.
     issue_view: Entity<crate::issue_view::IssueView>,
@@ -283,6 +284,8 @@ impl Workspace {
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
         let stash_view = cx.new(|cx| StashDiffViewer::new(state.clone(), cx));
         let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
+        let merge_editor =
+            cx.new(|cx| crate::merge_editor::MergeEditorView::new(state.clone(), cx));
         let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), window, cx));
         let review_view = cx.new(|cx| {
             crate::pull_request_review_view::PullRequestReviewView::new(state.clone(), cx)
@@ -336,6 +339,7 @@ impl Workspace {
             selected_commit,
             stash_view,
             blame_view,
+            merge_editor,
             issue_view,
             review_view,
             release_view,
@@ -732,6 +736,15 @@ impl Workspace {
             }
             Section::Changes if multi_selected > 1 => {
                 crate::no_changes::multiple_selection(multi_selected, cx).into_any_element()
+            }
+            // `1361-merge-editor`: a conflicted file opens in the merge editor
+            Section::Changes
+                if selected_change
+                    .as_ref()
+                    .is_some_and(|f| f.status.is_conflicted())
+                    && corvene_core::merge_editor::enabled(state) =>
+            {
+                self.merge_editor.clone().into_any_element()
             }
             Section::Changes if selected_change.is_some() => {
                 let file = selected_change.unwrap();

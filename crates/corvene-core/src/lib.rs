@@ -83,6 +83,7 @@ pub mod markdown_filters;
 pub mod markdown_images;
 pub mod mco;
 pub mod media;
+pub mod merge_editor;
 pub mod menu_bar_status;
 pub mod menu_state;
 pub mod navigation;

@@ -247,6 +247,27 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("home", SelectFirstFile, Some("ChangesList")),
         KeyBinding::new("end", SelectLastFile, Some("ChangesList")),
         KeyBinding::new("space", ToggleIncludeSelected, Some("ChangesList")),
+        // `1361-merge-editor`
+        KeyBinding::new("f7", MergeNextConflict, Some("MergeEditor")),
+        KeyBinding::new("shift-f7", MergePreviousConflict, Some("MergeEditor")),
+        KeyBinding::new("alt-secondary-left", MergeAcceptOurs, Some("MergeEditor")),
+        KeyBinding::new(
+            "alt-secondary-right",
+            MergeAcceptTheirs,
+            Some("MergeEditor"),
+        ),
+        // over the editor's own AddCursorBelow
+        KeyBinding::new(
+            "alt-secondary-down",
+            MergeAcceptBoth,
+            Some("MergeEditor > Input"),
+        ),
+        KeyBinding::new(
+            "alt-secondary-backspace",
+            MergeIgnoreConflict,
+            Some("MergeEditor"),
+        ),
+        KeyBinding::new("secondary-s", MergeSave, Some("MergeEditor")),
         KeyBinding::new("down", SelectNextFile, Some("HistoryList")),
         KeyBinding::new("up", SelectPreviousFile, Some("HistoryList")),
         KeyBinding::new("shift-down", ExtendSelectionDown, Some("HistoryList")),
@@ -277,10 +298,18 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("backspace", ArchiveUp, Some("ArchiveEntryList")),
         // `1359-page-strip`: a page diff's thumbnail strip, an EPUB's chapter list
         KeyBinding::new("down", SelectNextFile, Some(crate::page_strip::KEY_CONTEXT)),
-        KeyBinding::new("up", SelectPreviousFile, Some(crate::page_strip::KEY_CONTEXT)),
+        KeyBinding::new(
+            "up",
+            SelectPreviousFile,
+            Some(crate::page_strip::KEY_CONTEXT),
+        ),
         list_end_binding(true, crate::page_strip::KEY_CONTEXT),
         list_end_binding(false, crate::page_strip::KEY_CONTEXT),
-        KeyBinding::new("home", SelectFirstFile, Some(crate::page_strip::KEY_CONTEXT)),
+        KeyBinding::new(
+            "home",
+            SelectFirstFile,
+            Some(crate::page_strip::KEY_CONTEXT),
+        ),
         KeyBinding::new("end", SelectLastFile, Some(crate::page_strip::KEY_CONTEXT)),
         // `1335-video-diff` / `1336-audio-diff`: a focused media diff
         KeyBinding::new(

@@ -630,6 +630,11 @@ fn predicate(until: &str, cx: &mut App) -> Result<bool, String> {
                     .as_deref()
                     .is_some_and(|st| st.files.len() == arg.parse::<usize>().unwrap_or(0))
         }
+        // `1361-merge-editor`: the file is open in the merge editor
+        "merge" => rs
+            .merge_editors
+            .get(arg)
+            .is_some_and(|session| !session.loading),
         // `1311-stacked-diff`: at least N files' diffs of the stack have loaded
         "stacked" => rs.stacked.entries.len() >= arg.parse().unwrap_or(1),
         other => return Err(format!("unknown predicate {other:?}")),

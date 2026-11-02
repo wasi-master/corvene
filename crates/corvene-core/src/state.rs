@@ -1615,6 +1615,10 @@ pub struct RepositoryState {
     /// `<stash>^:<old path>`, for highlighting.
     pub stash_diff_old_contents: Option<Arc<Vec<String>>>,
 
+    // ---- `1361-merge-editor` ----
+    /// Conflicted files open in the merge editor, by path.
+    pub merge_editors: std::collections::BTreeMap<String, crate::merge_editor::MergeSession>,
+
     // ---- `798-blame` ----
     /// The open Blame view, shown in place of the diff.
     pub blame: Option<crate::blame::BlameState>,

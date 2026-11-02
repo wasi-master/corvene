@@ -1,0 +1,16 @@
+# The merge editor side by side (1361-merge-editor, Corvene only, off in the GitHub Desktop preset;
+# deviations.md > Diff viewer). GHD says the file must be resolved via the
+# command line.
+name: merge-editor-three-pane
+description: Ours, Result and Theirs for a merge stopped on a text conflict, then with the Base column
+setup: repo-conflicts
+corvene_flags: 1361-merge-editor=on
+steps:
+  - ghd: {skip: true}
+    corvene: {click: {text: "Resolve", within: "dialog"}}
+    wait: 1000
+  - snap: {name: three-pane, corvene_only: true, note: "ribbons, accept bars and the ruler"}
+  - ghd: {skip: true}
+    corvene: {click: {text: "Base"}}
+    wait: 600
+  - snap: {name: with-base, corvene_only: true}

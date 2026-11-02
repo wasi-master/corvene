@@ -1473,6 +1473,41 @@ Install the tap after the basin.
                           "Line 24 of the long paragraph (edited) now says")
 
 
+# `repo-conflicts` (`1361-merge-editor`): a merge that stops with a text
+# conflict in `src/conflict.rs` (one conflict the wand can merge, one it
+# cannot, changes around them on each side), a binary conflict and a
+# delete/modify conflict.
+def _conflicts(repo: Path) -> None:
+    src = repo / "src"
+    src.mkdir(exist_ok=True)
+    lines = [f"fn line_{i}() -> u32 {{ {i} }}" for i in range(40)]
+    def write(edits: dict) -> None:
+        shown = [edits.get(i, line) for i, line in enumerate(lines)]
+        (src / "conflict.rs").write_text("\n".join(shown) + "\n")
+    write({})
+    (repo / "logo.bin").write_bytes(b"\0base")
+    (repo / "notes.txt").write_text("kept on main\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "Add the files that conflict")
+    _git(repo, "checkout", "-q", "-b", "feature/conflicts")
+    write({6: "fn line_6() -> u32 { 1000 } // theirs", 7: "fn theirs_only() {}",
+           20: "fn line_20() -> u32 {  20 }", 34: "fn theirs_edit() {}"})
+    (repo / "logo.bin").write_bytes(b"\0theirs")
+    (repo / "notes.txt").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Change them on the branch")
+    _git(repo, "checkout", "-q", "main")
+    write({6: "fn line_6() -> u32 { 2000 } // ours", 20: "fn line_20() -> u32 { 20  }",
+           28: "fn ours_edit() {}"})
+    (repo / "logo.bin").write_bytes(b"\0ours")
+    (repo / "notes.txt").write_text("changed on main\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Change them on main")
+    # conflicts are the point: git exits 1
+    subprocess.run(["git", "merge", "--no-edit", "feature/conflicts"], cwd=repo,
+                   capture_output=True, check=False)
+
+
 def _markdown_edits(repo: Path) -> None:
     (repo / "guide.md").write_text(_GUIDE)
     _git(repo, "add", "-A")
@@ -1843,7 +1878,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           diff_marks: bool = False, pdf: bool = False, *, images: bool = False, archives: bool = False,
           documents: bool = False, notebooks: bool = False, markdown: bool = False,
           media: bool = False, inspect: bool = False, converted: bool = False,
-          markdown_edits: bool = False, page_strip: bool = False,
+          markdown_edits: bool = False, page_strip: bool = False, conflicts: bool = False,
           compiled: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
@@ -2024,6 +2059,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         return repo
     if markdown_edits:
         _markdown_edits(repo)
+        return repo
+    if conflicts:
+        _conflicts(repo)
         return repo
     if inspect:
         _inspect(repo)

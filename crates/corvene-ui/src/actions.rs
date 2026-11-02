@@ -3,6 +3,15 @@
 gpui_kit::actions!(
     corvene,
     [
+        // `1361-merge-editor`
+        MergeNextConflict,
+        MergePreviousConflict,
+        MergeAcceptOurs,
+        MergeAcceptTheirs,
+        MergeAcceptBoth,
+        MergeIgnoreConflict,
+        MergeMarkResolved,
+        MergeSave,
         // Lists (arrow keys while the changes list has focus)
         SelectNextFile,
         SelectPreviousFile,
