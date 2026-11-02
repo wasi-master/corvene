@@ -342,7 +342,7 @@ mod tests {
             classify("a.bin", vec![1, 0, 2], true),
             BrowseContent::Binary
         ));
-        let BrowseContent::Text { lines, edit } = classify("a.txt", b"x\r\ny\n".to_vec(), true)
+        let BrowseContent::Text { lines, edit } = classify("a.txt", b"x\r\ny\r\n".to_vec(), true)
         else {
             panic!("text expected");
         };
