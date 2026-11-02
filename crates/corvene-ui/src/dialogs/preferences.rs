@@ -2694,7 +2694,8 @@ impl PreferencesDialog {
                 corvene_core::offered_packs(flags),
                 flags.bool(ids::DEFAULT_CLONE_LOCATION),
                 flags.bool(ids::SETTINGS_FILE),
-                cfg!(target_os = "macos") && flags.bool(ids::MENU_BAR_STATUS_ITEM),
+                cfg!(target_os = "macos")
+                    && (flags.bool(ids::MENU_BAR_STATUS_ITEM) || flags.bool(ids::MACOS_WIDGETS)),
                 flags.bool(ids::PROXY_CREDENTIALS),
                 flags.bool(ids::STACKED_DIFF),
             )

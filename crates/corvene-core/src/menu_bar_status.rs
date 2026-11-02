@@ -272,8 +272,15 @@ impl AppState {
         if !self.menu_bar_enabled() {
             return None;
         }
-        let repos = self
-            .watched_repositories()
+        Some(MenuBarModel {
+            repos: self.watched_repositories_model(),
+        })
+    }
+
+    /// The watched repositories as the status item and the widgets
+    /// (`433-macos-widgets`) show them.
+    pub fn watched_repositories_model(&self) -> Vec<MenuBarRepo> {
+        self.watched_repositories()
             .into_iter()
             .filter_map(|id| {
                 let repo = self.repository(id)?;
@@ -304,8 +311,7 @@ impl AppState {
                     checks,
                 })
             })
-            .collect();
-        Some(MenuBarModel { repos })
+            .collect()
     }
 }
 
@@ -334,7 +340,7 @@ impl Dispatcher {
     pub fn touch_menu_bar_statuses(cx: &mut dyn Host) {
         let refs: Vec<(GitHubRepository, String)> = {
             let s = Self::state(cx).read(cx);
-            if !s.menu_bar_enabled() {
+            if !s.menu_bar_enabled() && !s.widgets_enabled() {
                 return;
             }
             s.watched_repositories()

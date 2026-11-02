@@ -129,6 +129,7 @@ pub mod ssh_prompts;
 pub mod stacked_diff;
 pub mod stacked_prs;
 pub mod stacked_refs;
+pub mod widgets;
 pub mod stash_flows;
 pub mod stash_list;
 pub mod state;

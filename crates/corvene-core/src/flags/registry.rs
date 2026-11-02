@@ -3630,6 +3630,21 @@ registry! {
         upstream: &[Upstream::issue(13625)],
         code: &["crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/app_menu.rs"],
     },
+    /// Desktop and Notification Center widgets.
+    MACOS_WIDGETS = 433 "macos-widgets" {
+        title: "Widgets",
+        summary: "Adds desktop and Notification Center widgets: Pull Requests (the ones waiting \
+                  for your review or assigned to you, per signed-in account) and Checks (the \
+                  current branch of the repositories chosen under Settings › Advanced › Menu \
+                  bar). They show the last data the app wrote and hold no token.",
+        ghd_behaviour: "No widgets.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: true, visible: true, availability: macos_only,
+        upstream: &[Upstream::issue(18139)],
+        code: &["crates/corvene-core/src/widgets.rs", "packaging/widgets/CorveneWidgets.swift", "packaging/widgets/WidgetViews.swift"],
+    },
 
     // ---- 500 Settings & updates ----
 

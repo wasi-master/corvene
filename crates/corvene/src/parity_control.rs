@@ -727,6 +727,7 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             Dispatcher::refresh_hook_env(cx);
         }
         "fake-github" => fake_github(arg, cx)?,
+        "widgets-refresh" => Dispatcher::search_widget_pull_requests(cx),
         // switches the selected repository to branch `arg`
         // (`1114-hook-results`' post-checkout)
         "checkout" => {

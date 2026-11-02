@@ -1790,6 +1790,7 @@ dependencies = [
  "hayro",
  "imagesize 0.14.0",
  "kurbo 0.13.1",
+ "libloading",
  "notify",
  "pulldown-cmark",
  "regex",

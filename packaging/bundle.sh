@@ -67,6 +67,8 @@ if [[ -z "$IDENTITY" ]]; then
     IDENTITY="Corvene Self-Signed"
   fi
 fi
+# Widgets (flag `433-macos-widgets`), signed before the app that holds them
+"$ROOT/packaging/widgets/build.sh" "$APP" "$IDENTITY" "$VERSION" "$BUILD"
 codesign --force --sign "$IDENTITY" --timestamp=none "$APP" >/dev/null
 
 echo "built $APP (v$VERSION build $BUILD, signed: ${IDENTITY/#-/ad-hoc})"

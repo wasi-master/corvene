@@ -72,6 +72,9 @@ pub struct ApiSearchPullRequest {
     /// `https://api.github.com/repos/{owner}/{name}`
     pub repository_url: String,
     pub user: ApiOwner,
+    /// Corvene (`433-macos-widgets`)
+    #[serde(default)]
+    pub html_url: Option<String>,
 }
 
 impl ApiSearchPullRequest {
@@ -243,6 +246,7 @@ mod tests {
     #[test]
     fn search_items_name_their_repository() {
         let item = ApiSearchPullRequest {
+            html_url: None,
             number: 7,
             title: "t".into(),
             updated_at: String::new(),

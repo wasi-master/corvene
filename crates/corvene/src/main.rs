@@ -1409,6 +1409,8 @@ pub(crate) fn main() {
         Dispatcher::start_pull_request_event_polling(cx);
         Dispatcher::start_pull_request_updater(cx);
         Dispatcher::start_commit_status_refresh(cx);
+        // `433-macos-widgets`
+        Dispatcher::start_widgets(cx);
         // flags 342-344: OAuth tokens of GitLab and Gitea accounts expire
         Dispatcher::start_host_token_refresh(cx);
         // GHD `componentDidMount`: offer the move to /Applications
