@@ -504,6 +504,9 @@ pub enum Banner {
     },
     /// Corvene (`797-stash-list`): after that Undo.
     StashRestored,
+    /// Corvene `1115-ssh-security-key-notice`: ssh waits for a touch on the
+    /// security key `key`; goes away when it moves on.
+    SecurityKeyTouch { id: u64, key: String },
     /// Corvene (`1315-discard-stash-file`): "Discarded <path> from the
     /// stash" + Undo, which puts stash commit `sha` back with `message` at
     /// `position`, in place of `replacing` (the rewritten entry; `None`
@@ -577,6 +580,8 @@ impl Banner {
             | Banner::BranchesRestored { .. }
             | Banner::StashRestored => Some(Duration::from_secs(5)),
             Banner::RepositoryMoved { .. } => Some(Duration::from_secs(15)),
+            // goes away when ssh moves on
+            Banner::SecurityKeyTouch { .. } => None,
             Banner::PatchApplied { conflicts, .. } => {
                 (*conflicts == 0).then(|| Duration::from_secs(5))
             }

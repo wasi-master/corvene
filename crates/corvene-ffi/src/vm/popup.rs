@@ -882,7 +882,7 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
             repo = Some(*r);
             f.put("sha", sha).put("message", message);
         }
-        Banner::StashRestored => {}
+        Banner::StashRestored | Banner::SecurityKeyTouch { .. } => {}
         Banner::StashFileDiscarded {
             repo: r,
             path,

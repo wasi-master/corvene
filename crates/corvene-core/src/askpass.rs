@@ -45,11 +45,100 @@ pub fn parse_logins(logins: &str) -> HashMap<String, String> {
 
 /// Answer one prompt, or `None` when Corvene knows nothing about the host.
 pub fn answer(prompt: &str) -> Option<String> {
+    if classify_ssh_prompt(prompt).is_some()
+        && let Some(answer) = ask_app(prompt)
+    {
+        return answer;
+    }
     let proxies = std::env::var("CORVENE_ASKPASS_PROXIES").unwrap_or_default();
     match answer_proxy(prompt, &proxies) {
         Some(answer) => answer,
         None => answer_with(prompt, logins()),
     }
+}
+
+/// Which dialog a secret question goes to (GHD `SSHKeyPassphrase`,
+/// `SSHUserPassword`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplyTo {
+    Key,
+    User,
+}
+
+/// What ssh asks through `SSH_ASKPASS` (GHD
+/// `createAskpassTrampolineHandler`; the last is ssh's notice for a security
+/// key, which wants no answer).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SshPrompt {
+    Host(corvene_git::AddSshHostInfo),
+    KeyPassphrase { key: String },
+    UserPassword { user: String },
+    UserPresence { key: String },
+}
+
+pub fn classify_ssh_prompt(prompt: &str) -> Option<SshPrompt> {
+    if prompt.starts_with("The authenticity of host ") {
+        return corvene_git::parse_add_ssh_host_prompt(prompt).map(SshPrompt::Host);
+    }
+    if let Some(rest) = prompt.strip_prefix("Enter passphrase for ") {
+        // ssh: `key '<path>': `; ssh-keygen signing: `"<path>": `
+        let rest = rest.strip_prefix("key ").unwrap_or(rest);
+        let rest = rest.trim_end().strip_suffix(':')?;
+        let key = rest.trim_matches(|c| c == '\'' || c == '"');
+        return (!key.is_empty()).then(|| SshPrompt::KeyPassphrase {
+            key: native_key_path(key),
+        });
+    }
+    if let Some(user) = prompt.strip_suffix("'s password: ")
+        && user.contains('@')
+    {
+        return Some(SshPrompt::UserPassword {
+            user: user.to_string(),
+        });
+    }
+    if let Some(rest) = prompt.strip_prefix("Confirm user presence for key ") {
+        return Some(SshPrompt::UserPresence {
+            key: rest.lines().next().unwrap_or(rest).trim().to_string(),
+        });
+    }
+    None
+}
+
+/// The ssh bundled with Git for Windows names keys `/c/Users/...`.
+fn native_key_path(key: &str) -> String {
+    let bytes = key.as_bytes();
+    if cfg!(windows)
+        && bytes.len() > 3
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && bytes[2] == b'/'
+    {
+        return format!("{}:{}", &key[1..2], &key[2..]);
+    }
+    key.to_string()
+}
+
+/// Ask the running app ([`crate::ssh_prompts`]) and wait. `None` when no app
+/// is listening; `Some(None)` when it has no answer.
+pub fn ask_app(prompt: &str) -> Option<Option<String>> {
+    use std::io::{Read, Write};
+    let port: u16 = std::env::var("CORVENE_ASKPASS_PORT").ok()?.parse().ok()?;
+    let token = std::env::var("CORVENE_ASKPASS_TOKEN").ok()?;
+    let no_ui = std::env::var_os("CORVENE_ASKPASS_NO_UI").is_some();
+    #[cfg(unix)]
+    let parent = std::os::unix::process::parent_id();
+    #[cfg(not(unix))]
+    let parent = 0u32;
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+    let request = format!(
+        "{token}\n{parent}\n{}\n{prompt}\0",
+        if no_ui { "1" } else { "0" }
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut reply = Vec::new();
+    stream.read_to_end(&mut reply).ok()?;
+    let reply = String::from_utf8(reply).ok()?;
+    Some(reply.strip_prefix('y').map(str::to_string))
 }
 
 /// Corvene (`528-proxy-credentials`): git asks for the password of a proxy
@@ -192,6 +281,9 @@ pub fn run() -> ! {
             println!("{value}");
             std::process::exit(0);
         }
+        // a cancelled ssh question: ssh stops asking instead of trying an
+        // empty answer
+        None if classify_ssh_prompt(&prompt).is_some() => std::process::exit(1),
         None => {
             println!();
             std::process::exit(0);
@@ -202,6 +294,42 @@ pub fn run() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_ssh_questions() {
+        assert_eq!(
+            classify_ssh_prompt("Enter passphrase for key '/home/u/.ssh/id_ed25519': "),
+            Some(SshPrompt::KeyPassphrase {
+                key: "/home/u/.ssh/id_ed25519".into()
+            })
+        );
+        assert_eq!(
+            classify_ssh_prompt("Enter passphrase for \"/home/u/.ssh/sign\": "),
+            Some(SshPrompt::KeyPassphrase {
+                key: "/home/u/.ssh/sign".into()
+            })
+        );
+        assert_eq!(
+            classify_ssh_prompt("git@example.com's password: "),
+            Some(SshPrompt::UserPassword {
+                user: "git@example.com".into()
+            })
+        );
+        assert_eq!(
+            classify_ssh_prompt("Confirm user presence for key ED25519-SK SHA256:abc"),
+            Some(SshPrompt::UserPresence {
+                key: "ED25519-SK SHA256:abc".into()
+            })
+        );
+        assert!(matches!(
+            classify_ssh_prompt(
+                "The authenticity of host 'example.com (10.0.0.1)' can't be established.\nED25519 key fingerprint is SHA256:abc.\nAre you sure?"
+            ),
+            Some(SshPrompt::Host(_))
+        ));
+        assert_eq!(classify_ssh_prompt("Username for 'https://github.com': "), None);
+        assert_eq!(classify_ssh_prompt("Password for 'https://u@x.com': "), None);
+    }
 
     #[test]
     fn parses_git_prompts() {

@@ -450,6 +450,47 @@ pub struct AskpassEnv {
     /// Corvene (`529-gh-cli-account`): passwords the keychain lacks may
     /// come from the GitHub CLI (`CORVENE_ASKPASS_GH_CLI`).
     pub gh_cli: bool,
+    /// A background task: ssh's questions take stored answers only (GHD
+    /// `getIsBackgroundTaskEnvironment`).
+    pub no_ui: bool,
+}
+
+/// Where this binary in askpass mode reaches the running app.
+static SSH_PROMPT_SERVER: std::sync::OnceLock<(u16, String)> = std::sync::OnceLock::new();
+
+/// `corvene_core::ssh_prompts` listens: ssh's questions may go to the app.
+pub fn set_ssh_prompt_server(port: u16, token: String) {
+    let _ = SSH_PROMPT_SERVER.set((port, token));
+}
+
+/// ssh's questions through `program` (`SSH_ASKPASS`), without a terminal or
+/// a display (`SSH_ASKPASS_REQUIRE`, from OpenSSH 8.4; before it `DISPLAY`
+/// must be set and there must be no terminal).
+fn with_ssh_askpass(cmd: GitCommand, program: &std::path::Path) -> GitCommand {
+    let Some((port, token)) = SSH_PROMPT_SERVER.get() else {
+        // Older gits only consult GIT_ASKPASS when SSH_ASKPASS is also
+        // unset; make sure the user's shell setup does not interfere.
+        return cmd.env_remove("SSH_ASKPASS");
+    };
+    let cmd = if std::env::var_os("DISPLAY").is_none() {
+        cmd.env("DISPLAY", ".")
+    } else {
+        cmd
+    };
+    cmd.env("SSH_ASKPASS", program)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env("CORVENE_ASKPASS", "1")
+        .env("CORVENE_ASKPASS_PORT", port.to_string())
+        .env("CORVENE_ASKPASS_TOKEN", token)
+}
+
+/// Corvene `1116-ssh-signing-prompt`: a signing `ssh-keygen` started by
+/// `git commit` asks through the app. Nothing without a server.
+pub fn with_signing_askpass(cmd: GitCommand) -> GitCommand {
+    match std::env::current_exe() {
+        Ok(program) => with_ssh_askpass(cmd, &program),
+        Err(_) => cmd,
+    }
 }
 
 impl AskpassEnv {
@@ -465,6 +506,7 @@ impl AskpassEnv {
             program,
             logins,
             gh_cli: false,
+            no_ui: false,
         })
     }
 
@@ -474,12 +516,16 @@ impl AskpassEnv {
         } else {
             cmd
         };
-        cmd.env("GIT_ASKPASS", &self.program)
+        let cmd = if self.no_ui {
+            cmd.env("CORVENE_ASKPASS_NO_UI", "1")
+        } else {
+            cmd
+        };
+        let cmd = cmd
+            .env("GIT_ASKPASS", &self.program)
             .env("CORVENE_ASKPASS", "1")
-            .env("CORVENE_ASKPASS_LOGINS", &self.logins)
-            // Older gits only consult GIT_ASKPASS when SSH_ASKPASS is also
-            // unset; make sure the user's shell setup does not interfere.
-            .env_remove("SSH_ASKPASS")
+            .env("CORVENE_ASKPASS_LOGINS", &self.logins);
+        with_ssh_askpass(cmd, &self.program)
     }
 }
 

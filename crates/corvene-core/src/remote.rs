@@ -1008,7 +1008,10 @@ impl Dispatcher {
                 .flags
                 .bool(crate::flags::ids::PUSH_DURING_BACKGROUND_FETCH);
         Self::arm_credential_helper_for(id, &remote.url, cx);
-        let askpass = Self::askpass_env_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx).map(|env| AskpassEnv {
+            no_ui: background,
+            ..env
+        });
         // `282-fast-forward-skips-worktree-branches`
         let skip_worktree_branches = Self::state(cx)
             .read(cx)
@@ -3145,6 +3148,7 @@ fn without_accounts_of(askpass: &AskpassEnv, accounts: &[String], host: &str) ->
         program: askpass.program.clone(),
         logins: logins.join(";"),
         gh_cli: askpass.gh_cli,
+        no_ui: askpass.no_ui,
     }
 }
 
@@ -3177,6 +3181,7 @@ fn with_account_of(
         program: askpass.program.clone(),
         logins: logins.join(";"),
         gh_cli: askpass.gh_cli,
+        no_ui: askpass.no_ui,
     }
 }
 
@@ -3241,6 +3246,7 @@ mod tests {
             program: "/x".into(),
             logins: "github.com=octocat;ghe.corp=me;github.com=saved".into(),
             gh_cli: false,
+            no_ui: false,
         };
         let accounts = ["github.com=octocat".to_string(), "ghe.corp=me".to_string()];
         let env = without_accounts_of(&askpass, &accounts, "github.com");
@@ -3253,6 +3259,7 @@ mod tests {
             program: "/x".into(),
             logins: "github.com=me;ghe.corp=work".into(),
             gh_cli: false,
+            no_ui: false,
         };
         let accounts = [
             "github.com=me".to_string(),

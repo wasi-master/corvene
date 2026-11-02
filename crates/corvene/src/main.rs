@@ -244,6 +244,8 @@ pub(crate) fn main() {
             service_urls.send(corvene_core::app_url::open_local_repo_url(&path));
         });
         Dispatcher::listen_for_app_urls(url_inbox, focus_main_window_host, cx);
+        #[cfg(not(target_os = "android"))]
+        Dispatcher::serve_ssh_prompts(cx);
         // flag-dependent key bindings and `keymap.json`, before the menu bar
         // reads its shortcuts
         Dispatcher::load_keymap_overrides(cx);
@@ -2197,6 +2199,36 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 cx,
             )
         }
+        ("add-ssh-host", _) => Dispatcher::show_popup(
+            Popup::AddSshHost {
+                request: 0,
+                info: corvene_git::AddSshHostInfo {
+                    host: "example.com".into(),
+                    ip: "192.0.2.10".into(),
+                    key_type: "ED25519".into(),
+                    fingerprint: "SHA256:AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsab".into(),
+                },
+            },
+            cx,
+        ),
+        ("ssh-user-password", _) => Dispatcher::show_popup(
+            Popup::SshSecret {
+                request: 0,
+                kind: corvene_core::askpass::ReplyTo::User,
+                subject: "git@example.com".into(),
+                wrong: false,
+            },
+            cx,
+        ),
+        ("ssh-key-passphrase-prompt", _) => Dispatcher::show_popup(
+            Popup::SshSecret {
+                request: 0,
+                kind: corvene_core::askpass::ReplyTo::Key,
+                subject: "/Users/octocat/.ssh/id_ed25519".into(),
+                wrong: false,
+            },
+            cx,
+        ),
         ("ssh-key-passphrase", _) => Dispatcher::show_popup(
             Popup::SshKeyPassphrase {
                 path: "/Users/octocat/.ssh/id_ed25519".into(),

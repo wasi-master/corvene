@@ -37,6 +37,8 @@ corvene-paginate.workspace = true
 # `1325-document-pages`: LibreOffice converts in a folder of its own
 tempfile = "3"
 async-channel = "2"
+# the ssh prompt server's per-run token
+getrandom = "0.3"
 yaml-rust = "0.4"
 
 [features]

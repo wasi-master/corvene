@@ -200,7 +200,7 @@ pub use reflog::{
 };
 pub use refs::{delete_ref, format_as_local_ref, get_symbolic_ref};
 pub use remote_ops::{
-    AskpassEnv, FastForward, FetchOptions, GitProgressEvent, ProgressLine, ProgressParser,
+    set_ssh_prompt_server, with_signing_askpass, AskpassEnv, FastForward, FetchOptions, GitProgressEvent, ProgressLine, ProgressParser,
     PushProgress, PushSize, RemoteFailure, TrackingBranch, add_remote, classify_remote_failure,
     cloned_at, commits_not_on_remote, config_value, delete_remote_tag,
     fast_forward_branch_from_remote, fast_forward_branches, fast_forward_branches_with,

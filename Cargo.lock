@@ -1784,6 +1784,7 @@ dependencies = [
  "corvene-store",
  "corvene-test-support",
  "dunce",
+ "getrandom 0.3.4",
  "gpui-kit",
  "hayro",
  "imagesize 0.14.0",

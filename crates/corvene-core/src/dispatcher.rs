@@ -6547,6 +6547,11 @@ impl Dispatcher {
                 .flags
                 .bool(crate::flags::ids::KEEP_STAGED_MODE_CHANGES);
         let patch_options = Self::patch_options(cx);
+        // `1116-ssh-signing-prompt`
+        let signing_askpass = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::SSH_SIGNING_PROMPT);
         let task = cx.background_executor().spawn(async move {
             corvene_git::hook_env::reload_if_uncached();
             // GHD recommends a force push after every amend; the flag only
@@ -6634,6 +6639,7 @@ impl Dispatcher {
                         allow_empty: options.allow_empty_commit,
                         author,
                         fixup: fixup_sha,
+                        signing_askpass,
                     },
                     Some(&on_output),
                 )

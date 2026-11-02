@@ -277,6 +277,20 @@ pub enum Popup {
         path: std::path::PathBuf,
         wrong: bool,
     },
+    /// GHD `PopupType.AddSSHHost`: ssh does not know the host's key. The
+    /// answer goes to question `request` (`Dispatcher::answer_ssh_prompt`).
+    AddSshHost {
+        request: u64,
+        info: corvene_git::AddSshHostInfo,
+    },
+    /// GHD `PopupType.SSHKeyPassphrase` / `SSHUserPassword`; `subject` is
+    /// the key's path or `user@host`, `wrong` after an answer that failed.
+    SshSecret {
+        request: u64,
+        kind: crate::askpass::ReplyTo,
+        subject: String,
+        wrong: bool,
+    },
     /// Corvene `1223-checkout-from-fork`: Branch › Check Out from Fork…
     /// for `repo`, the owner field starting as `input`.
     CheckoutFromFork {

@@ -7917,6 +7917,34 @@ registry! {
         code: &["crates/corvene-git/src/hooks.rs", "crates/corvene-core/src/hooks.rs", "crates/corvene-ui/src/hook_results.rs"],
     },
 
+    /// A notice while ssh waits for a touch on a security key.
+    SSH_SECURITY_KEY_NOTICE = 1115 "ssh-security-key-notice" {
+        title: "Touch your security key notice",
+        summary: "While ssh waits for a touch on a hardware security key a banner says so. It \
+                  goes away when ssh moves on.",
+        ghd_behaviour: "The fetch, push or clone seems to hang with nothing on screen.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12216)],
+        code: &["crates/corvene-core/src/ssh_prompts.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
+    /// A commit signed with a passphrase protected SSH key asks in the app.
+    SSH_SIGNING_PROMPT = 1116 "ssh-signing-prompt" {
+        title: "Passphrase prompt for SSH commit signing",
+        summary: "A commit signed with a passphrase protected SSH key (gpg.format=ssh) asks \
+                  for the passphrase in the same dialog as a fetch or push.",
+        ghd_behaviour: "The commit fails or hangs because nothing can ask for the passphrase.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17284)],
+        code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/ssh_prompts.rs"],
+    },
+
 
     // ---- 1200 History & branches (overflow) ----
 

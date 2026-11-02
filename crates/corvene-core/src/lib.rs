@@ -10,6 +10,7 @@ pub mod app_url;
 pub mod apply_patch;
 pub mod archive_browse;
 pub mod askpass;
+pub mod ssh_prompts;
 pub mod autocomplete;
 pub mod avatar_users;
 pub mod avatars;

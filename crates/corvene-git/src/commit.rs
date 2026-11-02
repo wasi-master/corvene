@@ -31,6 +31,9 @@ pub struct CommitOptions {
     /// Corvene `799-fixup-commits`: `--fixup=<sha>`, git writes the message
     /// (`fixup! <summary of sha>`) and the one passed in is not used.
     pub fixup: Option<String>,
+    /// Corvene `1116-ssh-signing-prompt`: a signing key's passphrase is
+    /// asked for in the app.
+    pub signing_askpass: bool,
 }
 
 /// Corvene `783-amend-author`: who an amended commit is by.
@@ -424,6 +427,9 @@ pub fn commit_with_terminal_output(
         .intercept_hooks(&hooks);
     if opts.fixup.is_none() {
         cmd = cmd.stdin(message.as_bytes().to_vec());
+    }
+    if opts.signing_askpass {
+        cmd = crate::remote_ops::with_signing_askpass(cmd);
     }
     let out = match on_terminal_output_available {
         Some(callback) => cmd.run_with_terminal_output(callback)?,

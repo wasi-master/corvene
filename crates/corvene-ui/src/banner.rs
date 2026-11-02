@@ -180,6 +180,9 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 .unwrap_or_else(|| "stash".to_string())),
         ],
         Banner::StashRestored => vec![t("Restored stash")],
+        Banner::SecurityKeyTouch { key, .. } => {
+            vec![t(&format!("Touch your security key ({key}) to continue"))]
+        }
         // `1315-discard-stash-file`
         Banner::StashFileDiscarded { path, .. } => vec![
             t("Discarded\u{a0}"),

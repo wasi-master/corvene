@@ -109,6 +109,13 @@ pub fn generic_password(host: &str, username: &str) -> Result<Option<String>> {
     }
 }
 
+pub fn delete_generic_password(host: &str, username: &str) -> Result<()> {
+    match generic_entry(host, username)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// Corvene (`528-proxy-credentials`): a proxy's password, one item per
 /// (proxy `host:port`, username).
 fn proxy_entry(proxy: &str, username: &str) -> Result<Entry> {
