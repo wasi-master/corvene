@@ -196,7 +196,7 @@ fn percent_decode(value: &str) -> String {
 /// passes its `CORVENE_ASKPASS_LOGINS` along with the prompt).
 pub fn answer_with(prompt: &str, logins: HashMap<String, String>) -> Option<String> {
     // GHD `handleSSHHostAuthenticity`: ssh's unknown host question goes to the
-    // AddSSHHost dialog, which Corvene does not have yet; declining makes ssh
+    // AddSSHHost dialog (`crate::ssh_prompts`); without the app (Android) declining makes ssh
     // refuse the host (`Host key verification failed.`)
     if let Some(info) = corvene_git::parse_add_ssh_host_prompt(prompt) {
         tracing::info!(

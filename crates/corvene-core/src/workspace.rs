@@ -69,6 +69,8 @@ pub struct WorkspaceState {
     pub navigation: NavigationHistory,
     /// `selectedBranchesTab`
     pub branches_tab: BranchesTab,
+    /// View › Show Changes Filter: hidden in this window.
+    pub changes_filter_hidden: bool,
     /// `showCIStatusPopover`: the check-run popover under the PR badge.
     pub show_ci_status_popover: bool,
     /// `dragAndDropManager` drop target during a commit drag.
@@ -87,6 +89,7 @@ impl WorkspaceState {
             banner_nonce: 0,
             navigation: NavigationHistory::default(),
             branches_tab: BranchesTab::Branches,
+            changes_filter_hidden: false,
             show_ci_status_popover: false,
             drag_target: None,
         }

@@ -363,6 +363,7 @@ impl MenuLabelsEvent {
                 repository.id,
             ) != corvene_core::ForcePushState::NotAvailable,
             is_stashed_changes_visible: rs.showing_stash,
+            is_changes_filter_visible: !s.changes_filter_hidden,
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
             host: s
                 .hosted_repository(repository.id)

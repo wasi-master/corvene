@@ -181,7 +181,8 @@ impl AddWorktreeDialog {
     fn effective_branch(&self, cx: &App) -> String {
         let typed = self.branch.read(cx).value().trim().to_string();
         if !typed.is_empty() {
-            return typed;
+            // GHD's Branch name box is a `RefNameTextBox`
+            return sanitize_branch_name(&typed, cx);
         }
         sanitize_branch_name(self.name.read(cx).value().trim(), cx)
     }
@@ -348,6 +349,12 @@ impl Render for AddWorktreeDialog {
                         ))
                         .children(popup),
                 )
+                .children(crate::dialogs::branch_dialogs::ref_name_notice_with(
+                    self.branch.read(cx).value().trim(),
+                    &crate::dialogs::branch_dialogs::branch_forbidden_chars(cx),
+                    "created",
+                    cx,
+                ))
                 .when(
                     !branch_placeholder.is_empty() && self.branch.read(cx).value().is_empty(),
                     |d| {

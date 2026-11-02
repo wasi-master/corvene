@@ -1309,6 +1309,8 @@ impl Render for SigningDiffView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // gpui's prelude has a `test` macro of its own
+    use core::prelude::v1::test;
     use corvene_models::signing::SigningItem;
 
     fn item(key: &str, serial: &str) -> SigningItem {

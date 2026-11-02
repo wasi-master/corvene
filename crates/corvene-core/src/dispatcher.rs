@@ -570,6 +570,17 @@ impl Dispatcher {
         });
     }
 
+    /// GHD `AppStore.showChangesFilter`: whether View says Show or Hide
+    /// Changes Filter.
+    pub fn set_changes_filter_visible(visible: bool, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            if s.changes_filter_hidden == visible {
+                s.changes_filter_hidden = !visible;
+                cx.notify();
+            }
+        });
+    }
+
     /// `265-remove-stale-index-lock`: the error dialog's "Remove Lock File":
     /// delete `lock` unless a git process is running in the repository.
     pub fn remove_index_lock(lock: PathBuf, cx: &mut dyn Host) {
@@ -4389,7 +4400,15 @@ impl Dispatcher {
         };
         Self::show_section(id, Section::Changes, cx);
         Self::state(cx).update(cx, |s, cx| {
+            let github = s.hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
             let rs = s.repo_state_mut(id);
+            // GHD `prepareToAmendCommit` → `restoreCoAuthorsFromCommit`
+            if github {
+                rs.co_authors = crate::git_store::restored_co_authors(&commit);
+                if !rs.co_authors.is_empty() {
+                    rs.show_co_authored_by = true;
+                }
+            }
             rs.commit_to_amend = Some(commit);
             rs.amend_nonce += 1;
             rs.amend_author = None;
@@ -6785,13 +6804,18 @@ impl Dispatcher {
                 && !s.settings.hide_whitespace_in_changes_diff)
                 .then(|| s.flags.bool(crate::flags::ids::RENAMED_DIFF_AGAINST_HEAD))
         };
+        let github = Self::state(cx).read(cx).hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
         let task = cx.background_executor().spawn(async move {
             let head = corvene_git::get_commits(&workdir, "HEAD", 0, 1)?
                 .into_iter()
                 .next();
+            let co_authors = match &head {
+                Some(commit) if github => crate::git_store::restored_co_authors(commit),
+                _ => Vec::new(),
+            };
             let message = match &head {
                 Some(commit) => {
-                    crate::git_store::undo_commit(git.clone(), &workdir, commit).map(Some)
+                    crate::git_store::undo_commit(git.clone(), &workdir, commit, github).map(Some)
                 }
                 None => corvene_git::undo_last_commit(git.clone(), &workdir).map(|()| None),
             }?;
@@ -6806,13 +6830,13 @@ impl Dispatcher {
                 }
                 _ => Vec::new(),
             };
-            Ok::<_, corvene_git::GitError>((message, restored))
+            Ok::<_, corvene_git::GitError>((message, restored, co_authors))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
-            let (result, restored) = match result {
-                Ok((message, restored)) => (Ok(message), restored),
-                Err(err) => (Err(err), Vec::new()),
+            let (result, restored, co_authors) = match result {
+                Ok((message, restored, co_authors)) => (Ok(message), restored, co_authors),
+                Err(err) => (Err(err), Vec::new(), Vec::new()),
             };
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -6822,6 +6846,10 @@ impl Dispatcher {
                     if let Ok(Some(message)) = &result {
                         rs.commit_message = message.clone();
                         rs.commit_message_nonce += 1;
+                        if !co_authors.is_empty() {
+                            rs.show_co_authored_by = true;
+                        }
+                        rs.co_authors = co_authors;
                     }
                     rs.restored_selections.clear();
                     for (path, selection, diff) in restored {

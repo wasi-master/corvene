@@ -1020,12 +1020,19 @@ impl ChangesSidebar {
                         window,
                         cx,
                     );
-                    this.replace_message_field(
-                        CommitField::Description,
-                        commit.body.clone(),
-                        window,
-                        cx,
-                    );
+                    let description = if state
+                        .read(cx)
+                        .selected
+                        .and_then(|id| state.read(cx).hosted_repository(id))
+                        .is_some_and(|h| h.kind == corvene_models::HostKind::GitHub)
+                    {
+                        commit.body_no_co_authors().trim_end().to_string()
+                    } else {
+                        commit.body.clone()
+                    };
+                    this.replace_message_field(CommitField::Description, description, window, cx);
+                    // GHD `restoreCoAuthorsFromCommit`
+                    this.load_co_authors(window, cx);
                     // `783-amend-author`
                     this.amend_author_original =
                         format!("{} <{}>", commit.author.name, commit.author.email);
@@ -1061,6 +1068,7 @@ impl ChangesSidebar {
                 );
                 this.refresh_spelling(CommitField::Summary, cx);
                 this.refresh_spelling(CommitField::Description, cx);
+                this.load_co_authors(window, cx);
                 cx.notify();
             }
         })
@@ -1409,6 +1417,28 @@ impl ChangesSidebar {
 
     /// GHD `onAuthorsUpdated` after the tokens changed (backspace removed one),
     /// plus "Space at the end of the text adds the typed handle".
+    /// The token field from the state's co-authors (Undo Commit, Amend).
+    fn load_co_authors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let authors = self
+            .state
+            .read(cx)
+            .selected_state()
+            .map(|rs| rs.co_authors.clone())
+            .unwrap_or_default();
+        self.co_authors.update(cx, |s, cx| {
+            s.set_value("", window, cx);
+            for author in &authors {
+                let Some(id) = co_author_id(author) else {
+                    continue;
+                };
+                let end = s.value().len();
+                let token =
+                    InlineToken::new(id, author.display_text()).with_label(author.display_text());
+                let _ = s.replace_range_with_token(end..end, token, window, cx);
+            }
+        });
+    }
+
     fn sync_co_authors(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.state.read(cx).selected else {
             return;
@@ -2270,6 +2300,7 @@ impl ChangesSidebar {
     /// Edit › Find.
     pub fn focus_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.filter_visible = true;
+        Dispatcher::set_changes_filter_visible(true, cx);
         let handle = self.filter.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         cx.notify();
@@ -2278,6 +2309,7 @@ impl ChangesSidebar {
     /// View › Show / Hide Changes Filter.
     pub fn toggle_filter(&mut self, cx: &mut Context<Self>) {
         self.filter_visible = !self.filter_visible;
+        Dispatcher::set_changes_filter_visible(self.filter_visible, cx);
         cx.notify();
     }
 

@@ -22,12 +22,30 @@ pub fn undo_commit(
     git: Arc<GitBinary>,
     workdir: &Path,
     commit: &Commit,
+    github: bool,
 ) -> Result<CommitMessage, GitError> {
     corvene_git::undo_last_commit(git, workdir)?;
-    Ok(CommitMessage::new(
-        commit.summary.clone(),
-        Some(commit.body.clone()),
-    ))
+    // GHD `restoreCoAuthorsFromCommit`: in a GitHub repository the trailers
+    // become co-author tokens ([`restored_co_authors`])
+    let body = if github && !commit.co_authors().is_empty() {
+        commit.body_no_co_authors().trim_end().to_string()
+    } else {
+        commit.body.clone()
+    };
+    Ok(CommitMessage::new(commit.summary.clone(), Some(body)))
+}
+
+/// GHD `loadCommitAndCoAuthors`: `commit`'s co-authors as the form's tokens.
+pub fn restored_co_authors(commit: &Commit) -> Vec<corvene_models::Author> {
+    commit
+        .co_authors()
+        .into_iter()
+        .map(|author| corvene_models::Author::Known {
+            name: author.name,
+            email: author.email,
+            username: None,
+        })
+        .collect()
 }
 
 /// The name of GHD's `findDefaultRemote`

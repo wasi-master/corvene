@@ -1811,6 +1811,25 @@ impl BranchFoldout {
                     if rebase_onto.is_some() || rebase_this.is_some() {
                         items.push(MenuItem::separator());
                     }
+                    // GHD `onViewPullRequestOnGitHub`, before Checkout in New
+                    // Worktree…
+                    let pull_request = AppState::global(cx)
+                        .read(cx)
+                        .pull_request_of_branch(id, &branch)
+                        .cloned();
+                    if let Some(pr) = pull_request {
+                        let at = items
+                            .iter()
+                            .position(|item| item.label.contains("orktree"))
+                            .unwrap_or(items.len());
+                        items.insert(
+                            at,
+                            MenuItem::new("View Pull Request on GitHub", move |_, cx| {
+                                Dispatcher::close_foldout(cx);
+                                Dispatcher::open_pull_request(&pr, cx);
+                            }),
+                        );
+                    }
                     items.extend([MenuItem::new("Delete…", move |_, cx| {
                         Dispatcher::close_foldout(cx);
                         Dispatcher::show_popup(

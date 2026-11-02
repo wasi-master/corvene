@@ -345,6 +345,30 @@ pub fn get_squashed_commit_description(commits: &[Commit], squash_onto: &Commit)
         .join("\n\n")
 }
 
+/// The squashed commits' co-authors as trailers under `description`. GHD
+/// prefills the squash dialog's co-author tokens with them
+/// (`commit-message-dialog.tsx`); that dialog has no token field here, so they
+/// stay in its text.
+pub fn with_co_author_trailers(
+    description: String,
+    co_authors: &[corvene_models::Author],
+) -> String {
+    if co_authors.is_empty() {
+        return description;
+    }
+    let trailers: Vec<String> = co_authors
+        .iter()
+        .filter_map(|a| a.trailer_value())
+        .map(|value| format!("Co-Authored-By: {value}"))
+        .collect();
+    let trailers = trailers.join("\n");
+    if description.trim().is_empty() {
+        trailers
+    } else {
+        format!("{}\n\n{trailers}", description.trim_end())
+    }
+}
+
 /// GHD `getUnmergedFiles`
 pub fn unmerged_files(status: &WorkingDirectoryStatus) -> Vec<&WorkingDirectoryFileChange> {
     status
@@ -2637,9 +2661,14 @@ impl Dispatcher {
                 .cloned()
                 .collect();
             let (summary, description) = draft.unwrap_or_else(|| {
+                let mut involved: Vec<Commit> = squashed.clone();
+                involved.push(onto_commit.clone());
                 (
                     onto_commit.summary.clone(),
-                    get_squashed_commit_description(&squashed, onto_commit),
+                    with_co_author_trailers(
+                        get_squashed_commit_description(&squashed, onto_commit),
+                        &get_unique_coauthors_as_authors(&involved),
+                    ),
                 )
             });
             (last_retained, summary, description, to_squash.len() + 1)
@@ -3650,6 +3679,24 @@ fn last_retained_for_warn(mco: &Option<MultiCommitOperation>) -> Option<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn squashed_co_authors_stay_as_trailers() {
+        let author = corvene_models::Author::Known {
+            name: "Mona".into(),
+            email: "mona@example.com".into(),
+            username: None,
+        };
+        assert_eq!(with_co_author_trailers("Body".into(), &[]), "Body");
+        assert_eq!(
+            with_co_author_trailers("Body\n".into(), std::slice::from_ref(&author)),
+            "Body\n\nCo-Authored-By: Mona <mona@example.com>"
+        );
+        assert_eq!(
+            with_co_author_trailers(String::new(), std::slice::from_ref(&author)),
+            "Co-Authored-By: Mona <mona@example.com>"
+        );
+    }
 
     #[test]
     fn git_email_banner_only_for_unlinked_addresses() {

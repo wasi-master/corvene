@@ -243,7 +243,12 @@ impl AppState {
     /// `branchesState.currentPullRequest`
     pub fn current_pull_request(&self, id: u64) -> Option<&PullRequest> {
         let info = self.repo_states.get(&id)?.info.as_ref()?;
-        let branch = info.current_branch()?;
+        self.pull_request_of_branch(id, info.current_branch()?)
+    }
+
+    /// `findAssociatedPullRequest` for any of the repository's branches.
+    pub fn pull_request_of_branch(&self, id: u64, branch: &Branch) -> Option<&PullRequest> {
+        let info = self.repo_states.get(&id)?.info.as_ref()?;
         find_associated_pull_request(
             branch,
             self.pull_requests_for(id),

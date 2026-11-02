@@ -113,7 +113,7 @@ impl GitStore {
     /// `undoCommit(commit)`: like `discardChanges`, an error is reported
     /// and swallowed (`performFailableOperation`, `Dispatcher::undo_commit`).
     fn undo_commit(&mut self, commit: &Commit) {
-        match corvene_core::git_store::undo_commit(git(), &self.path, commit) {
+        match corvene_core::git_store::undo_commit(git(), &self.path, commit, false) {
             Ok(message) => {
                 self.commit_message =
                     Some((message.summary, message.description.unwrap_or_default()));

@@ -361,6 +361,8 @@ pub fn render_image(width: u32, height: u32, mut rgba: Vec<u8>) -> Option<Arc<Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    // gpui's prelude has a `test` macro of its own
+    use core::prelude::v1::test;
 
     fn pair(previous: Option<usize>, current: Option<usize>) -> PagePair {
         PagePair {
