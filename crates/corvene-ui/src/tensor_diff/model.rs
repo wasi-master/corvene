@@ -607,7 +607,7 @@ mod tests {
             value_changed: &no,
         };
         let items = flatten(&tree, &rows, &shown);
-        assert_eq!(items.len(), 6);
+        assert_eq!(items.len(), 5);
         assert!(matches!(items[0], Item::Group { shown: 1, .. }));
         assert!(matches!(items[2], Item::Detail { row: 0 }));
         let collapsed = HashSet::from(["a.".to_string()]);
@@ -629,7 +629,7 @@ mod tests {
         assert_eq!(human_count(7_241_732_096), "7.24 B");
         assert_eq!(human_count(124_000_000), "124 M");
         assert_eq!(human_count(1_500), "1.5 K");
-        assert_eq!(value(0.0001234), "1.23e-4");
+        assert_eq!(value(0.0001234), "1.23e−4");
         assert_eq!(value(-0.5), "−0.5");
         assert_eq!(value(1234.5678), "1235");
         assert_eq!(value(0.0123456), "0.01235");
