@@ -1028,19 +1028,29 @@ pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
     }
 }
 
+/// Deferred: a click on a menu's row reaches here from inside that window's
+/// own update, where updating it again fails and the window would stay open,
+/// blank until the next menu draws in it (corvene#20).
 fn remove_windows(levels: Vec<Level>, cx: &mut App) {
     #[cfg(not(any(target_os = "android", windows)))]
-    for level in levels {
-        level
-            .window
-            .update(cx, |_, window, _| window.remove_window())
-            .ok();
-    }
+    cx.defer(move |cx| {
+        for level in levels {
+            level
+                .window
+                .update(cx, |_, window, _| window.remove_window())
+                .ok();
+        }
+    });
     #[cfg(any(target_os = "android", windows))]
     {
         #[cfg(windows)]
-        for popup in levels.iter().filter_map(|level| level.popup) {
-            popup.update(cx, |_, window, _| window.remove_window()).ok();
+        {
+            let popups: Vec<_> = levels.iter().filter_map(|level| level.popup).collect();
+            cx.defer(move |cx| {
+                for popup in popups {
+                    popup.update(cx, |_, window, _| window.remove_window()).ok();
+                }
+            });
         }
         drop(levels);
         cx.refresh_windows();
