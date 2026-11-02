@@ -1,0 +1,29 @@
+# ssh's questions (GHD `ui/ssh/`, desktop/desktop#22880 and #16542). GHD shows
+# them only while ssh waits on its trampoline, so they are recorded, not
+# compared, from the dev popups.
+name: ssh-add-host
+description: The unknown host question from a first connection over SSH.
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: add-ssh-host}
+    wait: 400
+  - snap: {name: add-host, corvene_only: true}
+---
+name: ssh-key-passphrase-prompt
+description: A key's passphrase with Remember passphrase.
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: ssh-key-passphrase-prompt}
+    wait: 400
+  - snap: {name: key-passphrase, corvene_only: true}
+---
+name: ssh-user-password
+description: An SSH user's password with Remember password.
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: ssh-user-password}
+    wait: 400
+  - snap: {name: user-password, corvene_only: true}
