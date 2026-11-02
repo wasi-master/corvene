@@ -277,6 +277,8 @@ pub enum Popup {
         path: std::path::PathBuf,
         wrong: bool,
     },
+    /// Corvene `624-command-palette`.
+    CommandPalette,
     /// GHD `PopupType.AddSSHHost`: ssh does not know the host's key. The
     /// answer goes to question `request` (`Dispatcher::answer_ssh_prompt`).
     AddSshHost {

@@ -104,6 +104,8 @@ gpui_kit::actions!(
         AddLocalRepository,
         CloneRepository,
         ImportFromGitHubDesktop,
+        // View › Command Palette… (`624-command-palette`)
+        CommandPalette,
         // File › Remove Repositories… (`269-bulk-remove-repositories`)
         RemoveRepositories,
         // Edit

@@ -1,0 +1,25 @@
+# The command palette (624-command-palette, off in the GitHub Desktop preset,
+# desktop/desktop#22832): recorded, not compared (GHD has none).
+name: command-palette
+description: The palette, its filter and its prefixes, then running an item from it.
+setup: repo
+corvene_flags: 624-command-palette=on
+steps:
+  - ghd: {skip: true}
+    corvene: {key: cmd-k}
+    wait: 500
+  - snap: {name: open, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {type: "@fea"}
+    wait: 300
+  - snap: {name: branches, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: cmd-a}
+  - ghd: {skip: true}
+    corvene: {type: ">show history"}
+    wait: 300
+  - snap: {name: actions, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: enter}
+    wait: 800
+  - snap: {name: ran, corvene_only: true}

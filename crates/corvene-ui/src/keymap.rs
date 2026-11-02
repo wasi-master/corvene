@@ -41,6 +41,8 @@ pub struct KeymapFlags {
     pub navigation_shortcuts: bool,
     /// `801-history-review-mode`: ⌃⌘S hides History's lists.
     pub history_review_mode: bool,
+    /// `624-command-palette`: ⌘K opens it (⇧⌘P is GitHub Desktop's Pull).
+    pub command_palette: bool,
     /// `419-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
     pub extra_zoom_inputs: bool,
     /// `429-multiple-windows`: ⌥⌘N opens a new window.
@@ -67,6 +69,7 @@ impl KeymapFlags {
             copy_path_shortcuts: flags.bool(ids::COPY_PATH_SHORTCUTS),
             navigation_shortcuts: flags.bool(ids::NAVIGATION_SHORTCUTS),
             history_review_mode: flags.bool(ids::HISTORY_REVIEW_MODE),
+            command_palette: flags.bool(ids::COMMAND_PALETTE),
             extra_zoom_inputs: flags.bool(ids::EXTRA_ZOOM_INPUTS),
             back_forward: flags.bool(ids::BACK_FORWARD_NAVIGATION),
             multiple_windows: flags.bool(ids::MULTIPLE_WINDOWS),
@@ -530,6 +533,9 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
             KeyBinding::new("alt-down", SelectNextFileFromDiff, Some("Diff")),
             KeyBinding::new("alt-up", SelectPreviousFileFromDiff, Some("Diff")),
         ]);
+    }
+    if flags.command_palette {
+        bindings.push(KeyBinding::new("secondary-k", CommandPalette, MENU));
     }
     if flags.history_review_mode {
         bindings.push(KeyBinding::new(CTRL_CMD_S, ToggleHistoryReviewMode, MENU));

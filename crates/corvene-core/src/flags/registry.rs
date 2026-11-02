@@ -4388,6 +4388,22 @@ registry! {
         code: &["crates/corvene-ui/src/keyboard_nav.rs", "crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// One box that runs any menu item and switches repository or branch.
+    COMMAND_PALETTE = 624 "command-palette" {
+        title: "Command palette",
+        summary: "⌘K (Ctrl+K) or View › Command Palette… opens a box that lists every menu \
+                  item that is enabled right now with its shortcut, and with typing also \
+                  repositories and branches. > narrows it to actions, @ to branches and # to \
+                  repositories. Recently used items come first.",
+        ghd_behaviour: "No palette. Menus and the two foldouts each have their own filter.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22832)],
+        code: &["crates/corvene-ui/src/dialogs/command_palette.rs", "crates/corvene-ui/src/app_menu.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

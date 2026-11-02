@@ -54,6 +54,7 @@
 
 use corvene_core::AppState;
 use corvene_core::flags::{Flags, ids};
+use corvene_core::menu_state::MenuId;
 use gpui_kit::{Action, Menu, MenuItem, OsAction, SystemMenuType};
 
 use crate::actions::*;
@@ -644,6 +645,10 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Show Pull Requests List", "&Pull requests list"),
             ShowPullRequestsList,
         ));
+    }
+    // Corvene (`624-command-palette`)
+    if extras.keymap.command_palette {
+        view.push(item(l("Command Palette…", "&Command palette…"), CommandPalette));
     }
     // Corvene (`801-history-review-mode`)
     if extras.keymap.history_review_mode {
@@ -1258,6 +1263,130 @@ fn gpui_items(items: Vec<MenuItemConstructorOptions>) -> Vec<MenuItem> {
             }
         })
         .collect()
+}
+
+/// GHD's menu id for one of Corvene's menu actions (`menu-update.ts` works
+/// on ids).
+pub(crate) fn menu_id(action: &dyn Action) -> Option<MenuId> {
+    let name = action.name();
+    let short = name.rsplit("::").next().unwrap_or(name);
+    Some(match short {
+        "RenameBranch" => MenuId::RenameBranch,
+        "DeleteBranch" => MenuId::DeleteBranch,
+        "DiscardAllChanges" => MenuId::DiscardAllChanges,
+        "StashAllChanges" => MenuId::StashAllChanges,
+        "OpenSettings" => MenuId::Preferences,
+        "UpdateFromDefaultBranch" => MenuId::UpdateBranchWithContributionTargetBranch,
+        "CompareToBranch" => MenuId::CompareToBranch,
+        "MergeIntoCurrentBranch" => MenuId::MergeBranch,
+        "RebaseCurrentBranch" => MenuId::RebaseBranch,
+        "ViewOnGitHub" => MenuId::ViewRepositoryOnGithub,
+        "CompareOnGitHub" => MenuId::CompareOnGithub,
+        "ViewBranchOnGitHub" => MenuId::BranchOnGithub,
+        "OpenInShell" => MenuId::OpenInShell,
+        "Push" => MenuId::Push,
+        "Pull" => MenuId::Pull,
+        "Fetch" => MenuId::Fetch,
+        "GoToSummary" => MenuId::GoToCommitMessage,
+        "NewBranch" => MenuId::CreateBranch,
+        "ShowChanges" => MenuId::ShowChanges,
+        "ShowHistory" => MenuId::ShowHistory,
+        "ShowRepositoryList" => MenuId::ShowRepositoryList,
+        "ShowBranchesList" => MenuId::ShowBranchesList,
+        "ShowInFinder" => MenuId::OpenWorkingDirectory,
+        "RepositorySettings" => MenuId::ShowRepositorySettings,
+        "OpenInEditor" => MenuId::OpenExternalEditor,
+        "OpenWith" => MenuId::OpenWithExternalEditor,
+        "RemoveRepository" => MenuId::RemoveRepository,
+        "NewRepository" => MenuId::NewRepository,
+        "AddLocalRepository" => MenuId::AddLocalRepository,
+        "CloneRepository" => MenuId::CloneRepository,
+        "About" => MenuId::About,
+        "CreatePullRequest" => MenuId::CreatePullRequest,
+        "PreviewPullRequest" => MenuId::PreviewPullRequest,
+        "SquashAndMergeIntoCurrentBranch" => MenuId::SquashAndMergeBranch,
+        "ToggleStashedChanges" => MenuId::ToggleStashedChanges,
+        "NewWorktree" => MenuId::CreateWorktree,
+        "ShowWorktreesList" => MenuId::ShowWorktreesList,
+        "CreateIssue" => MenuId::CreateIssueInRepositoryOnGithub,
+        "ToggleChangesFilter" => MenuId::ToggleChangesFilter,
+        "ExpandActiveResizable" => MenuId::IncreaseActiveResizableWidth,
+        "ContractActiveResizable" => MenuId::DecreaseActiveResizableWidth,
+        _ => return None,
+    })
+}
+
+/// A menu item the command palette can run (`624-command-palette`).
+pub struct PaletteCommand {
+    pub label: String,
+    /// Its top-level menu, with any submenus: `Branch › Compare`.
+    pub menu: String,
+    pub action: Box<dyn Action>,
+}
+
+/// A label without its `&` access key.
+fn plain_label(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '&' {
+            out.push(c);
+        } else if chars.peek() == Some(&'&') {
+            chars.next();
+            out.push('&');
+        }
+    }
+    out
+}
+
+/// Every visible, enabled item of the menu template as it stands, without
+/// the OS's own (Cut, Copy, …, which act on the focused text box) and the
+/// palette's own item.
+pub fn palette_commands(s: &AppState) -> Vec<PaletteCommand> {
+    fn walk(
+        items: Vec<MenuItemConstructorOptions>,
+        path: &str,
+        s: &AppState,
+        out: &mut Vec<PaletteCommand>,
+    ) {
+        for item in items {
+            if item.visible == Some(false) || item.enabled == Some(false) || item.separator {
+                continue;
+            }
+            let label = plain_label(item.label.as_deref().unwrap_or(""));
+            if let Some(children) = item.submenu {
+                walk(children, &format!("{path} › {label}"), s, out);
+                continue;
+            }
+            let Some(action) = item.action else {
+                continue;
+            };
+            if item.os_action.is_some() || item.system_menu.is_some() {
+                continue;
+            }
+            if action.partial_eq(&CommandPalette) {
+                continue;
+            }
+            let on = menu_id(&*action)
+                .is_none_or(|id| corvene_core::menu_state::is_enabled(s, id));
+            if on {
+                out.push(PaletteCommand {
+                    label,
+                    menu: path.to_string(),
+                    action,
+                });
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for top in build_default_menu_template(&MenuLabelsEvent::of(s)) {
+        if top.visible == Some(false) {
+            continue;
+        }
+        let name = plain_label(top.label.as_deref().unwrap_or(""));
+        walk(top.submenu.unwrap_or_default(), &name, s, &mut out);
+    }
+    out
 }
 
 #[cfg(test)]

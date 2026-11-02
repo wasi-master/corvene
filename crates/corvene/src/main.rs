@@ -1052,6 +1052,12 @@ pub(crate) fn main() {
         cx.on_action(move |_: &Find, cx| {
             defer_in_focused_workspace(cx, |w, window, cx| w.focus_filter(window, cx));
         });
+        // `624-command-palette`
+        on_menu_action(cx, |_: &CommandPalette, cx| {
+            defer_in_focused_workspace(cx, |_, window, cx| {
+                corvene_ui::dialogs::command_palette::open(window, cx)
+            });
+        });
         on_menu_action(cx, move |_: &ToggleChangesFilter, cx| {
             with_focused_workspace(cx, |w, cx| w.toggle_changes_filter(cx))
         });

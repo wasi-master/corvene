@@ -191,6 +191,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::Acknowledgements
         | Popup::ImportFromGitHubDesktop
         | Popup::CreateSshKey
+        | Popup::CommandPalette
         | Popup::ConfirmExitTutorial => {}
         Popup::CrashReportFound { reports } => {
             f.list("reports", reports.iter().map(|p| p.to_string_lossy()));

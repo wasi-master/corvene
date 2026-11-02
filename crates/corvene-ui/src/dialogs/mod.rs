@@ -66,6 +66,7 @@ pub mod sign_in_host;
 mod simple;
 mod sparse_checkout;
 mod add_ssh_host;
+pub mod command_palette;
 mod prompt_ssh_secret;
 mod ssh_key_passphrase;
 mod start_bisect;
@@ -931,6 +932,9 @@ impl DialogHost {
                 .into(),
             Popup::ImportGitConfig { settings, skipped } => cx
                 .new(|_| import_git_config::ImportGitConfigDialog::new(settings.clone(), *skipped))
+                .into(),
+            Popup::CommandPalette => cx
+                .new(|cx| command_palette::CommandPaletteDialog::new(window, cx))
                 .into(),
             Popup::AddSshHost { request, info } => cx
                 .new(|_| add_ssh_host::AddSshHostDialog::new(*request, info.clone()))

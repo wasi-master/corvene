@@ -20,7 +20,7 @@
 
 use std::rc::Rc;
 
-use corvene_core::menu_state::MenuId;
+use crate::app_menu::menu_id;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -45,57 +45,6 @@ const BUTTON_PADDING: f32 = if cfg!(target_os = "android") { 5. } else { 6. };
 const OPEN_HEIGHT: f32 = HEIGHT;
 #[cfg(windows)]
 const BUTTON_PADDING: f32 = 10.;
-
-/// GHD's menu id for one of Corvene's menu actions (`menu-update.ts` works
-/// on ids).
-fn menu_id(action: &dyn Action) -> Option<MenuId> {
-    let name = action.name();
-    let short = name.rsplit("::").next().unwrap_or(name);
-    Some(match short {
-        "RenameBranch" => MenuId::RenameBranch,
-        "DeleteBranch" => MenuId::DeleteBranch,
-        "DiscardAllChanges" => MenuId::DiscardAllChanges,
-        "StashAllChanges" => MenuId::StashAllChanges,
-        "OpenSettings" => MenuId::Preferences,
-        "UpdateFromDefaultBranch" => MenuId::UpdateBranchWithContributionTargetBranch,
-        "CompareToBranch" => MenuId::CompareToBranch,
-        "MergeIntoCurrentBranch" => MenuId::MergeBranch,
-        "RebaseCurrentBranch" => MenuId::RebaseBranch,
-        "ViewOnGitHub" => MenuId::ViewRepositoryOnGithub,
-        "CompareOnGitHub" => MenuId::CompareOnGithub,
-        "ViewBranchOnGitHub" => MenuId::BranchOnGithub,
-        "OpenInShell" => MenuId::OpenInShell,
-        "Push" => MenuId::Push,
-        "Pull" => MenuId::Pull,
-        "Fetch" => MenuId::Fetch,
-        "GoToSummary" => MenuId::GoToCommitMessage,
-        "NewBranch" => MenuId::CreateBranch,
-        "ShowChanges" => MenuId::ShowChanges,
-        "ShowHistory" => MenuId::ShowHistory,
-        "ShowRepositoryList" => MenuId::ShowRepositoryList,
-        "ShowBranchesList" => MenuId::ShowBranchesList,
-        "ShowInFinder" => MenuId::OpenWorkingDirectory,
-        "RepositorySettings" => MenuId::ShowRepositorySettings,
-        "OpenInEditor" => MenuId::OpenExternalEditor,
-        "OpenWith" => MenuId::OpenWithExternalEditor,
-        "RemoveRepository" => MenuId::RemoveRepository,
-        "NewRepository" => MenuId::NewRepository,
-        "AddLocalRepository" => MenuId::AddLocalRepository,
-        "CloneRepository" => MenuId::CloneRepository,
-        "About" => MenuId::About,
-        "CreatePullRequest" => MenuId::CreatePullRequest,
-        "PreviewPullRequest" => MenuId::PreviewPullRequest,
-        "SquashAndMergeIntoCurrentBranch" => MenuId::SquashAndMergeBranch,
-        "ToggleStashedChanges" => MenuId::ToggleStashedChanges,
-        "NewWorktree" => MenuId::CreateWorktree,
-        "ShowWorktreesList" => MenuId::ShowWorktreesList,
-        "CreateIssue" => MenuId::CreateIssueInRepositoryOnGithub,
-        "ToggleChangesFilter" => MenuId::ToggleChangesFilter,
-        "ExpandActiveResizable" => MenuId::IncreaseActiveResizableWidth,
-        "ContractActiveResizable" => MenuId::DecreaseActiveResizableWidth,
-        _ => return None,
-    })
-}
 
 /// Electron's role accelerators, for the Edit items whose actions the
 /// text fields bind themselves.
