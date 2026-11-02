@@ -4426,6 +4426,17 @@ impl ChangesSidebar {
                     .enabled(!file.status.kind.is_new_or_untracked()),
                 );
             }
+            // `1118-quick-edit`
+            if flags.bool(corvene_core::flags::ids::BROWSE_FILES)
+                && flags.bool(corvene_core::flags::ids::QUICK_EDIT)
+                && file.status.kind != FileStatusKind::Deleted
+            {
+                let path = path.clone();
+                items.push(MenuItem::new(
+                    crate::context_menu::mac_or("Edit File", "Edit file"),
+                    move |_, cx| Dispatcher::edit_working_file(id, path.clone(), cx),
+                ));
+            }
         }
         self.open_menu(items, position, window, cx);
     }

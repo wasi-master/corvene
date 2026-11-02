@@ -279,6 +279,19 @@ pub enum Popup {
     },
     /// Corvene `624-command-palette`.
     CommandPalette,
+    /// Corvene `1366-diff-line-edits`: Edit Line in the Changes diff.
+    EditLine {
+        repo: u64,
+        path: String,
+        /// 1-based, in the working file.
+        line: u32,
+        text: String,
+    },
+    /// Corvene `1118-quick-edit`: leaving an edit that is not saved.
+    ConfirmDiscardFileEdit {
+        repo: u64,
+        close_browser: bool,
+    },
     /// GHD `PopupType.AddSSHHost`: ssh does not know the host's key. The
     /// answer goes to question `request` (`Dispatcher::answer_ssh_prompt`).
     AddSshHost {
@@ -1621,6 +1634,8 @@ pub struct RepositoryState {
     /// Conflicted files open in the merge editor, by path.
     pub merge_editors: std::collections::BTreeMap<String, crate::merge_editor::MergeSession>,
 
+    /// `1117-browse-files`: the open file browser.
+    pub browse: Option<crate::browse_files::BrowseFilesState>,
     /// `1227-fold-merge-commits`: the plain history with merges folded.
     pub merge_folds: Option<crate::merge_folds::MergeFolds>,
 

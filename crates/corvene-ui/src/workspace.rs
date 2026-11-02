@@ -76,6 +76,8 @@ pub struct Workspace {
     section: Section,
     sidebar_width: Pixels,
     resizable: Entity<ResizableState>,
+    /// `1117-browse-files`: shown in place of the repository view.
+    browse_files: Entity<crate::browse_files::BrowseFilesView>,
     /// `431-repository-sidebar`: the pinned list and its column's split.
     pinned_repositories: Entity<RepositoryFoldout>,
     repository_column: Entity<ResizableState>,
@@ -282,6 +284,8 @@ impl Workspace {
         })
         .detach();
 
+        let browse_files =
+            cx.new(|cx| crate::browse_files::BrowseFilesView::new(state.clone(), window, cx));
         let repository_column = cx.new(|_| ResizableState::default());
         cx.subscribe(&repository_column, |_, state, _: &ResizablePanelEvent, cx| {
             if let Some(width) = state.read(cx).sizes().first().copied() {
@@ -338,6 +342,7 @@ impl Workspace {
             workspace_id,
             section: Section::Changes,
             sidebar_width: sidebar_width.max(sidebar_min),
+            browse_files,
             pinned_repositories,
             repository_column,
             resizable,
@@ -1247,6 +1252,12 @@ impl Workspace {
     /// at the window's left edge, when it is showing.
     fn with_repository_column(&self, view: AnyElement, cx: &Context<Self>) -> AnyElement {
         let s = self.state.read(cx);
+        // `1117-browse-files`
+        let view = if s.selected_state().is_some_and(|rs| rs.browse.is_some()) {
+            self.browse_files.clone().into_any_element()
+        } else {
+            view
+        };
         if !s.flags.bool(corvene_core::flags::ids::REPOSITORY_SIDEBAR)
             || !s.settings.repository_sidebar
         {

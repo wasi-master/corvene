@@ -67,6 +67,7 @@ mod simple;
 mod sparse_checkout;
 mod add_ssh_host;
 pub mod command_palette;
+mod edit_line;
 mod prompt_ssh_secret;
 mod ssh_key_passphrase;
 mod start_bisect;
@@ -932,6 +933,32 @@ impl DialogHost {
                 .into(),
             Popup::ImportGitConfig { settings, skipped } => cx
                 .new(|_| import_git_config::ImportGitConfigDialog::new(settings.clone(), *skipped))
+                .into(),
+            Popup::EditLine {
+                repo,
+                path,
+                line,
+                text,
+            } => cx
+                .new(|cx| {
+                    edit_line::EditLineDialog::new(
+                        *repo,
+                        path.clone(),
+                        *line,
+                        text.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::ConfirmDiscardFileEdit {
+                repo,
+                close_browser,
+            } => cx
+                .new(|_| edit_line::ConfirmDiscardFileEditDialog {
+                    repo: *repo,
+                    close_browser: *close_browser,
+                })
                 .into(),
             Popup::CommandPalette => cx
                 .new(|cx| command_palette::CommandPaletteDialog::new(window, cx))

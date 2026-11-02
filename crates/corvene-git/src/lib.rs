@@ -45,6 +45,7 @@ pub mod patch_import;
 pub mod paths;
 pub mod process;
 pub mod proxy;
+pub mod file_browser;
 pub mod rebase_ops;
 pub mod reflog;
 pub mod refs;

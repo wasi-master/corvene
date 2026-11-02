@@ -680,6 +680,12 @@ pub(crate) fn main() {
             Dispatcher::set_diff_wrap_lines(!wrap, cx);
         });
         // Corvene (`1310-file-list-tree`): View › Show Changes as Tree / as List
+        // `1117-browse-files`
+        on_menu_action(cx, |_: &BrowseFiles, cx| {
+            if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                Dispatcher::show_browse_files(id, None, cx);
+            }
+        });
         // `431-repository-sidebar`
         on_menu_action(cx, |_: &ToggleRepositorySidebar, cx| {
             Dispatcher::update_settings(cx, |s| s.repository_sidebar = !s.repository_sidebar);

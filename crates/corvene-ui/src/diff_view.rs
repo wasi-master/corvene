@@ -2368,8 +2368,9 @@ impl DiffView {
     ) {
         // `1303-partial-stash`: Stash … Lines after the discard item
         let items: Vec<MenuItem> = self
-            .discard_item(start, len, kind, cx)
+            .edit_line_item(start, len, cx)
             .into_iter()
+            .chain(self.discard_item(start, len, kind, cx))
             .chain(self.stash_item(start, len, kind, cx))
             .collect();
         if !items.is_empty() {
@@ -2509,6 +2510,53 @@ impl DiffView {
                 cx,
             );
         }))
+    }
+
+    /// `1366-diff-line-edits`: Edit Line on a single added line of a working
+    /// file. Not for a line that is not UTF-8 or a UTF-16 file's, whose bytes
+    /// are not what the box would write.
+    fn edit_line_item(&self, start: u32, len: u32, cx: &Context<Self>) -> Option<MenuItem> {
+        let snap = self.snapshot(cx)?;
+        let on = AppState::global(cx)
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::DIFF_LINE_EDITS);
+        if !on
+            || len != 1
+            || self.source != DiffSource::WorkingDirectory
+            || snap.kind == FileStatusKind::Conflicted
+            || snap.as_text
+            || snap.diff.warnings().is_some_and(|w| w.utf16.is_some())
+        {
+            return None;
+        }
+        let line = snap.diff.hunks()?.iter().find_map(|hunk| {
+            let index = start.checked_sub(hunk.unified_diff_start)? as usize;
+            hunk.lines.get(index)
+        })?;
+        if line.kind != DiffLineKind::Add || line.raw.is_some() {
+            return None;
+        }
+        let (repo, path, number, text) = (
+            snap.repo,
+            snap.path.clone(),
+            line.new_line?,
+            line.text.clone(),
+        );
+        Some(MenuItem::new(
+            crate::context_menu::mac_or("Edit Line…", "Edit line…"),
+            move |_, cx| {
+                Dispatcher::show_popup(
+                    corvene_core::Popup::EditLine {
+                        repo,
+                        path: path.clone(),
+                        line: number,
+                        text: text.clone(),
+                    },
+                    cx,
+                )
+            },
+        ))
     }
 
     /// "Discard Added Line…" for `len` selection lines from `start`; none

@@ -19,6 +19,7 @@ pub mod banner_focus;
 pub mod bibtex;
 pub mod bisect;
 pub mod blame;
+pub mod browse_files;
 pub mod block_diff;
 pub mod bookmarks;
 pub mod branch_pruner;

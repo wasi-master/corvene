@@ -1,0 +1,16 @@
+# The file browser and quick edit (1117-browse-files, 1118-quick-edit, off in
+# the GitHub Desktop preset, desktop/desktop#13831 and #20440): recorded, not
+# compared (GHD has neither).
+name: browse-files
+description: The working tree's files, one open, then in the editor.
+setup: repo
+corvene_flags: 1117-browse-files=on,1118-quick-edit=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::BrowseFiles"}
+    wait: 800
+  - snap: {name: tree, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [120, 180]}
+    wait: 600
+  - snap: {name: file, corvene_only: true}

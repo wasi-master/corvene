@@ -104,6 +104,8 @@ gpui_kit::actions!(
         AddLocalRepository,
         CloneRepository,
         ImportFromGitHubDesktop,
+        // Repository › Browse Files (`1117-browse-files`)
+        BrowseFiles,
         // View › Show Repository Sidebar (`431-repository-sidebar`)
         ToggleRepositorySidebar,
         // View › History File List (`432-history-file-list`)

@@ -7991,6 +7991,37 @@ registry! {
         code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/ssh_prompts.rs"],
     },
 
+    /// A read-only browser of any commit's files.
+    BROWSE_FILES = 1117 "browse-files" {
+        title: "Browse files",
+        summary: "Repository › Browse Files, and Browse Files at This Commit in History, show \
+                  a file tree with a filter beside the highlighted file, for any branch, commit \
+                  or the working tree. Images show as images.",
+        ghd_behaviour: "Files can only be opened in an external editor.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13831)],
+        code: &["crates/corvene-ui/src/browse_files.rs", "crates/corvene-core/src/browse_files.rs"],
+    },
+
+    /// A plain editor for a working file.
+    QUICK_EDIT = 1118 "quick-edit" {
+        title: "Quick edit",
+        summary: "Edit File in the file browser and the Changes list opens a plain editor for a \
+                  working file, with undo, redo and ⌘S, and a warning before leaving unsaved \
+                  changes. A file keeps its line endings and byte order mark. Files that are not \
+                  UTF-8, mix line endings or are over 512 KB stay read-only.",
+        ghd_behaviour: "Files can only be edited in an external editor.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20440)],
+        code: &["crates/corvene-ui/src/browse_files.rs", "crates/corvene-git/src/file_browser.rs"],
+    },
+
 
     // ---- 1200 History & branches (overflow) ----
 
@@ -9521,6 +9552,20 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(11784)],
         code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Edit Line in the Changes diff.
+    DIFF_LINE_EDITS = 1366 "diff-line-edits" {
+        title: "Edit a line in the diff",
+        summary: "The Changes diff's right-click menu on an added line offers Edit Line, which \
+                  changes that line in the working file. Discard already reverts a line.",
+        ghd_behaviour: "Lines can be discarded but not edited.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14243)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/file_browser.rs"],
     },
 
 }

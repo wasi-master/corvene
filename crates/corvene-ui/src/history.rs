@@ -2013,6 +2013,24 @@ impl HistorySidebar {
                 .enabled(unpushed && !busy),
             );
         }
+        // `1117-browse-files`
+        if AppState::global(cx)
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::BROWSE_FILES)
+        {
+            let sha = sha.clone();
+            items.extend([
+                MenuItem::separator(),
+                MenuItem::new(
+                    crate::context_menu::mac_or(
+                        "Browse Files at This Commit",
+                        "Browse files at this commit",
+                    ),
+                    move |_, cx| Dispatcher::show_browse_files(id, Some(sha.clone()), cx),
+                ),
+            ]);
+        }
         items.extend([
             MenuItem::separator(),
             MenuItem::new("Copy SHA", {

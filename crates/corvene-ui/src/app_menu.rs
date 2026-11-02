@@ -212,6 +212,8 @@ pub struct MenuExtras {
     /// Flag `1310-file-list-tree`: View › Show Changes as Tree / as List,
     /// `true` while file lists show trees (set by [`MenuLabelsEvent::of`]).
     pub file_list_tree: Option<bool>,
+    /// `1117-browse-files`
+    pub browse_files: bool,
     /// `431-repository-sidebar`: the sidebar is showing.
     pub repository_sidebar: Option<bool>,
     /// `432-history-file-list`: where the list is.
@@ -261,6 +263,7 @@ impl MenuExtras {
             undo_last_commit: flags.bool(ids::UNDO_COMMIT_MENU_ITEM).then_some(false),
             diff_wrap_lines: flags.bool(ids::DIFF_NO_WRAP).then_some(true),
             file_list_tree: flags.bool(ids::FILE_LIST_TREE).then_some(false),
+            browse_files: flags.bool(ids::BROWSE_FILES),
             repository_sidebar: flags.bool(ids::REPOSITORY_SIDEBAR).then_some(false),
             history_file_list: flags
                 .bool(ids::HISTORY_FILE_LIST)
@@ -837,6 +840,9 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     // storage, where Termux reaches it (`corvene_core::shared_storage`)
     if cfg!(target_os = "android") {
         repository.push(item("&Move to shared storage…", MoveToSharedStorage));
+    }
+    if extras.browse_files {
+        repository.push(item(l("Browse Files", "&Browse files"), BrowseFiles));
     }
     repository.extend([
         separator(),
@@ -1532,6 +1538,7 @@ mod tests {
                     undo_last_commit: Some(true),
                     diff_wrap_lines: Some(bits & 2 != 0),
                     file_list_tree: Some(bits & 2 != 0),
+                    browse_files: false,
                     repository_sidebar: None,
                     history_file_list: None,
                     keymap: KeymapFlags {
