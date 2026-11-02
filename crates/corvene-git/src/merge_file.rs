@@ -358,7 +358,9 @@ pub fn conflict_labels(
     }
 }
 
-fn stage_bytes(
+/// A stage's mode and bytes, by object id; `None` when the side has no such
+/// stage.
+pub fn stage_bytes(
     git: Arc<GitBinary>,
     workdir: &Path,
     entries: &[UnmergedEntry],

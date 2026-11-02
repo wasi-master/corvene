@@ -2,7 +2,7 @@
 //! ribbons between panes, each conflict's accept bar, the overview ruler, the
 //! blame card, the side picker and the "changed on disk" banner.
 
-use corvene_core::merge_editor::{BlameLoad, MergeSession};
+use corvene_core::merge_editor::{BlameLoad, MergeSession, SidePreview};
 use corvene_core::persistence::MergeEditorLayout;
 use corvene_core::{AppState, Dispatcher};
 use corvene_git::merge_file::PickReason;
@@ -226,6 +226,14 @@ impl MergeEditorView {
                         Dispatcher::merge_editor_whitespace_changed(id, cx);
                     }),
                 )
+                .when(self.fixed.is_none(), |d| {
+                    let key = key.clone();
+                    d.child(
+                        small_button("merge-pop-out", "Pop Out", cx)
+                            .ghd_tooltip("Open this file in its own window")
+                            .on_click(cx.listener(move |this, _, _, cx| this.pop_out(&key, cx))),
+                    )
+                })
                 .child(mark)
             })
     }
@@ -466,6 +474,7 @@ impl MergeEditorView {
             return div();
         };
         let left_is_side = side == PaneId::Ours;
+        let ribbon_tops = file.pane(side).ribbon_tops.clone();
         let ribbons: Vec<_> = file
             .doc
             .chunks
@@ -490,6 +499,12 @@ impl MergeEditorView {
                 ) else {
                     return;
                 };
+                // A pane right of this gutter applies its scroll after this
+                // paints: what moved gets one more frame.
+                let tops = (a.text_top, b.text_top);
+                if ribbon_tops.replace(tops) != tops {
+                    window.request_animation_frame();
+                }
                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
                     let (x0, x1) = (bounds.left(), bounds.right());
                     let mid = (x0 + x1) / 2.;
@@ -725,39 +740,185 @@ pub(super) fn side_picker(id: u64, session: &MergeSession, state: &AppState, cx:
         labels.and_then(|l| l.theirs.as_ref()),
         "theirs",
     );
-    let pick = |name: &'static str, text: String, side: ManualConflictResolution| {
+    let previews = session.previews.clone();
+    let card = |name: &'static str,
+                heading: &'static str,
+                text: String,
+                ix: usize,
+                side: ManualConflictResolution| {
         let path = session.path.clone();
-        button(name, text, cx)
-            .on_click(move |_, _, cx| Dispatcher::pick_merge_side(id, path.clone(), side, cx))
+        let preview = previews.as_ref().map(|p| p[ix].clone());
+        div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(heading),
+            )
+            .child(
+                div()
+                    .id(("merge-pick-preview", ix))
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .rounded(BORDER_RADIUS())
+                    .border_1()
+                    .border_color(t.box_border)
+                    .bg(t.box_background)
+                    .child(preview_body(preview, cx)),
+            )
+            .child(div().flex_none().child(
+                button(name, text, cx).on_click(move |_, _, cx| {
+                    Dispatcher::pick_merge_side(id, path.clone(), side, cx)
+                }),
+            ))
     };
     div()
         .flex_1()
         .min_h_0()
         .flex()
         .flex_col()
-        .items_center()
-        .justify_center()
         .gap(SPACING())
+        .p(SPACING())
         .child(
             div()
+                .flex_none()
                 .text_size(FONT_SIZE())
                 .text_color(t.text)
                 .child(reason),
         )
         .child(
             div()
+                .flex_1()
+                .min_h_0()
                 .flex()
                 .flex_row()
-                .gap(SPACING_HALF())
-                .child(pick(
+                .gap(SPACING())
+                .child(card(
                     "merge-pick-ours",
+                    "Ours",
                     ours,
+                    0,
                     ManualConflictResolution::Ours,
                 ))
-                .child(pick(
+                .child(card(
                     "merge-pick-theirs",
+                    "Theirs",
                     theirs,
+                    1,
                     ManualConflictResolution::Theirs,
                 )),
+        )
+}
+
+/// One side's content in the picker.
+fn preview_body(preview: Option<SidePreview>, cx: &App) -> AnyElement {
+    let t = cx.ghd();
+    let note = |text: String| {
+        div()
+            .p(SPACING())
+            .text_size(FONT_SIZE())
+            .text_color(t.text_secondary)
+            .child(text)
+            .into_any_element()
+    };
+    let mono = |text: String| {
+        div()
+            .p(SPACING_HALF())
+            .font_family(mono_font())
+            .text_size(FONT_SIZE_SM())
+            .text_color(t.text)
+            .whitespace_nowrap()
+            .children(
+                text.lines()
+                    .map(|line| div().min_h(zpx(16.)).child(line.to_string()))
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element()
+    };
+    match preview {
+        None => note("Loading…".to_string()),
+        Some(SidePreview::Deleted) => note("Deleted on this side".to_string()),
+        Some(SidePreview::Link(target)) => note(format!("Symbolic link to {target}")),
+        Some(SidePreview::Commit(oid)) => note(format!("Submodule at {oid}")),
+        Some(SidePreview::Binary(bytes)) => note(format!("Binary file, {}", ByteLabel(bytes))),
+        Some(SidePreview::Text(text, more)) => {
+            let mut text = text.to_string();
+            if more {
+                text.push_str("…\n");
+            }
+            mono(text)
+        }
+        Some(SidePreview::Image(blob)) => match image_format(&blob.media_type) {
+            Some(format) => div()
+                .p(SPACING())
+                .size_full()
+                .child(
+                    img(std::sync::Arc::new(Image::from_bytes(
+                        format,
+                        blob.bytes.clone(),
+                    )))
+                    .size_full()
+                    .object_fit(ObjectFit::ScaleDown),
+                )
+                .into_any_element(),
+            None => note(format!("Image, {}", ByteLabel(blob.bytes.len() as u64))),
+        },
+    }
+}
+
+/// What GPUI draws of the image types; SVG and TGA need their own renderers.
+fn image_format(media_type: &str) -> Option<ImageFormat> {
+    Some(match media_type {
+        "image/png" => ImageFormat::Png,
+        "image/jpg" | "image/jpeg" => ImageFormat::Jpeg,
+        "image/gif" => ImageFormat::Gif,
+        "image/webp" => ImageFormat::Webp,
+        "image/bmp" => ImageFormat::Bmp,
+        "image/x-icon" => ImageFormat::Ico,
+        _ => return None,
+    })
+}
+
+struct ByteLabel(u64);
+
+impl std::fmt::Display for ByteLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            n if n < 1024 => write!(f, "{n} bytes"),
+            n if n < 1024 * 1024 => write!(f, "{:.1} KB", n as f64 / 1024.),
+            n => write!(f, "{:.1} MB", n as f64 / (1024. * 1024.)),
+        }
+    }
+}
+
+/// The main window while a file is in its own.
+pub(super) fn popped_out_placeholder(key: &FileKey, cx: &App) -> Div {
+    let t = cx.ghd();
+    let (id, path) = key.clone();
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(SPACING())
+        .bg(t.background)
+        .child(
+            div()
+                .text_size(FONT_SIZE())
+                .text_color(t.text_secondary)
+                .child("This file is open in its own window."),
+        )
+        .child(
+            button("merge-bring-back", "Bring Back", cx)
+                .on_click(move |_, _, cx| Dispatcher::set_merge_popped_out(id, &path, false, cx)),
         )
 }

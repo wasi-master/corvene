@@ -20,6 +20,7 @@ mod highlight;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,7 +33,7 @@ use corvene_merge::anchors::Anchors;
 use corvene_merge::{ChunkKind, DocMode, LiveState, MergeDocument, Resolution, Side, Text};
 use gpui_kit::component::input::{
     Editor, EditorState, InputEvent, RangeDecoration, RangeDecorationCollection,
-    RangeDecorationStyle,
+    RangeDecorationStyle, TextDecoration, TextDecorationCollection,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -49,6 +50,13 @@ const SCAN_DELAY: Duration = Duration::from_millis(30);
 
 /// `banner_focus` focuses a new banner after 200 ms.
 const FOCUS_AFTER_BANNER: Duration = Duration::from_millis(300);
+
+/// Chunks larger than this get no word marks.
+const MAX_WORD_MARK_BYTES: usize = 16 * 1024;
+
+/// A popped-out window's size.
+const POP_OUT_WIDTH: f32 = 1200.;
+const POP_OUT_HEIGHT: f32 = 760.;
 
 /// Lines kept above a conflict the editor jumps to.
 const JUMP_CONTEXT_LINES: f32 = 5.;
@@ -142,7 +150,10 @@ pub(crate) struct Pane {
     /// The pane body's last bounds: what floats over it is placed from here
     /// (the editor's own bounds are inset by its padding).
     pub body: Rc<Cell<Bounds<Pixels>>>,
+    /// Where its ribbons last ended, on this pane and on the result.
+    pub ribbon_tops: Rc<Cell<(Pixels, Pixels)>>,
     fills: RangeDecorationCollection,
+    words: TextDecorationCollection,
     last_scroll: Pixels,
 }
 
@@ -184,6 +195,72 @@ pub struct MergeEditorView {
     pub(crate) open: HashMap<FileKey, OpenFile>,
     /// The chunk and side the pointer is over, for the blame card.
     pub(crate) hovered: Option<(u32, Side)>,
+    /// A popped-out window's one file; the main view follows the selection.
+    pub(crate) fixed: Option<FileKey>,
+}
+
+/// The windows files are popped out into.
+#[derive(Default)]
+struct PoppedOut(Vec<(FileKey, AnyWindowHandle)>);
+
+impl Global for PoppedOut {}
+
+/// The most recent pop-out window, for the control hook.
+pub fn last_popped_out_window(cx: &App) -> Option<AnyWindowHandle> {
+    cx.try_global::<PoppedOut>()?.0.last().map(|(_, w)| *w)
+}
+
+/// The Pop Out button: the file moves to a window of its own, its text kept
+/// (its undo history stays behind: the editors are tied to their window).
+fn pop_out(state: Entity<AppState>, key: FileKey, cx: &mut App) {
+    if let Some(window) = cx
+        .try_global::<PoppedOut>()
+        .and_then(|p| p.0.iter().find(|(k, _)| *k == key).map(|(_, w)| *w))
+    {
+        let _ = window.update(cx, |_, window, _| window.activate_window());
+        return;
+    }
+    Dispatcher::set_merge_popped_out(key.0, &key.1, true, cx);
+    let bounds = Bounds::centered(None, size(px(POP_OUT_WIDTH), px(POP_OUT_HEIGHT)), cx);
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some(key.1.clone().into()),
+            ..TitlebarOptions::default()
+        }),
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_min_size: Some(size(px(600.), px(400.))),
+        app_id: Some(corvene_platform::BUNDLE_ID.into()),
+        ..WindowOptions::default()
+    };
+    let view_key = key.clone();
+    let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+        let close_key = view_key.clone();
+        window.on_window_should_close(cx, move |_, cx| {
+            Dispatcher::set_merge_popped_out(close_key.0, &close_key.1, false, cx);
+            true
+        });
+        cx.new(|cx| {
+            let mut view = MergeEditorView::new(state, cx);
+            view.fixed = Some(view_key);
+            view
+        })
+    });
+    match opened {
+        Ok((handle, view)) => {
+            let released = key.clone();
+            cx.observe_release(&view, move |_, cx| {
+                cx.default_global::<PoppedOut>()
+                    .0
+                    .retain(|(k, _)| *k != released);
+            })
+            .detach();
+            cx.default_global::<PoppedOut>().0.push((key, handle));
+        }
+        Err(err) => {
+            tracing::warn!(%err, "could not open the merge editor's window");
+            Dispatcher::set_merge_popped_out(key.0, &key.1, false, cx);
+        }
+    }
 }
 
 fn editor_for(
@@ -237,6 +314,93 @@ fn fill_range(text: &str, range: std::ops::Range<usize>) -> std::ops::Range<usiz
     range.start..end
 }
 
+/// What two versions of a chunk change, as byte ranges from their starts;
+/// large chunks are not worth marking.
+fn word_marks(a: &str, b: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    if a.len().max(b.len()) > MAX_WORD_MARK_BYTES {
+        return Default::default();
+    }
+    crate::diff_view_rows::word_changes(a, b)
+}
+
+fn moved(marks: Vec<Range<usize>>, by: usize) -> impl Iterator<Item = Range<usize>> {
+    marks.into_iter().map(move |r| r.start + by..r.end + by)
+}
+
+/// The words each side pane marks ([base, ours, theirs]): a conflict's sides
+/// against each other, any other chunk's change against the base.
+fn side_word_marks(doc: &MergeDocument) -> [Vec<Range<usize>>; 3] {
+    let mut out: [Vec<Range<usize>>; 3] = Default::default();
+    let start = |chunk: &corvene_merge::MergeChunk, side: Side| {
+        doc.text(side).byte_range(chunk.lines(side)).start
+    };
+    for chunk in doc.chunks.iter().filter(|c| c.has_ribbons()) {
+        let text = |side| doc.side_text(chunk, side);
+        let at = |side| start(chunk, side);
+        match chunk.kind {
+            ChunkKind::Unchanged => {}
+            ChunkKind::Conflict => {
+                let (a, b) = word_marks(text(Side::Ours), text(Side::Theirs));
+                out[1].extend(moved(a, at(Side::Ours)));
+                out[2].extend(moved(b, at(Side::Theirs)));
+            }
+            ChunkKind::OursOnly | ChunkKind::BothSame => {
+                let (a, b) = word_marks(text(Side::Base), text(Side::Ours));
+                out[0].extend(moved(a, at(Side::Base)));
+                out[1].extend(moved(b, at(Side::Ours)));
+                if chunk.kind == ChunkKind::BothSame {
+                    let (_, b) = word_marks(text(Side::Base), text(Side::Theirs));
+                    out[2].extend(moved(b, at(Side::Theirs)));
+                }
+            }
+            ChunkKind::TheirsOnly => {
+                let (a, b) = word_marks(text(Side::Base), text(Side::Theirs));
+                out[0].extend(moved(a, at(Side::Base)));
+                out[2].extend(moved(b, at(Side::Theirs)));
+            }
+        }
+    }
+    out
+}
+
+/// The words the result marks: an unresolved block's sides against each
+/// other, anything else against the base.
+fn result_word_marks(doc: &MergeDocument, text: &str, live: &LiveState) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    for (chunk, state) in doc.chunks.iter().zip(&live.chunks) {
+        if !chunk.kind.is_change() {
+            continue;
+        }
+        if let Some(block) = &state.block {
+            let (a, b) = word_marks(block.ours(text), block.theirs(text));
+            out.extend(moved(a, block.ours.start));
+            out.extend(moved(b, block.theirs.start));
+        } else if chunk.has_ribbons()
+            && let Some(content) = text.get(state.range.clone())
+        {
+            let (_, b) = word_marks(doc.side_text(chunk, Side::Base), content);
+            out.extend(moved(b, state.range.start));
+        }
+    }
+    out
+}
+
+fn word_color(t: &GhdTheme) -> Hsla {
+    // over a chunk's own colour, whichever that is
+    t.text.opacity(if t.is_dark() { 0.2 } else { 0.14 })
+}
+
+fn decorations(marks: Vec<Range<usize>>, color: Hsla) -> Vec<TextDecoration> {
+    let style = HighlightStyle {
+        background_color: Some(color),
+        ..HighlightStyle::default()
+    };
+    marks
+        .into_iter()
+        .map(|range| TextDecoration::new(range, style))
+        .collect()
+}
+
 /// A chunk's colour.
 pub(crate) fn chunk_color(kind: ChunkKind, resolution: Resolution, t: &GhdTheme) -> Hsla {
     match (kind, resolution) {
@@ -255,11 +419,22 @@ impl MergeEditorView {
             focus: cx.focus_handle(),
             open: HashMap::new(),
             hovered: None,
+            fixed: None,
         }
+    }
+
+    /// Sends the current text along, then moves the file to its own window.
+    pub(crate) fn pop_out(&mut self, key: &FileKey, cx: &mut Context<Self>) {
+        self.rescan(key, cx);
+        let (state, key) = (self.state.clone(), key.clone());
+        cx.defer(move |cx| pop_out(state, key, cx));
     }
 
     /// The selected repository and conflicted file.
     pub(crate) fn current_key(&self, cx: &App) -> Option<FileKey> {
+        if let Some(fixed) = &self.fixed {
+            return Some(fixed.clone());
+        }
         let s = self.state.read(cx);
         let id = s.selected?;
         let path = s.repo_states.get(&id)?.selected_file.clone()?;
@@ -325,12 +500,17 @@ impl MergeEditorView {
             let highlighter =
                 highlight::MergeHighlighter::new(path.clone(), engine, theme.clone(), tap);
             let editor = editor_for(text, readonly, highlighter, window, cx);
-            let fills = editor.update(cx, |e, cx| {
-                e.create_range_decorations_collection(Vec::new(), cx)
+            let (fills, words) = editor.update(cx, |e, cx| {
+                (
+                    e.create_range_decorations_collection(Vec::new(), cx),
+                    e.create_decorations_collection(Vec::new(), cx),
+                )
             });
             Pane {
                 editor,
+                words,
                 body: Rc::default(),
+                ribbon_tops: Rc::new(Cell::new((px(0.), px(0.)))),
                 fills,
                 last_scroll: px(0.),
             }
@@ -370,6 +550,15 @@ impl MergeEditorView {
             scan: None,
             _subscriptions: subscriptions,
         };
+        let [base_words, ours_words, theirs_words] = side_word_marks(&doc);
+        let mark = word_color(&cx.ghd().clone());
+        for (id, marks) in [
+            (PaneId::Base, base_words),
+            (PaneId::Ours, ours_words),
+            (PaneId::Theirs, theirs_words),
+        ] {
+            file.pane(id).words.set(decorations(marks, mark), cx);
+        }
         self.open.insert(key.clone(), file);
         self.rescan(key, cx);
         if let Some(file) = self.open.get(key) {
@@ -461,6 +650,10 @@ impl MergeEditorView {
         ] {
             file.pane(id).fills.set(fills, cx);
         }
+        let marks = result_word_marks(&doc, text, &live);
+        file.pane(PaneId::Result)
+            .words
+            .set(decorations(marks, word_color(&t)), cx);
         file.live = live;
         Dispatcher::merge_text_changed(key.0, &key.1, text.to_string(), cx);
         cx.notify();
@@ -854,10 +1047,24 @@ impl Render for MergeEditorView {
             )
         };
         let Some(session) = session else {
+            // the file was resolved: its window has nothing left to show
+            if self.fixed.is_some() {
+                window.defer(cx, |window, _| window.remove_window());
+                return div().size_full().into_any_element();
+            }
             let open_key = key.clone();
             cx.defer(move |cx| Dispatcher::open_merge_editor(open_key.0, open_key.1, cx));
             return Self::message("Loading…".to_string(), &t).into_any_element();
         };
+        // the other view has the file: its editors here are out of date
+        if session.popped_out != self.fixed.is_some() {
+            self.open.remove(&key);
+            if self.fixed.is_some() {
+                window.defer(cx, |window, _| window.remove_window());
+                return div().size_full().into_any_element();
+            }
+            return chrome::popped_out_placeholder(&key, cx).into_any_element();
+        }
         self.sync_open(&key, window, cx);
         let content = if session.loading && session.generation == 0 {
             Self::message("Loading…".to_string(), &t).into_any_element()
@@ -923,8 +1130,57 @@ impl Render for MergeEditorView {
 
 #[cfg(test)]
 mod tests {
-    use super::{fill_range, lines_of};
-    use corvene_merge::Text;
+    use super::{fill_range, lines_of, result_word_marks, side_word_marks};
+    use corvene_merge::anchors::Anchors;
+    use corvene_merge::{MergeInput, Text};
+
+    fn doc(working: &str) -> corvene_merge::MergeDocument {
+        corvene_merge::reconcile(&MergeInput {
+            base: Some("a b c\nkeep\nd e\n"),
+            ours: "a X c\nkeep\nd e\n",
+            theirs: "a Y c\nkeep\nd F\n",
+            working,
+            marker_size: 7,
+            ..MergeInput::default()
+        })
+    }
+
+    const WORKING: &str = "<<<<<<< H\na X c\n=======\na Y c\n>>>>>>> t\nkeep\nd F\n";
+
+    #[test]
+    fn side_panes_mark_only_the_changed_words() {
+        let [base, ours, theirs] = side_word_marks(&doc(WORKING));
+        let (ours_text, theirs_text) = ("a X c\nkeep\nd e\n", "a Y c\nkeep\nd F\n");
+        assert_eq!(
+            ours.iter()
+                .map(|r| &ours_text[r.clone()])
+                .collect::<Vec<_>>(),
+            ["X"]
+        );
+        assert_eq!(
+            theirs
+                .iter()
+                .map(|r| &theirs_text[r.clone()])
+                .collect::<Vec<_>>(),
+            ["Y", "F"]
+        );
+        assert_eq!(base.len(), 1, "the base's word theirs replaced");
+    }
+
+    #[test]
+    fn the_result_marks_a_blocks_sides_and_other_changes() {
+        let doc = doc(WORKING);
+        let anchors = Anchors::new(doc.result_ranges());
+        let live = corvene_merge::scan(&doc, WORKING, anchors.ranges());
+        let marks = result_word_marks(&doc, WORKING, &live);
+        assert_eq!(
+            marks
+                .iter()
+                .map(|r| &WORKING[r.clone()])
+                .collect::<Vec<_>>(),
+            ["X", "Y", "F"]
+        );
+    }
 
     #[test]
     fn chunk_lines_follow_their_bytes() {

@@ -10,6 +10,6 @@ steps:
     corvene: {click: [747, 456]}
     wait: 1000
   - ghd: {skip: true}
-    corvene: {click: [1083, 131]}
+    corvene: {click: [1022, 131]}
     wait: 600
   - snap: {name: stacked, corvene_only: true}

@@ -9444,8 +9444,10 @@ registry! {
                   ruler marks every conflict, F7 and Shift-F7 move between them, and hovering \
                   a chunk shows the commit that changed it on that side. Edits are saved to \
                   the file as you go, with markers kept for unresolved conflicts, and Mark as \
-                  Resolved stages it. Binary and delete/modify conflicts get a side picker. \
-                  The conflicts dialog gets a Resolve button for each file.",
+                  Resolved stages it. Changed words are marked inside each chunk. Binary and delete/modify \
+                  conflicts get a side picker that previews both sides. \
+                  The conflicts dialog gets a Resolve button for each file, and Pop Out moves \
+                  the editor to a window of its own.",
         ghd_behaviour: "Conflicted files show \"The file is in conflict and must be resolved \
                         via the command line\" and are resolved in an external editor.",
         nature: Nature::Feature,

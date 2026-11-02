@@ -21,7 +21,7 @@ use corvene_git::merge_file::{
     self, ChunkBlame, MergeInputs, PickReason, WriteOutcome, WriteStamp,
 };
 use corvene_merge::{ConflictStyle, Labels, MergeDocument, MergeInput, Side};
-use corvene_models::{ManualConflictResolution, Section};
+use corvene_models::{Diff, FileStatusKind, ImageBlob, ManualConflictResolution, Section};
 
 use crate::dispatcher::Dispatcher;
 use crate::host::{AsyncCtx, Host};
@@ -30,6 +30,9 @@ use crate::state::{AppState, RepositoryState};
 
 /// How long typing must pause before the result is written.
 pub const MERGE_SAVE_DELAY: Duration = Duration::from_millis(400);
+
+/// How many lines of a text a side picker preview holds.
+pub const PREVIEW_LINES: usize = 200;
 
 /// Whether the editor replaces the conflicted file message.
 pub fn enabled(state: &AppState) -> bool {
@@ -44,6 +47,48 @@ pub enum BlameLoad {
     /// The side has no revision or path to blame (a stash without its
     /// commit, a rename on that side).
     Unavailable,
+}
+
+/// What the side picker shows of one side.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidePreview {
+    Deleted,
+    Image(Arc<ImageBlob>),
+    /// Its first [`PREVIEW_LINES`] lines, and whether there are more.
+    Text(Arc<str>, bool),
+    /// A symbolic link's target.
+    Link(String),
+    /// A submodule's commit.
+    Commit(String),
+    Binary(u64),
+}
+
+/// A stage as the side picker shows it.
+pub fn side_preview(path: &str, stage: Option<(String, Vec<u8>)>) -> SidePreview {
+    let Some((mode, bytes)) = stage else {
+        return SidePreview::Deleted;
+    };
+    if mode == "120000" {
+        return SidePreview::Link(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    let size = bytes.len() as u64;
+    if !bytes.contains(&0)
+        && let Ok(text) = std::str::from_utf8(&bytes)
+    {
+        let end = text
+            .match_indices('\n')
+            .nth(PREVIEW_LINES - 1)
+            .map_or(text.len(), |(at, _)| at + 1);
+        return SidePreview::Text(Arc::from(&text[..end]), end < text.len());
+    }
+    let image = corvene_git::image_diff(path, FileStatusKind::New, || Some(bytes), || None);
+    match image {
+        Diff::Image {
+            current: Some(blob),
+            ..
+        } => SidePreview::Image(Arc::new(blob)),
+        _ => SidePreview::Binary(size),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +108,10 @@ pub struct MergeSession {
     pub document: Option<Arc<MergeDocument>>,
     /// The file goes to the side picker.
     pub pick: Option<PickReason>,
+    /// Ours and theirs, for the side picker.
+    pub previews: Option<Arc<[SidePreview; 2]>>,
+    /// The file is open in a window of its own.
+    pub popped_out: bool,
     /// Why there is nothing to show.
     pub message: Option<String>,
     /// The result as the view last reported it.
@@ -92,6 +141,8 @@ impl MergeSession {
             inputs: None,
             document: None,
             pick: None,
+            previews: None,
+            popped_out: false,
             message: None,
             text: Arc::from(""),
             saved: Arc::from(""),
@@ -158,7 +209,13 @@ pub fn build_document(inputs: &MergeInputs, ignore_whitespace: bool) -> MergeDoc
     })
 }
 
-type Loaded = Result<(MergeInputs, Option<MergeDocument>), String>;
+struct LoadedFile {
+    inputs: MergeInputs,
+    document: Option<MergeDocument>,
+    previews: Option<[SidePreview; 2]>,
+}
+
+type Loaded = Result<LoadedFile, String>;
 
 impl Dispatcher {
     /// Opens `path` in the merge editor; an open session stays as it is.
@@ -190,13 +247,38 @@ impl Dispatcher {
         spawn_bg(
             cx,
             move || -> Loaded {
-                let inputs = merge_file::load_merge_inputs(git, &workdir, &load_path)
+                let inputs = merge_file::load_merge_inputs(git.clone(), &workdir, &load_path)
                     .map_err(|err| err.to_string())?;
                 let document = inputs
                     .pick
                     .is_none()
                     .then(|| build_document(&inputs, ignore_whitespace));
-                Ok((inputs, document))
+                let previews = inputs.pick.is_some().then(|| {
+                    [2, 3].map(|stage| {
+                        let bytes =
+                            merge_file::stage_bytes(git.clone(), &workdir, &inputs.entries, stage);
+                        match bytes {
+                            Ok(Some((mode, _))) if mode == "160000" => {
+                                let side = inputs.entries.iter().find(|e| e.stage == stage);
+                                SidePreview::Commit(side.map_or(String::new(), |e| e.oid.clone()))
+                            }
+                            // a submodule's commit is not in this repository
+                            Err(_) => inputs
+                                .entries
+                                .iter()
+                                .find(|e| e.stage == stage && e.mode == "160000")
+                                .map_or(SidePreview::Binary(0), |e| {
+                                    SidePreview::Commit(e.oid.clone())
+                                }),
+                            Ok(stage) => side_preview(&load_path, stage),
+                        }
+                    })
+                });
+                Ok(LoadedFile {
+                    inputs,
+                    document,
+                    previews,
+                })
             },
             move |loaded, cx| Self::apply_merge_load(id, &path, loaded, cx),
         );
@@ -213,7 +295,12 @@ impl Dispatcher {
             session.message = None;
             session.blame.clear();
             match loaded {
-                Ok((inputs, document)) => {
+                Ok(LoadedFile {
+                    inputs,
+                    document,
+                    previews,
+                }) => {
+                    session.previews = previews.map(Arc::new);
                     if inputs.entries.is_empty() {
                         session.message = Some("This file is no longer in conflict.".to_string());
                     }
@@ -250,6 +337,32 @@ impl Dispatcher {
                 session.document = Some(Arc::new(build_document(&inputs, ignore)));
                 session.generation += 1;
             }
+            cx.notify();
+        });
+    }
+
+    /// The Pop Out button and closing that window: the view opening the file
+    /// starts from the text as it is now, so its chunks are worked out again.
+    pub fn set_merge_popped_out(id: u64, path: &str, popped_out: bool, cx: &mut dyn Host) {
+        let ignore = Self::state(cx)
+            .read(cx)
+            .settings
+            .merge_editor_ignore_whitespace;
+        Self::state(cx).update(cx, |s, cx| {
+            let Some(session) = s.repo_state_mut(id).merge_editors.get_mut(path) else {
+                return;
+            };
+            if session.popped_out == popped_out {
+                return;
+            }
+            session.popped_out = popped_out;
+            if let Some(inputs) = session.inputs.as_ref().filter(|_| session.pick.is_none()) {
+                let mut inputs = (**inputs).clone();
+                inputs.working = Some(session.text.to_string());
+                session.document = Some(Arc::new(build_document(&inputs, ignore)));
+                session.generation += 1;
+            }
+            session.focus_request += 1;
             cx.notify();
         });
     }
@@ -674,6 +787,31 @@ mod tests {
         assert!(session.dirty());
         session.saved = session.text.clone();
         assert!(!session.dirty());
+    }
+
+    #[test]
+    fn previews_show_each_kind_of_side() {
+        assert_eq!(side_preview("a", None), SidePreview::Deleted);
+        let stage = |mode: &str, bytes: &[u8]| Some((mode.to_string(), bytes.to_vec()));
+        assert_eq!(
+            side_preview("a", stage("120000", b"target")),
+            SidePreview::Link("target".into())
+        );
+        assert_eq!(
+            side_preview("a.bin", stage("100644", b"a\0b")),
+            SidePreview::Binary(3)
+        );
+        assert_eq!(
+            side_preview("a.txt", stage("100644", b"one\ntwo\n")),
+            SidePreview::Text(Arc::from("one\ntwo\n"), false)
+        );
+        let long = "x\n".repeat(PREVIEW_LINES + 5);
+        let SidePreview::Text(text, more) = side_preview("a.txt", stage("100644", long.as_bytes()))
+        else {
+            panic!("not text");
+        };
+        assert!(more);
+        assert_eq!(text.lines().count(), PREVIEW_LINES);
     }
 
     #[test]

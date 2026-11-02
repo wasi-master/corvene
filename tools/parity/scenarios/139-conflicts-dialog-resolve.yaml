@@ -10,4 +10,4 @@ steps:
   - ghd: {skip: true}
     corvene: {key: escape}
     wait: 800
-  - snap: {name: side-picker, corvene_only: true, note: "the binary conflict selected"}
+  - snap: {name: side-picker, corvene_only: true, note: "the binary conflict selected, each side's size"}

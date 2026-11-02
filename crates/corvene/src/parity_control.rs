@@ -166,6 +166,14 @@ fn handle(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, Stri
         }
         _ => {}
     }
+    // `1361-merge-editor`: a popped-out file's window has no workspace
+    if request["window"].as_str() == Some("merge") {
+        let window = corvene_ui::merge_editor::last_popped_out_window(cx)
+            .ok_or_else(|| "no popped-out window".to_string())?;
+        return window
+            .update(cx, |_, window, cx| window_command(cmd, request, window, cx))
+            .map_err(|err| err.to_string())?;
+    }
     // `429-multiple-windows`: the command runs for the window's workspace
     let entry = target_window(request, cx)?;
     Dispatcher::enter_workspace(entry.workspace, cx);

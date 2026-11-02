@@ -11,6 +11,6 @@ steps:
     wait: 1000
   - snap: {name: three-pane, corvene_only: true, note: "ribbons, accept bars and the ruler"}
   - ghd: {skip: true}
-    corvene: {click: [1133, 131]}
+    corvene: {click: [1074, 131]}
     wait: 600
   - snap: {name: with-base, corvene_only: true}
