@@ -701,6 +701,66 @@ pub fn discard_changes(
     Ok(untrashable)
 }
 
+/// Corvene `1365-discard-explains-leftovers` (desktop/desktop#11784): what
+/// still differs from the index after a discard.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiscardLeftovers {
+    /// Only the file mode differs: the drive does not keep it.
+    pub mode_only: Vec<String>,
+    /// The contents differ too.
+    pub changed: Vec<String>,
+}
+
+/// Refresh the index's cached file times, which clears files whose contents
+/// never changed (GHD reads a status that does not take the index lock, so
+/// they stay listed), and list what still differs among `paths`.
+pub fn discard_leftovers(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    paths: &[&str],
+) -> Result<DiscardLeftovers> {
+    GitCommand::new(git.clone())
+        .args(["update-index", "-q", "--refresh"])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?;
+    let mut leftovers = DiscardLeftovers::default();
+    if paths.is_empty() {
+        return Ok(leftovers);
+    }
+    let out = GitCommand::new(git.clone())
+        .args(["diff-files", "--raw", "--no-renames", "-z", "--"])
+        .args(paths.iter().copied())
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .current_dir(workdir)
+        .run()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let pieces: Vec<&str> = text.split('\0').collect();
+    let (pairs, _) = pieces.as_chunks::<2>();
+    for [meta, path] in pairs {
+        let mut fields = meta.trim_start_matches(':').split(' ');
+        let (Some(old_mode), Some(new_mode)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        // a file on disk with the index's blob differs in its mode alone
+        let index_oid = fields.next().unwrap_or_default();
+        let same_blob = GitCommand::new(git.clone())
+            .args(["hash-object", "--"])
+            .arg(path)
+            .current_dir(workdir)
+            .run()
+            .ok()
+            .and_then(|out| out.stdout_string().ok())
+            .is_some_and(|oid| oid.trim() == index_oid);
+        if old_mode != new_mode && same_blob {
+            leftovers.mode_only.push(path.to_string());
+        } else {
+            leftovers.changed.push(path.to_string());
+        }
+    }
+    Ok(leftovers)
+}
+
 /// Delete worktree paths (files or folders) for good: the new files
 /// [`discard_changes`] could not move to the Trash, once the user agreed.
 pub fn delete_worktree_paths(workdir: &Path, paths: &[String]) -> Result<()> {
@@ -1203,6 +1263,42 @@ mod tests {
         );
         let status = crate::get_status(git, path).unwrap();
         assert_eq!(status.files.len(), 2);
+    }
+
+    #[test]
+    fn discard_leftovers_refreshes_and_names_what_differs() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("touched"), "t\n").unwrap();
+        std::fs::write(path.join("edited"), "e\n").unwrap();
+        std::fs::write(path.join("moded"), "m\n").unwrap();
+        let run_git = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+        };
+        run_git(&["add", "."]);
+        run_git(&["commit", "-qm", "files"]);
+        // same contents, new file times
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(path.join("touched"), "t\n").unwrap();
+        std::fs::write(path.join("edited"), "changed\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path.join("moded"), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let leftovers = discard_leftovers(git, path, &["touched", "edited", "moded"]).unwrap();
+        assert_eq!(leftovers.changed, vec!["edited".to_string()]);
+        #[cfg(unix)]
+        assert_eq!(leftovers.mode_only, vec!["moded".to_string()]);
     }
 
     #[test]

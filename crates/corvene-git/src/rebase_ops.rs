@@ -740,7 +740,7 @@ pub fn abort_rebase(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
         .args(["rebase", "--abort"])
         .current_dir(workdir)
         .run()?;
-    Ok(())
+    crate::rewrite_untracked::restore_set_aside(workdir)
 }
 
 /// GHD `continueRebase`: stage the (resolved) tracked files, then
@@ -786,7 +786,7 @@ pub fn continue_rebase(
                 on_progress(p);
             }
         });
-    Ok(classify_rebase(workdir, result))
+    Ok(restored_after(workdir, classify_rebase(workdir, result)))
 }
 
 /// Corvene `892-squash-message-survives-conflicts`: GIT_EDITOR for
@@ -859,6 +859,9 @@ pub struct RebaseOptions {
     /// commits they point at ([`with_update_refs`]); empty leaves every
     /// other branch where it is.
     pub update_refs: UpdateRefs,
+    /// Corvene `1226-rewrite-keeps-untracked`: files a commit in the range
+    /// stopped tracking are kept out of the replay's way.
+    pub keep_untracked: bool,
 }
 
 /// Corvene `1221-stacked-branch-refs`: full branch refs
@@ -965,6 +968,15 @@ pub fn rebase_interactive(
     if todo_path.contains('"') {
         return RebaseResult::Error("temporary todo path contains a quote".into());
     }
+    if options.keep_untracked
+        && let Err(err) = crate::rewrite_untracked::set_aside_for_rewrite(
+            git.clone(),
+            workdir,
+            last_retained_ref,
+        )
+    {
+        return RebaseResult::Error(err.to_string());
+    }
     let sequence_editor = format!("sequence.editor=cat \"{todo_path}\" >");
     let base = last_retained_ref.unwrap_or("--root");
     let mut args = vec![
@@ -992,7 +1004,16 @@ pub fn rebase_interactive(
         });
     let result = classify_rebase(workdir, result);
     mark_kept_messages(workdir, options.keep_messages, &result);
-    result
+    restored_after(workdir, result)
+}
+
+/// `1226-rewrite-keeps-untracked`: the files set aside come back once the
+/// rebase is over. A no-op without any.
+fn restored_after(workdir: &Path, result: RebaseResult) -> RebaseResult {
+    match crate::rewrite_untracked::restore_set_aside(workdir) {
+        Ok(()) => result,
+        Err(err) => RebaseResult::Error(err.to_string()),
+    }
 }
 
 /// Commits from `last_retained_ref` (exclusive) to HEAD, oldest first; the
@@ -1290,6 +1311,8 @@ pub fn reword(
                 keep_messages,
                 autostash: true,
                 update_refs: UpdateRefs::new(),
+                // a Corvene operation: nothing of GHD's to keep
+                keep_untracked: true,
             },
             |_| {},
         )
@@ -2243,6 +2266,142 @@ mod tests {
         // Undo puts it back
         restore_branch_tips(git.clone(), path, &[("refs/heads/a".into(), old_a.clone())]).unwrap();
         assert_eq!(rev("a"), old_a);
+    }
+
+    /// desktop/desktop#18331: base, then A adds `f`, B runs `git rm --cached
+    /// f` and ignores it, C changes `g`. `f` has local work on disk.
+    fn stopped_tracking_repo(ignored: bool) -> (tempfile::TempDir, Arc<GitBinary>, Vec<Commit>) {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("z"), "base\n").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "base"]);
+        std::fs::write(path.join("f"), "v1\n").unwrap();
+        std::fs::write(path.join("g"), "x\n").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "A"]);
+        run(path, &["rm", "-q", "--cached", "f"]);
+        if ignored {
+            std::fs::write(path.join(".gitignore"), "f\n").unwrap();
+            run(path, &["add", ".gitignore"]);
+        }
+        run(path, &["commit", "-qm", "B"]);
+        std::fs::write(path.join("g"), "y\n").unwrap();
+        run(path, &["add", "g"]);
+        run(path, &["commit", "-qm", "C"]);
+        std::fs::write(path.join("f"), "local work\n").unwrap();
+        let all = commits_in_range(git.clone(), path, "HEAD~3..HEAD")
+            .unwrap()
+            .unwrap();
+        let identity = corvene_models::CommitIdentity {
+            name: "t".into(),
+            email: "t@t".into(),
+            seconds: 0,
+            offset: 0,
+        };
+        let commits = all
+            .iter()
+            .map(|one| Commit {
+                sha: one.sha.clone(),
+                summary: one.summary.clone(),
+                body: String::new(),
+                author: identity.clone(),
+                committer: identity.clone(),
+                parents: Vec::new(),
+                trailers: Vec::new(),
+                tags: Vec::new(),
+                signature: None,
+            })
+            .collect();
+        (dir, git, commits)
+    }
+
+    fn squash_stopped_tracking(
+        git: Arc<GitBinary>,
+        path: &Path,
+        commits: &[Commit],
+        keep_untracked: bool,
+    ) -> RebaseResult {
+        squash(
+            git,
+            path,
+            &commits[1..],
+            &commits[0],
+            Some("HEAD~3"),
+            "All",
+            RebaseOptions {
+                keep_untracked,
+                ..RebaseOptions::default()
+            },
+            |_| {},
+        )
+    }
+
+    #[test]
+    fn squash_keeps_a_file_that_stopped_being_tracked() {
+        for ignored in [true, false] {
+            let (dir, git, commits) = stopped_tracking_repo(ignored);
+            let path = dir.path();
+            let result = squash_stopped_tracking(git.clone(), path, &commits, true);
+            assert_eq!(result, RebaseResult::CompletedWithoutError);
+            assert_eq!(
+                std::fs::read_to_string(path.join("f")).unwrap(),
+                "local work\n"
+            );
+            assert!(!git_dir(path).join("corvene-set-aside").exists());
+            let tracked = GitCommand::new(git)
+                .args(["ls-files", "--", "f"])
+                .current_dir(path)
+                .run()
+                .unwrap();
+            assert!(tracked.stdout.is_empty());
+        }
+    }
+
+    #[test]
+    fn plain_squash_loses_a_file_that_stopped_being_tracked() {
+        // why `keep_untracked` exists: git's own replay deletes it
+        let (dir, git, commits) = stopped_tracking_repo(true);
+        let path = dir.path();
+        let result = squash_stopped_tracking(git, path, &commits, false);
+        assert_eq!(result, RebaseResult::CompletedWithoutError);
+        assert!(!path.join("f").exists());
+    }
+
+    #[test]
+    fn set_aside_files_wait_for_a_stopped_rebase() {
+        let (dir, git, _) = stopped_tracking_repo(true);
+        let path = dir.path();
+        // a `rebase-merge` folder stands in for a stop on a conflict
+        crate::rewrite_untracked::set_aside_for_rewrite(git.clone(), path, Some("HEAD~3")).unwrap();
+        assert!(!path.join("f").exists());
+        let stopped = git_dir(path).join("rebase-merge");
+        std::fs::create_dir(&stopped).unwrap();
+        crate::rewrite_untracked::restore_set_aside(path).unwrap();
+        assert!(!path.join("f").exists());
+        std::fs::remove_dir(&stopped).unwrap();
+        crate::rewrite_untracked::restore_set_aside(path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path.join("f")).unwrap(),
+            "local work\n"
+        );
+    }
+
+    #[test]
+    fn a_restored_file_never_overwrites_what_the_history_tracks() {
+        let (dir, git, _) = stopped_tracking_repo(true);
+        let path = dir.path();
+        crate::rewrite_untracked::set_aside_for_rewrite(git, path, Some("HEAD~3")).unwrap();
+        std::fs::write(path.join("f"), "from the rewrite\n").unwrap();
+        crate::rewrite_untracked::restore_set_aside(path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path.join("f")).unwrap(),
+            "from the rewrite\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("f.orig")).unwrap(),
+            "local work\n"
+        );
     }
 
     #[test]

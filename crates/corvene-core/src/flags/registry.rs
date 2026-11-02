@@ -8348,6 +8348,22 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
     },
 
+    /// A squash or reorder leaves files that stopped being tracked alone.
+    REWRITE_KEEPS_UNTRACKED = 1226 "rewrite-keeps-untracked" {
+        title: "Squash and reorder keep files that stopped being tracked",
+        summary: "A file that a commit in the range stopped tracking (git rm --cached) stays \
+                  on disk with its contents through a squash or reorder. It is moved out of \
+                  the way while the commits are replayed and comes back afterwards.",
+        ghd_behaviour: "Replaying the commits deletes the file from disk when it is ignored, \
+                        losing the local work in it, and stops with an error when it is not.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18331)],
+        code: &["crates/corvene-git/src/rewrite_untracked.rs", "crates/corvene-core/src/mco.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.
@@ -9381,6 +9397,38 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
+    /// A partial commit git's patch cannot place is staged directly.
+    PARTIAL_COMMIT_INDEX_BLOB = 1364 "partial-commit-index-blob" {
+        title: "Partial commits that do not depend on patch matching",
+        summary: "When git refuses the patch for the selected lines of a file, the staged \
+                  version is built from the lines themselves and written to the index, so \
+                  the commit goes through.",
+        ghd_behaviour: "The commit fails with \"The requested changes conflict with one or \
+                        more files in the repository.\"",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22583)],
+        code: &["crates/corvene-git/src/patch.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Discard says why a file still shows as changed.
+    DISCARD_EXPLAINS_LEFTOVERS = 1365 "discard-explains-leftovers" {
+        title: "Discard explains changes it could not undo",
+        summary: "After a discard the index's cached file times are refreshed, which clears \
+                  files whose contents never changed. A file that still differs gets a message \
+                  saying so, and for a file mode change that the drive cannot store it names \
+                  core.fileMode.",
+        ghd_behaviour: "The files stay in the list and nothing says why.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11784)],
+        code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
 }

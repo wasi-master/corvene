@@ -1735,6 +1735,10 @@ pub struct DiffLine {
     pub new_line: Option<u32>,
     /// `\ No newline at end of file` followed this line.
     pub no_trailing_newline: bool,
+    /// The line ends in CR LF. `text` leaves the CR out, partial patches put
+    /// it back: without it `git apply` does not find the line.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carriage_return: bool,
     /// The line's bytes (without the marker) when they are not UTF-8;
     /// `text` is then a rendition of them. Partial patches write these
     /// (Corvene `789-non-utf8-diffs`).

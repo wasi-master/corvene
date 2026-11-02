@@ -1120,7 +1120,9 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
     for line in patch.split_inclusive('\n') {
         let raw_line = raw_lines.as_mut().and_then(|lines| lines.next());
         let line = line.strip_suffix('\n').unwrap_or(line);
-        let line = line.strip_suffix('\r').unwrap_or(line);
+        let stripped = line.strip_suffix('\r');
+        let carriage_return = stripped.is_some();
+        let line = stripped.unwrap_or(line);
         if line.starts_with("diff --git ") {
             // the next section's headers (`--- /dev/null`) are not content
             sections += 1;
@@ -1148,6 +1150,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
                     old_line: None,
                     new_line: None,
                     no_trailing_newline: false,
+                    carriage_return: false,
                     raw: None,
                 }],
             });
@@ -1214,6 +1217,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
             old_line,
             new_line,
             no_trailing_newline: false,
+            carriage_return,
             raw,
         });
     }

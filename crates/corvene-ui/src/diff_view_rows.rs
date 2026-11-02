@@ -2468,6 +2468,7 @@ mod tests {
             old_line: None,
             new_line: None,
             no_trailing_newline: false,
+            carriage_return: false,
             raw: None,
         };
         DiffHunk {

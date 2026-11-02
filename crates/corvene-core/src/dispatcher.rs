@@ -6869,19 +6869,33 @@ impl Dispatcher {
             .settings
             .confirm_discard_changes_permanently;
         let discarded: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        let explain_leftovers = flags.bool(crate::flags::ids::DISCARD_EXPLAINS_LEFTOVERS);
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).discarding = true;
             cx.notify();
         });
+        let checked = discarded.clone();
         let task = cx.background_executor().spawn(async move {
-            corvene_git::discard_changes(
-                git,
+            let untrashable = corvene_git::discard_changes(
+                git.clone(),
                 &workdir,
                 &files,
                 move_to_trash,
                 clean_submodules,
                 keep_untrashable,
-            )
+            )?;
+            // `1365-discard-explains-leftovers`
+            let leftovers = if explain_leftovers {
+                let paths: Vec<&str> = checked
+                    .iter()
+                    .filter(|p| !untrashable.contains(p))
+                    .map(String::as_str)
+                    .collect();
+                corvene_git::discard_leftovers(git, &workdir, &paths).unwrap_or_default()
+            } else {
+                corvene_git::DiscardLeftovers::default()
+            };
+            Ok::<_, corvene_git::GitError>((untrashable, leftovers))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
@@ -6892,7 +6906,10 @@ impl Dispatcher {
                 });
                 match result {
                     Err(err) => Self::show_error("Could not discard changes", err.to_string(), cx),
-                    Ok(untrashable) => {
+                    Ok((untrashable, leftovers)) => {
+                        if let Some(message) = Self::discard_leftovers_message(&leftovers) {
+                            Self::show_error("Some changes are still there", message, cx);
+                        }
                         // `1313-changelists`: discarded files leave their
                         // lists (not the ones the Trash refused, still changed)
                         let gone: Vec<String> = discarded
@@ -6908,6 +6925,32 @@ impl Dispatcher {
             });
         })
         .detach();
+    }
+
+    /// `1365-discard-explains-leftovers`: why files are still listed after a
+    /// discard (desktop/desktop#11784).
+    fn discard_leftovers_message(leftovers: &corvene_git::DiscardLeftovers) -> Option<String> {
+        let name = |paths: &[String]| match paths {
+            [one] => one.clone(),
+            many => format!("{} files", many.len()),
+        };
+        let mut parts = Vec::new();
+        if !leftovers.mode_only.is_empty() {
+            parts.push(format!(
+                "Only the file mode of {} differs and this drive does not keep the mode Git \
+                 restored. Network shares often do this. Running git config core.fileMode false \
+                 in this repository tells Git to ignore file modes.",
+                name(&leftovers.mode_only)
+            ));
+        }
+        if !leftovers.changed.is_empty() {
+            parts.push(format!(
+                "{} still differs from the last commit after being restored. This usually comes \
+                 from line ending or filter settings in .gitattributes or core.autocrlf.",
+                name(&leftovers.changed)
+            ));
+        }
+        (!parts.is_empty()).then(|| parts.join("\n\n"))
     }
 
     /// GHD `DiscardChangesError` → `DiscardChangesRetry`: files the Trash
@@ -7089,6 +7132,7 @@ impl Dispatcher {
         corvene_git::PatchOptions {
             exact_hunk_starts: flags.bool(crate::flags::ids::PARTIAL_COMMIT_HUNK_POSITIONS),
             raw_lines: flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
+            index_blob_fallback: flags.bool(crate::flags::ids::PARTIAL_COMMIT_INDEX_BLOB),
         }
     }
 

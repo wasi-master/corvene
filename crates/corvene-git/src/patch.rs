@@ -35,6 +35,10 @@ pub struct PatchOptions {
     /// bytes (`DiffLine::raw`); GHD writes the replacement characters it
     /// decoded, which no longer match the file, so `git apply` refuses.
     pub raw_lines: bool,
+    /// `1364-partial-commit-index-blob`: when `git apply` refuses the patch
+    /// the staged version is built from the selected lines
+    /// ([`selected_blob`]). GHD reports git's refusal as a conflict.
+    pub index_blob_fallback: bool,
 }
 
 fn format_patch_header(from: Option<&str>, to: Option<&str>) -> String {
@@ -80,6 +84,9 @@ fn push_line(buf: &mut Vec<u8>, marker: u8, line: &DiffLine, options: PatchOptio
     match line.raw.as_deref() {
         Some(raw) if options.raw_lines => buf.extend_from_slice(raw),
         _ => buf.extend_from_slice(line.text.as_bytes()),
+    }
+    if line.carriage_return {
+        buf.push(b'\r');
     }
     buf.push(b'\n');
 }
@@ -380,7 +387,7 @@ fn apply_hunks_to_index(
     let Some(patch) = format_patch_with(file, hunks, options) else {
         return Ok(());
     };
-    GitCommand::new(git)
+    let applied = GitCommand::new(git.clone())
         .args([
             "apply",
             "--cached",
@@ -390,8 +397,93 @@ fn apply_hunks_to_index(
         ])
         .current_dir(workdir)
         .stdin(patch)
+        .run();
+    match applied {
+        Ok(_) => Ok(()),
+        Err(err) if options.index_blob_fallback => {
+            let old = index_blob(git.clone(), workdir, &file.path)?;
+            let Some(staged) = selected_blob(&old, file, hunks) else {
+                return Err(err);
+            };
+            tracing::warn!(path = %file.path, "git apply refused a partial patch: {err}");
+            crate::utf16::add_to_index(git, workdir, &file.path, staged, None)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// The path's blob in the index, empty when it has none.
+fn index_blob(git: Arc<GitBinary>, workdir: &Path, path: &str) -> Result<Vec<u8>> {
+    let out = GitCommand::new(git)
+        .args(["cat-file", "blob"])
+        .arg(format!(":{path}"))
+        .current_dir(workdir)
+        .allow_exit_code(128)
         .run()?;
-    Ok(())
+    Ok(if out.status.success() {
+        out.stdout
+    } else {
+        Vec::new()
+    })
+}
+
+/// `1364-partial-commit-index-blob` (desktop/desktop#22583): `old` with only
+/// the selected lines of `hunks` applied. git has no part in placing the
+/// lines, each hunk goes where its header says. `None` when `old` is not
+/// what the diff was made against.
+pub fn selected_blob(
+    old: &[u8],
+    file: &WorkingDirectoryFileChange,
+    hunks: &[DiffHunk],
+) -> Option<Vec<u8>> {
+    let old_lines: Vec<&[u8]> = old.split_inclusive(|b| *b == b'\n').collect();
+    let mut out: Vec<u8> = Vec::with_capacity(old.len());
+    let mut next = 0usize;
+    for hunk in hunks {
+        // a hunk with no old lines names the line before it
+        let start = if hunk.old_lines == 0 {
+            hunk.old_start
+        } else {
+            hunk.old_start.saturating_sub(1)
+        } as usize;
+        out.extend(old_lines.get(next..start)?.concat());
+        next = start;
+        for (index, line) in hunk.lines.iter().enumerate() {
+            let absolute = hunk.unified_diff_start + index as u32;
+            let selected = file.selection.is_selected(absolute);
+            let bytes = line.raw.as_deref().unwrap_or(line.text.as_bytes());
+            match line.kind {
+                DiffLineKind::Hunk => {}
+                DiffLineKind::Add if selected => {
+                    if out.last().is_some_and(|b| *b != b'\n') {
+                        out.push(b'\n');
+                    }
+                    out.extend_from_slice(bytes);
+                    if line.carriage_return {
+                        out.push(b'\r');
+                    }
+                    if !line.no_trailing_newline {
+                        out.push(b'\n');
+                    }
+                }
+                DiffLineKind::Add => {}
+                DiffLineKind::Context | DiffLineKind::Delete => {
+                    let current = old_lines.get(next)?;
+                    let current_text = current.strip_suffix(b"\n").unwrap_or(current);
+                    let current_text = current_text.strip_suffix(b"\r").unwrap_or(current_text);
+                    if current_text != bytes {
+                        return None;
+                    }
+                    next += 1;
+                    if line.kind == DiffLineKind::Context || !selected {
+                        out.extend_from_slice(current);
+                    }
+                }
+            }
+        }
+    }
+    out.extend(old_lines.get(next..)?.concat());
+    Some(out)
 }
 
 /// Stage the partially-selected files by patch (GHD `stageFiles`, step 3),
@@ -501,6 +593,161 @@ mod tests {
         assert_eq!(
             patch,
             "--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+        );
+    }
+
+    /// Every line of `edits` selected or not by `pick`, against git's apply.
+    fn selected_blob_matches_apply(old: &str, new: &str, pick: impl Fn(u32) -> bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+        };
+        run(&["init", "-q"]);
+        std::fs::write(path.join("f"), old).unwrap();
+        run(&["add", "f"]);
+        std::fs::write(path.join("f"), new).unwrap();
+        let git = Arc::new(crate::detect::find_git().unwrap());
+        let plain = file("f", FileStatusKind::Modified, DiffSelection::none());
+        let diff = crate::diff::working_directory_diff(
+            git.clone(),
+            path,
+            &plain,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+        let Diff::Text { hunks, .. } = &diff else {
+            panic!("text diff expected")
+        };
+        let mut selection = DiffSelection::none();
+        for hunk in hunks {
+            for (index, line) in hunk.lines.iter().enumerate() {
+                let absolute = hunk.unified_diff_start + index as u32;
+                if matches!(line.kind, DiffLineKind::Add | DiffLineKind::Delete) && pick(absolute) {
+                    selection = selection.with_line(absolute, true);
+                }
+            }
+        }
+        let f = file("f", FileStatusKind::Modified, selection);
+        let blob = selected_blob(old.as_bytes(), &f, hunks)
+            .unwrap_or_else(|| panic!("no blob for {old:?} -> {new:?}: {hunks:#?}"));
+        let patch = format_patch_with(
+            &f,
+            hunks,
+            PatchOptions {
+                exact_hunk_starts: true,
+                ..Default::default()
+            },
+        );
+        let Some(patch) = patch else {
+            assert_eq!(blob, old.as_bytes());
+            return;
+        };
+        let applied = GitCommand::new(git.clone())
+            .args([
+                "apply",
+                "--cached",
+                "--unidiff-zero",
+                "--whitespace=nowarn",
+                "-",
+            ])
+            .current_dir(path)
+            .stdin(patch)
+            .run();
+        assert!(applied.is_ok(), "git apply refused: {applied:?}");
+        let staged = index_blob(git, path, "f").unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&blob),
+            String::from_utf8_lossy(&staged)
+        );
+    }
+
+    #[test]
+    fn selected_blob_equals_what_git_stages() {
+        let old: String = (0..60).map(|i| format!("line {}\n", i % 7)).collect();
+        let mut lines: Vec<String> = old.lines().map(str::to_string).collect();
+        lines[5] = "changed five".into();
+        lines.insert(20, "added".into());
+        lines.remove(40);
+        lines[50] = "changed fifty".into();
+        let new = lines.join("\n") + "\n";
+        for seed in 0..16u32 {
+            selected_blob_matches_apply(&old, &new, |line| (seed >> (line % 4)) & 1 == 1);
+        }
+        // no newline at the end on either side
+        selected_blob_matches_apply("a\nb", "a\nB", |_| true);
+        selected_blob_matches_apply("a\nb", "a\nb\nc\n", |_| true);
+        selected_blob_matches_apply("a\n", "a\nb", |_| true);
+        // line ends are part of the line, all of them or some
+        selected_blob_matches_apply("a\r\nb\r\n", "a\r\nB\r\n", |_| true);
+        selected_blob_matches_apply("a\nb\r\nc\n", "a\nB\r\nc\n", |_| true);
+        selected_blob_matches_apply("a\r\nb\nc\r\n", "A\r\nb\nC\n", |line| line % 2 == 0);
+    }
+
+    #[test]
+    fn selected_blob_refuses_another_base() {
+        let diff = crate::parse_unified(
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n",
+        );
+        let Diff::Text { hunks, .. } = &diff else {
+            panic!("text diff expected")
+        };
+        let f = file("f", FileStatusKind::Modified, DiffSelection::all());
+        assert_eq!(
+            selected_blob(b"one\ntwo\n", &f, hunks).as_deref(),
+            Some(&b"one\nTWO\n"[..])
+        );
+        assert!(selected_blob(b"one\nother\n", &f, hunks).is_none());
+        assert!(selected_blob(b"one\n", &f, hunks).is_none());
+    }
+
+    #[test]
+    fn a_refused_patch_is_staged_from_the_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+        };
+        run(&["init", "-q"]);
+        // git reads the patch header's path up to the tab and finds no file
+        let name = "we\tird";
+        std::fs::write(path.join(name), "one\ntwo\nthree\n").unwrap();
+        run(&["add", name]);
+        let diff = crate::parse_unified(
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n",
+        );
+        let git = Arc::new(crate::detect::find_git().unwrap());
+        let f = file(name, FileStatusKind::Modified, DiffSelection::all());
+        assert!(
+            apply_hunks_to_index(git.clone(), path, &f, &diff, PatchOptions::default()).is_err()
+        );
+        let fallback = PatchOptions {
+            index_blob_fallback: true,
+            ..Default::default()
+        };
+        apply_hunks_to_index(git.clone(), path, &f, &diff, fallback).unwrap();
+        assert_eq!(
+            index_blob(git, path, name).unwrap(),
+            b"one\nTWO\nthree\n".to_vec()
         );
     }
 

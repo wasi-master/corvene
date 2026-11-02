@@ -780,6 +780,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_line_endings_only_stash_can_be_dropped_and_restored() {
+        // desktop/desktop#11159
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "one\r\n").unwrap();
+        run(path, &["stash", "push", "-q", "-m", "line ends"]);
+        let sha = crate::process::GitCommand::new(git.clone())
+            .args(["rev-parse", "refs/stash"])
+            .current_dir(path)
+            .run()
+            .unwrap()
+            .stdout_string()
+            .unwrap()
+            .trim()
+            .to_string();
+        let restored =
+            pop_stash_entry_with(git.clone(), path, &sha, StashPopOptions::default()).unwrap();
+        assert_eq!(restored, StashPop::Restored);
+        assert_eq!(std::fs::read(path.join("a.txt")).unwrap(), b"one\r\n");
+        run(path, &["stash", "push", "-q", "-m", "line ends"]);
+        let sha = crate::process::GitCommand::new(git.clone())
+            .args(["rev-parse", "refs/stash"])
+            .current_dir(path)
+            .run()
+            .unwrap()
+            .stdout_string()
+            .unwrap()
+            .trim()
+            .to_string();
+        drop_desktop_stash_entry(git.clone(), path, &sha).unwrap();
+        assert!(stash_entry_matching_sha(git, path, &sha).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stash_pops_after_a_submodule_pointer_moved() {
+        // desktop/desktop#11679: the moved pointer is a local change, and
+        // the stash's files come back next to it
+        let sub = tempfile::tempdir().unwrap();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.name", "T"],
+            &["config", "user.email", "t@example.com"],
+        ] {
+            run(sub.path(), args);
+        }
+        std::fs::write(sub.path().join("s"), "1\n").unwrap();
+        run(sub.path(), &["add", "."]);
+        run(sub.path(), &["commit", "-qm", "s1"]);
+        let (dir, git) = repo();
+        let path = dir.path();
+        let url = sub.path().to_string_lossy().to_string();
+        run(
+            path,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                &url,
+                "sub",
+            ],
+        );
+        run(path, &["commit", "-qm", "with submodule"]);
+        std::fs::write(path.join("a.txt"), "stashed\n").unwrap();
+        run(path, &["stash", "push", "-q", "-m", "work"]);
+        let sha = crate::process::GitCommand::new(git.clone())
+            .args(["rev-parse", "refs/stash"])
+            .current_dir(path)
+            .run()
+            .unwrap()
+            .stdout_string()
+            .unwrap()
+            .trim()
+            .to_string();
+        let inner = path.join("sub");
+        for args in [
+            &["config", "user.name", "T"][..],
+            &["config", "user.email", "t@example.com"],
+        ] {
+            run(&inner, args);
+        }
+        std::fs::write(inner.join("s"), "2\n").unwrap();
+        run(&inner, &["add", "."]);
+        run(&inner, &["commit", "-qm", "s2"]);
+        let restored = pop_stash_entry_with(git, path, &sha, StashPopOptions::default()).unwrap();
+        assert_eq!(restored, StashPop::Restored);
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "stashed\n"
+        );
+    }
+
     /// A stash of `a.txt` = "two" made on "one", then "three" committed.
     fn conflicting_stash() -> (tempfile::TempDir, Arc<GitBinary>, String) {
         let (dir, git) = repo();

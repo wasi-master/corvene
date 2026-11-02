@@ -881,6 +881,13 @@ impl Dispatcher {
     }
 
     /// Flag `834`: rebases keep `#` lines in commit messages.
+    fn rewrite_keeps_untracked(cx: &dyn Host) -> bool {
+        Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::REWRITE_KEEPS_UNTRACKED)
+    }
+
     fn rebase_keeps_messages(cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
@@ -2784,6 +2791,7 @@ impl Dispatcher {
             keep_messages: Self::rebase_keeps_messages(cx),
             autostash,
             update_refs,
+            keep_untracked: Self::rewrite_keeps_untracked(cx),
         };
         let run = move |cx: &mut dyn Host| {
             let (git, workdir) = (git.clone(), workdir.clone());
@@ -2999,6 +3007,7 @@ impl Dispatcher {
         let count = commits.len();
         let last_retained_for_run = last_retained.clone();
         let keep_messages = Self::rebase_keeps_messages(cx);
+        let keep_untracked = Self::rewrite_keeps_untracked(cx);
         let run = move |cx: &mut dyn Host| {
             let (git, workdir) = (git.clone(), workdir.clone());
             let branch = branch.clone();
@@ -3021,6 +3030,7 @@ impl Dispatcher {
                             keep_messages,
                             autostash: false,
                             update_refs,
+                            keep_untracked,
                         },
                         on_progress,
                     );
@@ -3156,6 +3166,7 @@ impl Dispatcher {
             keep_messages: Self::rebase_keeps_messages(cx),
             autostash,
             update_refs,
+            keep_untracked: Self::rewrite_keeps_untracked(cx),
         };
         let last_retained_for_run = last_retained.clone();
         let run = move |cx: &mut dyn Host| {
