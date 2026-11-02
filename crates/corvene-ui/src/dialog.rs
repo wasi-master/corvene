@@ -720,11 +720,53 @@ fn dialog_impl(
     let trap = crate::keyboard_nav::dialog_trap(id, window, cx);
     let focus_primary =
         focus_primary && !(trap.contains_focused(window, cx) && !trap.is_focused(window));
+    // GHD's `<form>`: Enter takes the `type="submit"` button. A text box or a
+    // button with focus handles its own Enter, so this only sees it while
+    // nothing inside has focus
+    let mut buttons = buttons;
+    let mut submit: Option<std::rc::Rc<ClickHandler>> = None;
+    for button in buttons.iter_mut().filter(|b| b.primary && !b.disabled) {
+        let on_click = std::mem::replace(&mut button.on_click, Box::new(|_, _| {}));
+        let shared = std::rc::Rc::new(on_click);
+        let for_button = shared.clone();
+        button.on_click = Box::new(move |window, cx| for_button(window, cx));
+        submit = Some(shared);
+    }
+    let trap_for_submit = trap.clone();
+    let trap_for_claim = trap.clone();
     deferred(
         anchored().position(crate::theme::page_origin()).child(
             div()
                 .id(id)
                 .track_focus(&trap)
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, cx| {
+                            crate::keyboard_nav::claim_dialog_focus(
+                                id,
+                                &trap_for_claim,
+                                window,
+                                cx,
+                            )
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+                .when_some(submit, |d, submit| {
+                    d.on_key_down(move |ev: &KeyDownEvent, window, cx| {
+                        let keystroke = &ev.keystroke;
+                        if keystroke.key == "enter"
+                            && !ev.is_held
+                            && !keystroke.modifiers.modified()
+                            && trap_for_submit.is_focused(window)
+                        {
+                            cx.stop_propagation();
+                            submit(window, cx);
+                        }
+                    })
+                })
                 // modal: the views underneath get no hover, clicks or wheel
                 // (GHD's `<dialog>` makes the rest of the page inert)
                 .occlude()

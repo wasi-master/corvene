@@ -540,6 +540,21 @@ pub fn contribution_target_default_branch<'a>(
     upstream_default_branch(repository, branches, configured_default).or(default_branch)
 }
 
+impl crate::state::AppState {
+    /// GHD `branchesState.upstreamDefaultBranch`: `upstream/<default>` of a
+    /// fork contributing to its parent.
+    pub fn upstream_default_branch_of(&self, id: u64) -> Option<&Branch> {
+        let rs = self.repo_states.get(&id)?;
+        let branches = rs.info.as_ref()?.branches.as_slice();
+        let name = upstream_default_branch(
+            self.repository(id)?,
+            branches,
+            rs.default_branch.as_deref().unwrap_or("main"),
+        )?;
+        branches.iter().find(|b| b.name == name)
+    }
+}
+
 /// GHD `git-store.ts#refreshDefaultBranch`'s `upstreamDefaultBranch`.
 fn upstream_default_branch<'a>(
     repository: &'a Repository,

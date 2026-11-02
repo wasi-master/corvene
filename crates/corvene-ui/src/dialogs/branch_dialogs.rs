@@ -774,7 +774,36 @@ impl Render for CreateBranchDialog {
                     let current_name = branch.name.clone();
                     let other_default =
                         default_branch.clone().filter(|d| *d != current_name);
-                    if other_default.is_some() || from_any {
+                    // GHD `renderForkBranchSelection`
+                    let upstream_default = self
+                        .state
+                        .read(cx)
+                        .upstream_default_branch_of(self.repo)
+                        .cloned();
+                    let upstream_is_current = upstream_default
+                        .as_ref()
+                        .is_some_and(|u| u.name_without_remote() == current_name);
+                    let parent_name = self
+                        .state
+                        .read(cx)
+                        .repository(self.repo)
+                        .and_then(|r| r.github.as_ref())
+                        .and_then(|g| g.parent.as_ref())
+                        .map(|p| format!("{}/{}", p.owner, p.name));
+                    if let (Some(upstream), true, false) =
+                        (&upstream_default, upstream_is_current, from_any)
+                    {
+                        start_point = Some(upstream.name.clone());
+                        description.push(
+                            div()
+                                .child(format!(
+                                    "Your new branch will be based on {}'s default branch ({}).",
+                                    parent_name.clone().unwrap_or_default(),
+                                    upstream.name_without_remote()
+                                ))
+                                .into_any_element(),
+                        );
+                    } else if other_default.is_some() || upstream_default.is_some() || from_any {
                         // `selectedValue`: the default branch when that is
                         // the start point and not the current branch, else
                         // the current branch
@@ -783,9 +812,12 @@ impl Render for CreateBranchDialog {
                             Base::Start(preferred) => match get_start_point(
                                 &tip,
                                 default_branch_ref.as_ref(),
-                                None,
+                                upstream_default.as_ref(),
                                 preferred,
                             ) {
+                                StartPoint::UpstreamDefaultBranch => {
+                                    Base::Start(StartPoint::UpstreamDefaultBranch)
+                                }
                                 StartPoint::DefaultBranch if other_default.is_some() => {
                                     Base::Start(StartPoint::DefaultBranch)
                                 }
@@ -793,6 +825,9 @@ impl Render for CreateBranchDialog {
                             },
                         };
                         start_point = match selected {
+                            Base::Start(StartPoint::UpstreamDefaultBranch) => {
+                                upstream_default.as_ref().map(|u| u.name.clone())
+                            }
                             Base::Start(StartPoint::DefaultBranch) => other_default.clone(),
                             Base::Start(_) => Some(current_name.clone()),
                             Base::Other => {
@@ -802,7 +837,14 @@ impl Render for CreateBranchDialog {
                         };
                         let mut options: Vec<(&'static str, String, &'static str, Base)> =
                             Vec::new();
-                        if let Some(default) = &other_default {
+                        if let Some(upstream) = &upstream_default {
+                            options.push((
+                                "start-upstream",
+                                upstream.name.clone(),
+                                "The default branch of the upstream repository. Pick this to start on something new that's not dependent on your current branch.",
+                                Base::Start(StartPoint::UpstreamDefaultBranch),
+                            ));
+                        } else if let Some(default) = &other_default {
                             options.push((
                                 "start-default",
                                 default.clone(),
@@ -932,6 +974,33 @@ crate::branch_list::sort_by_date(cx),
                 }
                 Tip::Unknown => {}
             }
+        }
+        // GHD `renderForkLink`
+        let forked = self
+            .state
+            .read(cx)
+            .repository(self.repo)
+            .and_then(|r| r.github.as_ref())
+            .is_some_and(|g| g.parent.is_some());
+        if forked && target_commit.is_none() && matches!(tip, Tip::Valid { .. }) {
+            let repo = self.repo;
+            description.push(
+                paragraph(vec![
+                    "Your default branch source is determined by your ".into(),
+                    crate::widgets::link_button(
+                        "create-branch-fork-settings",
+                        "fork behavior settings",
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::show_popup(corvene_core::Popup::ChooseForkSettings { repo }, cx)
+                    })
+                    .into_any_element()
+                    .into(),
+                    ".".into(),
+                ])
+                .into_any_element(),
+            );
         }
         let _ = current;
         let rule_notice = branch_name_rule_notice(self.state.read(cx), self.repo, &name, cx);

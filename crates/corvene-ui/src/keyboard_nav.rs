@@ -148,6 +148,9 @@ thread_local! {
     /// One handle per dialog id, kept across frames.
     static DIALOG_HANDLES: RefCell<HashMap<(WindowId, SharedString), FocusHandle>> =
         RefCell::default();
+    /// The dialogs [`claim_dialog_focus`] has run for since no popup was open.
+    static CLAIMED: RefCell<std::collections::HashSet<(WindowId, SharedString)>> =
+        RefCell::default();
 }
 
 /// The focus handle of dialog `id`'s container (the trap), registered as
@@ -167,10 +170,31 @@ pub fn dialog_trap(id: &str, window: &Window, cx: &App) -> FocusHandle {
     handle
 }
 
+/// Once per opening, after the dialog's first frame: focus `trap` unless a
+/// field of the dialog took focus, so Enter and Escape reach the dialog
+/// rather than what was focused underneath. Only then can it be known: a
+/// field focused as the dialog is built is not in the frame being drawn.
+pub fn claim_dialog_focus(id: &str, trap: &FocusHandle, window: &mut Window, cx: &mut App) {
+    let key = (
+        window.window_handle().window_id(),
+        SharedString::from(id.to_string()),
+    );
+    if !CLAIMED.with(|c| c.borrow_mut().insert(key)) {
+        return;
+    }
+    let trap = trap.clone();
+    window.defer(cx, move |window, cx| {
+        if !trap.contains_focused(window, cx) {
+            window.focus(&trap, cx);
+        }
+    });
+}
+
 /// Forget the window's dialog once no popup is open.
 pub fn clear_dialog_trap(window: &Window) {
     let id = window.window_handle().window_id();
     MODAL.with(|m| m.borrow_mut().remove(&id));
+    CLAIMED.with(|c| c.borrow_mut().retain(|(window, _)| *window != id));
 }
 
 /// Move focus to the next (or previous) tab stop; with a dialog open, the

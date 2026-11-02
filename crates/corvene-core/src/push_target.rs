@@ -207,6 +207,13 @@ impl Dispatcher {
         cx: &mut dyn Host,
     ) -> bool {
         let s = Self::state(cx).read(cx);
+        // GHD `_createBranch`: never tracks the upstream's default branch
+        if start_point.is_some_and(|start| {
+            s.upstream_default_branch_of(id)
+                .is_some_and(|b| b.name == start)
+        }) {
+            return true;
+        }
         if !Self::push_target_guard(s) {
             return false;
         }

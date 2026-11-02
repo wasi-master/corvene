@@ -3266,6 +3266,65 @@ type GraphColumn = (
 );
 
 /// `CommitListItem`
+/// GHD `renderCommitListItemTooltip` (`ui/history/commit-list.tsx`): each
+/// author with their avatar, the date in full, and what the unpushed badge
+/// says.
+struct CommitTooltip {
+    commit: Commit,
+    unpushed: Option<SharedString>,
+}
+
+impl Render for CommitTooltip {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.ghd().clone();
+        let label = || div().flex_none().w(zpx(40.)).flex().flex_row().justify_end();
+        let row = || div().flex().flex_row().gap(SPACING_HALF());
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
+            .max_w(zpx(400.))
+            .p(SPACING())
+            .rounded(BORDER_RADIUS())
+            .bg(t.tooltip_background)
+            .text_color(t.tooltip_text)
+            .text_size(FONT_SIZE_SM())
+            .children(avatar_users_for(&self.commit, cx).into_iter().map(|user| {
+                row()
+                    .items_center()
+                    .child(label().child(crate::widgets::author_avatar(
+                        &user.name,
+                        &user.email,
+                        zpx(20.),
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .when(!user.name.is_empty(), |d| d.child(user.name.clone()))
+                            .child(if user.email.is_empty() && user.name.is_empty() {
+                                "Unknown user".to_string()
+                            } else {
+                                user.email.clone()
+                            }),
+                    )
+            }))
+            .child(
+                row()
+                    .child(label().child("Date:"))
+                    .child(crate::format::format_date_time(self.commit.author.date())),
+            )
+            .when_some(self.unpushed.clone(), |d, unpushed| {
+                d.child(
+                    row()
+                        .child(label().child(octicon(Octicon::ArrowUp, t.tooltip_text)))
+                        .child(unpushed),
+                )
+            })
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn commit_row(
     id: u64,
@@ -3333,8 +3392,15 @@ fn commit_row(
     let weak_for_move = weak.clone();
     let weak_for_drop = weak.clone();
     let line = t.box_selected_active_background;
+    let tooltip_commit = commit.clone();
+    let tooltip_unpushed = unpushed.clone();
     div()
         .id(SharedString::from(format!("commit-{}", commit.sha)))
+        .tooltip(move |_, cx| {
+            let commit = tooltip_commit.clone();
+            let unpushed = tooltip_unpushed.clone();
+            cx.new(|_| CommitTooltip { commit, unpushed }).into()
+        })
         .a11y_row(
             format!(
                 "{}, {}, {}{}",
