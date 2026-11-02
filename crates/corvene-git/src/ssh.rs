@@ -39,8 +39,11 @@ pub fn parse_add_ssh_host_prompt(prompt: &str) -> Option<AddSshHostInfo> {
     let (_, rest) = rest.split_once('.')?;
     let rest = rest.strip_prefix('\n')?;
     let (key_type, rest) = rest.split_once(' ')?;
-    let rest = rest.strip_prefix("key fingerprint is ")?;
-    let (fingerprint, _) = rest.split_once('.')?;
+    let rest = rest.strip_prefix("key fingerprint is")?;
+    // OpenSSH 10 writes `is: SHA256:abc` and a line break, earlier ones
+    // `is SHA256:abc.`
+    let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+    let fingerprint = rest.split(['.', '\n']).next()?;
     if host.is_empty() || ip.is_empty() || key_type.is_empty() || fingerprint.is_empty() {
         return None;
     }
@@ -55,6 +58,20 @@ pub fn parse_add_ssh_host_prompt(prompt: &str) -> Option<AddSshHostInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_openssh_10s_prompt() {
+        let info = parse_add_ssh_host_prompt(
+            "The authenticity of host '[127.0.0.1]:22922 ([127.0.0.1]:22922)' can't be established.\nED25519 key fingerprint is: SHA256:SL0QTD9l1LAayujCLdZVhKfWYc5iz/GC1G3jZHNZ9ks\nThis key is not known by any other names.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ",
+        )
+        .unwrap();
+        assert_eq!(info.host, "[127.0.0.1]:22922");
+        assert_eq!(info.key_type, "ED25519");
+        assert_eq!(
+            info.fingerprint,
+            "SHA256:SL0QTD9l1LAayujCLdZVhKfWYc5iz/GC1G3jZHNZ9ks"
+        );
+    }
 
     #[test]
     fn other_prompts_are_not_host_questions() {
