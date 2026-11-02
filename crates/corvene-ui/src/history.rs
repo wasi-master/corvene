@@ -2079,6 +2079,17 @@ impl HistorySidebar {
     // ---- keyboard reorder (`onKeyboardReorder`, list keyboard insertion) ----
 
     fn start_keyboard_reorder(&mut self, id: u64, shas: Vec<String>, cx: &mut Context<Self>) {
+        // `1227-fold-merge-commits`: rows are not the branch's commits
+        if self
+            .state
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|r| r.merge_folds.as_ref())
+            .is_some_and(|f| f.marks.any())
+        {
+            return;
+        }
         let first = {
             let s = self.state.read(cx);
             s.repo_states
@@ -2211,6 +2222,9 @@ impl HistorySidebar {
     }
 
     fn commit_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(id) = self.state.read(cx).selected {
+            Dispatcher::sync_merge_folds(id, cx);
+        }
         let t = cx.ghd();
         let s = self.state.read(cx);
         let Some(id) = s.selected else {
@@ -2247,14 +2261,42 @@ impl HistorySidebar {
         let loaded = rs.map(|r| r.info.is_some()).unwrap_or(false);
         let draggable = rs.is_some_and(|r| r.mco.is_none()) && self.reorder.is_none() && !comparing;
         // filtered rows can be dragged onto a branch, not squashed or reordered
-        let droppable = draggable && !filtering && all_branches.is_none();
+        // `1227-fold-merge-commits`: rows are not positions in the branch's
+        // commits, which a squash or reorder works from
+        let folds = rs
+            .and_then(|r| r.merge_folds.as_ref())
+            .filter(|_| !comparing && !filtering && all_branches.is_none())
+            .map(|f| f.marks.clone())
+            .filter(|marks| marks.any());
+        let droppable = draggable && !filtering && all_branches.is_none() && folds.is_none();
         // `1213`: the graph of the plain list (or all branches)
         let graph =
             (s.flags.bool(corvene_core::flags::ids::COMMIT_GRAPH) && !comparing && !filtering)
                 .then(|| {
                     let head = all_branches.and_then(|a| a.tips.first().map(String::as_str));
                     let mut graph = self.graph.borrow_mut();
-                    graph.sync(&commits, head, Dispatcher::history_first_parent(s));
+                    // `1227-fold-merge-commits`: a lane to a commit that is
+                    // folded away ends at the merge
+                    let parents_shown;
+                    let for_graph: &[Commit] = if folds.is_some() {
+                        let shown: std::collections::HashSet<&str> =
+                            commits.iter().map(|c| c.sha.as_str()).collect();
+                        parents_shown = commits
+                            .iter()
+                            .map(|c| {
+                                let mut c = c.clone();
+                                let first = c.parents.first().cloned();
+                                c.parents.retain(|p| {
+                                    Some(p) == first.as_ref() || shown.contains(p.as_str())
+                                });
+                                c
+                            })
+                            .collect::<Vec<_>>();
+                        &parents_shown
+                    } else {
+                        &commits
+                    };
+                    graph.sync(for_graph, head, Dispatcher::history_first_parent(s));
                     (
                         self.graph.clone(),
                         crate::commit_graph::graph_columns(graph.width()),
@@ -2401,7 +2443,17 @@ impl HistorySidebar {
             // GHD `ariaLabel="Commits"` on the list
             .role(Role::List)
             .aria_label("Commits")
-            .key_context("HistoryList")
+            .key_context(if folds.is_some() {
+                "HistoryList FileTree"
+            } else {
+                "HistoryList"
+            })
+            .on_action(cx.listener(|this, _: &crate::actions::CollapseFolder, _, cx| {
+                this.fold_key(false, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::actions::ExpandFolder, _, cx| {
+                this.fold_key(true, cx)
+            }))
             .on_action(self.menu_anchor.action_handler())
             .track_focus(&self.list_focus)
             .on_action(cx.listener(|this, _: &ReorderMoveUp, _, cx| this.move_insertion(-1, cx)))
@@ -2486,6 +2538,10 @@ impl HistorySidebar {
                                 .as_deref()
                                 .and_then(|st| stack_mark(st, &commit.sha, labelled));
                             let row_hint = RowHint {
+                                fold: folds.as_ref().map(|marks| RowFold {
+                                    merge: marks.fold(&commit.sha),
+                                    child: marks.is_child(&commit.sha),
+                                }),
                                 squash_target: drop_hint == Some(DropHint::Squash(ix)),
                                 // `1221`: not over the drop's insertion line
                                 stack_line: stack.is_some() && ix > 0 && insertion_here != Some(ix),
@@ -2545,6 +2601,31 @@ impl HistorySidebar {
     }
 
     /// ↑/↓ moves a single-row selection (`onSelectedRowChanged`).
+    /// `1227-fold-merge-commits`: → unfolds the selected merge; ← folds it,
+    /// or the merge a selected commit is under.
+    fn fold_key(&self, expand: bool, cx: &mut App) {
+        let s = self.state.read(cx);
+        let Some(id) = s.selected else {
+            return;
+        };
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(sha), Some(folds)) = (rs.selected_commit.clone(), rs.merge_folds.as_ref()) else {
+            return;
+        };
+        let target = if folds.marks.fold(&sha).is_some() {
+            Some(sha)
+        } else if expand {
+            None
+        } else {
+            folds.marks.merge_of(&sha).map(str::to_string)
+        };
+        if let Some(target) = target {
+            Dispatcher::set_merge_expanded(id, target, expand, cx);
+        }
+    }
+
     fn step_selection(&self, id: u64, delta: isize, cx: &mut App) {
         let next = {
             let s = self.state.read(cx);
@@ -2683,6 +2764,8 @@ pub(crate) fn request_commit_avatars(commit: &Commit, cx: &mut App) {
 
 #[derive(Clone, Default)]
 struct RowHint {
+    /// `1227-fold-merge-commits`: the row's place in the folds.
+    fold: Option<RowFold>,
     squash_target: bool,
     /// `1221-stacked-branch-refs`: the separator above a stacked branch's
     /// tip, or above the row where the default branch begins.
@@ -3148,6 +3231,15 @@ fn history_toggle(
         .into_any_element()
 }
 
+/// `1227-fold-merge-commits`: what a row shows of the merge folds.
+#[derive(Clone, Copy)]
+struct RowFold {
+    /// `(unfolded, commits it brought in)` on a merge with any.
+    merge: Option<(bool, usize)>,
+    /// A commit under a merge: indented.
+    child: bool,
+}
+
 /// `1213`: the graph, its column count and lane colours for a row.
 type GraphColumn = (
     Rc<std::cell::RefCell<corvene_core::commit_graph::CommitGraph>>,
@@ -3371,9 +3463,61 @@ fn commit_row(
                     }));
             // `1213`: the graph column before the contents (painted in
             // the row, the contents moved over: no extra layout per row)
+            // `1227-fold-merge-commits`: every row leaves room for the arrow
+            let fold_room = hint.fold.map_or(zpx(0.), |fold| {
+                zpx(if fold.child { 18. + 14. } else { 18. })
+            });
+            let graph_width = graph
+                .as_ref()
+                .map_or(zpx(0.), |(_, columns, _)| crate::commit_graph::column_width(*columns));
+            let fold_arrow = hint.fold.and_then(|fold| fold.merge).map(|(open, count)| {
+                let sha = commit.sha.clone();
+                div()
+                    .id("fold-merge")
+                    .absolute()
+                    .top_0()
+                    .left(graph_width + SPACING_HALF())
+                    .h_full()
+                    .w(zpx(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .role(Role::Button)
+                    .aria_label(SharedString::from(format!(
+                        "{} {count} merged commits",
+                        if open { "Fold" } else { "Unfold" }
+                    )))
+                    .tooltip(crate::widgets::tooltip(format!(
+                        "{count} merged {}",
+                        if count == 1 { "commit" } else { "commits" }
+                    )))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        Dispatcher::set_merge_expanded(id, sha.clone(), !open, cx);
+                    })
+                    .child(octicon(
+                        if open {
+                            Octicon::ChevronDown
+                        } else {
+                            Octicon::ChevronRight
+                        },
+                        secondary,
+                    ))
+            });
+            let contents = if hint.fold.is_some() {
+                contents.pl(graph_width + SPACING() + fold_room)
+            } else {
+                contents
+            };
             let (contents, graph) = match graph {
                 Some((graph, columns, palette)) => (
-                    contents.pl(crate::commit_graph::column_width(columns) + SPACING()),
+                    if hint.fold.is_some() {
+                        contents
+                    } else {
+                        contents.pl(crate::commit_graph::column_width(columns) + SPACING())
+                    },
                     Some(crate::commit_graph::graph_cell(
                         graph,
                         ix,
@@ -3390,7 +3534,7 @@ fn commit_row(
                 ),
                 None => (contents, None),
             };
-            let d = d.children(graph);
+            let d = d.children(graph).children(fold_arrow);
             // `621-context-menu-buttons`: after the contents
             if crate::context_menu::row_menu_buttons(cx) {
                 d.group("commit-row")

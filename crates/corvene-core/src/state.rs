@@ -1621,6 +1621,9 @@ pub struct RepositoryState {
     /// Conflicted files open in the merge editor, by path.
     pub merge_editors: std::collections::BTreeMap<String, crate::merge_editor::MergeSession>,
 
+    /// `1227-fold-merge-commits`: the plain history with merges folded.
+    pub merge_folds: Option<crate::merge_folds::MergeFolds>,
+
     // ---- `798-blame` ----
     /// The open Blame view, shown in place of the diff.
     pub blame: Option<crate::blame::BlameState>,
@@ -1798,6 +1801,9 @@ impl RepositoryState {
             self.all_branches
                 .as_ref()
                 .map_or(&self.commits, |a| &a.commits)
+        } else if let Some(folds) = &self.merge_folds {
+            // `1227-fold-merge-commits`
+            &folds.commits
         } else {
             &self.commits
         }

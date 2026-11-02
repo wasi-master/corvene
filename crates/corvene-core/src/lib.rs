@@ -10,6 +10,7 @@ pub mod app_url;
 pub mod apply_patch;
 pub mod archive_browse;
 pub mod askpass;
+pub mod merge_folds;
 pub mod ssh_prompts;
 pub mod autocomplete;
 pub mod avatar_users;
@@ -169,6 +170,7 @@ pub use mco::{
 };
 pub use packs::{OFFERED_PACKS, PackProgress, PacksState, offered_packs};
 pub use persistence::DocumentDiffView;
+pub use persistence::HistoryFileList;
 pub use persistence::{
     CodeOwnersDisplay, CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT,
     DEFAULT_TIME_FORMAT, NotificationClickAction, PullRequestEventNotifications, Settings,

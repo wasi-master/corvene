@@ -3582,6 +3582,36 @@ registry! {
         code: &["crates/corvene-ui/src/tab_strip.rs", "crates/corvene-core/src/workspace.rs"],
     },
 
+    /// The repository list can stay visible as a column.
+    REPOSITORY_SIDEBAR = 431 "repository-sidebar" {
+        title: "Repository list always visible",
+        summary: "View › Show Repository Sidebar pins the repository list as a resizable \
+                  column at the window's left edge, with its filter, groups and indicators. \
+                  The toolbar's dropdown keeps working.",
+        ghd_behaviour: "The repository list is a foldout that closes after a pick.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16175)],
+        code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// History's file list can be hidden or moved above the diff.
+    HISTORY_FILE_LIST = 432 "history-file-list" {
+        title: "Hide or move History's file list",
+        summary: "View › History File List keeps a commit's files beside the diff, in a strip \
+                  of tabs above it, or hidden with a file picker over the diff so it takes \
+                  the full width. The choice is remembered.",
+        ghd_behaviour: "The list is always beside the diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13625)],
+        code: &["crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/app_menu.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
@@ -8406,6 +8436,22 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(18331)],
         code: &["crates/corvene-git/src/rewrite_untracked.rs", "crates/corvene-core/src/mco.rs"],
+    },
+
+    /// History folds the commits a merge brought in under the merge.
+    FOLD_MERGE_COMMITS = 1227 "fold-merge-commits" {
+        title: "Foldable merge commits",
+        summary: "A merge commit in History gets a disclosure arrow. Folded, which is how they \
+                  start, the commits it brought in are hidden. Unfolded they show indented \
+                  under it. ← and → fold and unfold the selected merge. Dragging commits to \
+                  squash or reorder is off while merges can fold.",
+        ghd_behaviour: "Every commit is listed flat.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20106)],
+        code: &["crates/corvene-core/src/merge_folds.rs", "crates/corvene-ui/src/history.rs"],
     },
 
     // ---- 1300 Changes & diffs (overflow) ----

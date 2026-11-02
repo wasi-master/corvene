@@ -680,6 +680,26 @@ pub(crate) fn main() {
             Dispatcher::set_diff_wrap_lines(!wrap, cx);
         });
         // Corvene (`1310-file-list-tree`): View › Show Changes as Tree / as List
+        // `431-repository-sidebar`
+        on_menu_action(cx, |_: &ToggleRepositorySidebar, cx| {
+            Dispatcher::update_settings(cx, |s| s.repository_sidebar = !s.repository_sidebar);
+        });
+        // `432-history-file-list`
+        on_menu_action(cx, |_: &HistoryFileListBeside, cx| {
+            Dispatcher::update_settings(cx, |s| {
+                s.history_file_list = corvene_core::HistoryFileList::Beside
+            });
+        });
+        on_menu_action(cx, |_: &HistoryFileListAbove, cx| {
+            Dispatcher::update_settings(cx, |s| {
+                s.history_file_list = corvene_core::HistoryFileList::Above
+            });
+        });
+        on_menu_action(cx, |_: &HistoryFileListHidden, cx| {
+            Dispatcher::update_settings(cx, |s| {
+                s.history_file_list = corvene_core::HistoryFileList::Hidden
+            });
+        });
         on_menu_action(cx, |_: &ToggleFileListTree, cx| {
             let tree = corvene_core::AppState::global(cx)
                 .read(cx)

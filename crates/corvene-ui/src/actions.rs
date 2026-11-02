@@ -104,6 +104,12 @@ gpui_kit::actions!(
         AddLocalRepository,
         CloneRepository,
         ImportFromGitHubDesktop,
+        // View › Show Repository Sidebar (`431-repository-sidebar`)
+        ToggleRepositorySidebar,
+        // View › History File List (`432-history-file-list`)
+        HistoryFileListBeside,
+        HistoryFileListAbove,
+        HistoryFileListHidden,
         // View › Command Palette… (`624-command-palette`)
         CommandPalette,
         // File › Remove Repositories… (`269-bulk-remove-repositories`)

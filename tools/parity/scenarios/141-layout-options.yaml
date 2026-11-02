@@ -1,0 +1,43 @@
+# Layout options (431-repository-sidebar, 432-history-file-list, off in the
+# GitHub Desktop preset, desktop/desktop#16175 and #13625): recorded, not
+# compared (GHD has neither).
+name: repository-sidebar
+description: The repository list pinned as a column.
+setup: repo
+corvene_flags: 431-repository-sidebar=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ToggleRepositorySidebar"}
+    wait: 500
+  - snap: {name: pinned, corvene_only: true}
+---
+name: history-file-list
+description: A commit's files above the diff, then hidden with a picker.
+setup: repo
+corvene_flags: 432-history-file-list=on
+steps:
+  - ghd: {skip: true}
+    corvene: {key: cmd-2}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {action: "corvene::HistoryFileListAbove"}
+    wait: 400
+  - snap: {name: above, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {action: "corvene::HistoryFileListHidden"}
+    wait: 400
+  - snap: {name: hidden, corvene_only: true}
+---
+name: fold-merge-commits
+description: Merges in History folded, then one unfolded with the keyboard.
+setup: repo-graph
+corvene_flags: 1227-fold-merge-commits=on,1213-commit-graph=on
+steps:
+  - ghd: {skip: true}
+    corvene: {key: cmd-2}
+    wait: 800
+  - snap: {name: folded, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: right}
+    wait: 400
+  - snap: {name: unfolded, corvene_only: true}

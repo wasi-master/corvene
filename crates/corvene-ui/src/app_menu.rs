@@ -212,6 +212,10 @@ pub struct MenuExtras {
     /// Flag `1310-file-list-tree`: View › Show Changes as Tree / as List,
     /// `true` while file lists show trees (set by [`MenuLabelsEvent::of`]).
     pub file_list_tree: Option<bool>,
+    /// `431-repository-sidebar`: the sidebar is showing.
+    pub repository_sidebar: Option<bool>,
+    /// `432-history-file-list`: where the list is.
+    pub history_file_list: Option<corvene_core::HistoryFileList>,
     /// Flags that add key bindings and their View menu items
     /// (`612-navigation-shortcuts`, `801-history-review-mode`).
     pub keymap: KeymapFlags,
@@ -257,6 +261,10 @@ impl MenuExtras {
             undo_last_commit: flags.bool(ids::UNDO_COMMIT_MENU_ITEM).then_some(false),
             diff_wrap_lines: flags.bool(ids::DIFF_NO_WRAP).then_some(true),
             file_list_tree: flags.bool(ids::FILE_LIST_TREE).then_some(false),
+            repository_sidebar: flags.bool(ids::REPOSITORY_SIDEBAR).then_some(false),
+            history_file_list: flags
+                .bool(ids::HISTORY_FILE_LIST)
+                .then_some(corvene_core::HistoryFileList::Beside),
             keymap: KeymapFlags::from_flags(flags),
         }
     }
@@ -303,6 +311,12 @@ impl MenuLabelsEvent {
         // `1310-file-list-tree`
         if extras.file_list_tree.is_some() {
             extras.file_list_tree = Some(s.settings.file_list_tree);
+        }
+        if extras.repository_sidebar.is_some() {
+            extras.repository_sidebar = Some(s.settings.repository_sidebar);
+        }
+        if extras.history_file_list.is_some() {
+            extras.history_file_list = Some(s.settings.history_file_list);
         }
         // `1212-bisect`: whether the selected repository bisects
         if extras.bisect.is_some() {
@@ -648,7 +662,10 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     }
     // Corvene (`624-command-palette`)
     if extras.keymap.command_palette {
-        view.push(item(l("Command Palette…", "&Command palette…"), CommandPalette));
+        view.push(item(
+            l("Command Palette…", "&Command palette…"),
+            CommandPalette,
+        ));
     }
     // Corvene (`801-history-review-mode`)
     if extras.keymap.history_review_mode {
@@ -712,6 +729,47 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
                 l("Show Changes as Tree", "Show changes as &tree")
             },
             ToggleFileListTree,
+        ));
+    }
+    // Corvene (`431-repository-sidebar`)
+    if let Some(showing) = extras.repository_sidebar {
+        view.push(item(
+            if showing {
+                l("Hide Repository Sidebar", "Hide repository s&idebar")
+            } else {
+                l("Show Repository Sidebar", "Show repository s&idebar")
+            },
+            ToggleRepositorySidebar,
+        ));
+    }
+    // Corvene (`432-history-file-list`)
+    if let Some(place) = extras.history_file_list {
+        use corvene_core::HistoryFileList as List;
+        let choice = |label: &str, action: Box<dyn Action>, at: List| MenuItemConstructorOptions {
+            label: Some(label.to_string()),
+            action: Some(action),
+            checked: place == at,
+            ..Default::default()
+        };
+        view.push(submenu(
+            l("History File List", "History file &list"),
+            vec![
+                choice(
+                    l("Beside the Diff", "&Beside the diff"),
+                    Box::new(HistoryFileListBeside),
+                    List::Beside,
+                ),
+                choice(
+                    l("Above the Diff", "&Above the diff"),
+                    Box::new(HistoryFileListAbove),
+                    List::Above,
+                ),
+                choice(
+                    l("Hidden", "&Hidden"),
+                    Box::new(HistoryFileListHidden),
+                    List::Hidden,
+                ),
+            ],
         ));
     }
     // Corvene's macOS menu sets Toggle Full Screen apart; GHD has no
@@ -1367,8 +1425,7 @@ pub fn palette_commands(s: &AppState) -> Vec<PaletteCommand> {
             if action.partial_eq(&CommandPalette) {
                 continue;
             }
-            let on = menu_id(&*action)
-                .is_none_or(|id| corvene_core::menu_state::is_enabled(s, id));
+            let on = menu_id(&*action).is_none_or(|id| corvene_core::menu_state::is_enabled(s, id));
             if on {
                 out.push(PaletteCommand {
                     label,
@@ -1475,6 +1532,8 @@ mod tests {
                     undo_last_commit: Some(true),
                     diff_wrap_lines: Some(bits & 2 != 0),
                     file_list_tree: Some(bits & 2 != 0),
+                    repository_sidebar: None,
+                    history_file_list: None,
                     keymap: KeymapFlags {
                         navigation_shortcuts: true,
                         history_review_mode: true,

@@ -31,6 +31,22 @@ use tracing::warn;
 
 use corvene_models::{Account, Repository, SyntaxHighlighter, ThemeSetting};
 
+/// Corvene `432-history-file-list`: where History keeps a commit's files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HistoryFileList {
+    /// GHD's: a list beside the diff.
+    #[default]
+    Beside,
+    /// A strip of file tabs above the diff.
+    Above,
+    /// The diff takes the width; a picker in its place switches files.
+    Hidden,
+}
+
+fn default_repository_sidebar_width() -> f32 {
+    250.0
+}
+
 /// User settings persisted across launches (subset of GHD's preferences).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -264,6 +280,16 @@ pub struct Settings {
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
     pub file_list_tree: bool,
+    /// Corvene `431-repository-sidebar`: the repository list stays visible
+    /// as a column at the window's left edge.
+    #[serde(default)]
+    pub repository_sidebar: bool,
+    /// Its width, in unzoomed points.
+    #[serde(default = "default_repository_sidebar_width")]
+    pub repository_sidebar_width: f32,
+    /// Corvene `432-history-file-list`: where History keeps a commit's files.
+    #[serde(default)]
+    pub history_file_list: HistoryFileList,
     /// Corvene `117-file-icons`: Appearance › File icons
     /// (`corvene_core::file_icons`).
     #[serde(default = "default_file_icon_theme")]
@@ -752,6 +778,9 @@ impl Default for Settings {
             pretty_diff_view: InspectDiffView::Source,
             signing_diff_view: InspectDiffView::Read,
             file_list_tree: false,
+            repository_sidebar: false,
+            repository_sidebar_width: default_repository_sidebar_width(),
+            history_file_list: HistoryFileList::default(),
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,
             stacked_diff_history: false,

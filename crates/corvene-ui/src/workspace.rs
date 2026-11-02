@@ -76,6 +76,9 @@ pub struct Workspace {
     section: Section,
     sidebar_width: Pixels,
     resizable: Entity<ResizableState>,
+    /// `431-repository-sidebar`: the pinned list and its column's split.
+    pinned_repositories: Entity<RepositoryFoldout>,
+    repository_column: Entity<ResizableState>,
     /// The compact (phone) layout, see `theme::compact`: the sidebar above
     /// the content instead of beside it, this tall.
     compact: bool,
@@ -279,6 +282,14 @@ impl Workspace {
         })
         .detach();
 
+        let repository_column = cx.new(|_| ResizableState::default());
+        cx.subscribe(&repository_column, |_, state, _: &ResizablePanelEvent, cx| {
+            if let Some(width) = state.read(cx).sizes().first().copied() {
+                Dispatcher::update_settings(cx, |s| s.repository_sidebar_width = unzoom(width));
+            }
+        })
+        .detach();
+        let pinned_repositories = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
         let changes = cx.new(|cx| ChangesSidebar::new(state.clone(), window, cx));
         let history = cx.new(|cx| HistorySidebar::new(state.clone(), window, cx));
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
@@ -327,6 +338,8 @@ impl Workspace {
             workspace_id,
             section: Section::Changes,
             sidebar_width: sidebar_width.max(sidebar_min),
+            pinned_repositories,
+            repository_column,
             resizable,
             compact: false,
             compact_sidebar_height: zpx(0.),
@@ -1230,6 +1243,45 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// `431-repository-sidebar`: `view` with the repository list as a column
+    /// at the window's left edge, when it is showing.
+    fn with_repository_column(&self, view: AnyElement, cx: &Context<Self>) -> AnyElement {
+        let s = self.state.read(cx);
+        if !s.flags.bool(corvene_core::flags::ids::REPOSITORY_SIDEBAR)
+            || !s.settings.repository_sidebar
+        {
+            return view;
+        }
+        let t = cx.ghd();
+        let width = zpx(s.settings.repository_sidebar_width);
+        let group = h_resizable("repository-column")
+            .with_state(&self.repository_column)
+            .with_handle_appearance(std::rc::Rc::new(|_, _, _| Some(div().into_any_element())))
+            .child(
+                resizable_panel()
+                    .size(width)
+                    .size_range(zpx(180.)..zpx(500.))
+                    .child(
+                        div()
+                            .id("repository-column")
+                            .size_full()
+                            .min_h_0()
+                            .border_t_1()
+                            .border_r_1()
+                            .border_color(t.box_border)
+                            .bg(t.background)
+                            .child(self.pinned_repositories.clone()),
+                    ),
+            )
+            .child(resizable_panel().child(view));
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(group)
+            .into_any_element()
+    }
+
     /// `maybeRenderTutorialPanel`: the repository view with the tutorial
     /// panel on the right while a tutorial step is showing.
     fn repository_view_with_tutorial(&self, cx: &Context<Self>) -> AnyElement {
@@ -1711,7 +1763,7 @@ impl Render for Workspace {
                 } else if has_repos && !tutorial_paused && no_selection {
                     no_repository_selected(cx)
                 } else if has_repos && !tutorial_paused {
-                    self.repository_view_with_tutorial(cx)
+                    self.with_repository_column(self.repository_view_with_tutorial(cx), cx)
                 } else {
                     div()
                         .flex_1()

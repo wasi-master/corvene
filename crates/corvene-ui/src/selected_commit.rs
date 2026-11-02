@@ -1247,6 +1247,111 @@ impl SelectedCommitView {
     }
 
     /// `FileList` + `.file-list-header`
+    /// `432-history-file-list`: what stands in for the file list: a strip of
+    /// tabs, or a picker with the selected file's name. ⌥↑ / ⌥↓ and the arrow
+    /// keys keep working through the list's own focus.
+    fn file_switcher(
+        &mut self,
+        id: u64,
+        place: corvene_core::HistoryFileList,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = cx.ghd().clone();
+        let rs = self.state.read(cx).repo_states.get(&id);
+        let files: Vec<String> = rs
+            .and_then(|r| r.changeset.as_ref())
+            .map(|c| c.files.iter().map(|f| f.path.clone()).collect())
+            .unwrap_or_default();
+        let selected = rs.and_then(|r| r.commit_selected_file.clone());
+        let row = div()
+            .id("commit-file-switcher")
+            .flex_none()
+            .h(zpx(34.))
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .border_b_1()
+            .border_color(t.box_border)
+            .track_focus(&self.file_list_focus)
+            .key_context("CommitFileList")
+            .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| this.select_relative(1, cx)))
+            .on_action(
+                cx.listener(|this, _: &SelectPreviousFile, _, cx| this.select_relative(-1, cx)),
+            );
+        match place {
+            corvene_core::HistoryFileList::Above => row
+                .overflow_x_scroll()
+                .children(files.into_iter().enumerate().map(|(ix, path)| {
+                    let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+                    let on = selected.as_deref() == Some(path.as_str());
+                    let tooltip = path.clone();
+                    div()
+                        .id(("commit-file-tab", ix))
+                        .flex_none()
+                        .h_full()
+                        .px(SPACING())
+                        .flex()
+                        .items_center()
+                        .border_r_1()
+                        .border_color(t.box_border)
+                        .cursor_pointer()
+                        .when(on, |d| {
+                            d.bg(t.box_selected_active_background)
+                                .text_color(t.box_selected_active_text)
+                        })
+                        .tooltip(crate::widgets::tooltip(tooltip))
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::select_commit_file(id, path.clone(), cx)
+                        })
+                        .child(name)
+                }))
+                .into_any_element(),
+            _ => {
+                let label = selected.clone().unwrap_or_else(|| "No file".to_string());
+                let count = files.len();
+                row.px(SPACING())
+                    .gap(SPACING())
+                    .child(
+                        crate::widgets::button("commit-file-picker", label, cx).on_mouse_down(
+                            MouseButton::Left,
+                            move |ev, window, cx| {
+                                cx.stop_propagation();
+                                let items = files
+                                    .iter()
+                                    .map(|path| {
+                                        let path = path.clone();
+                                        crate::context_menu::MenuItem::new(
+                                            path.clone(),
+                                            move |_, cx| {
+                                                Dispatcher::select_commit_file(id, path.clone(), cx)
+                                            },
+                                        )
+                                    })
+                                    .collect();
+                                crate::native_menu::show_context_menu(
+                                    items,
+                                    ev.position,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_size(FONT_SIZE_SM())
+                            .text_color(t.text_secondary)
+                            .child(format!(
+                                "{count} changed {}",
+                                if count == 1 { "file" } else { "files" }
+                            )),
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
     fn file_list(&mut self, id: u64, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.ghd().clone();
         let state = self.state.clone();
@@ -2176,6 +2281,28 @@ impl Render for SelectedCommitView {
                 .bg(t.background)
                 .children(self.summary(id, cx))
                 .child(diff_pane)
+                .into_any_element();
+        }
+        // `432-history-file-list`
+        let place = {
+            let s = self.state.read(cx);
+            if s.flags.bool(corvene_core::flags::ids::HISTORY_FILE_LIST) && !compact {
+                s.settings.history_file_list
+            } else {
+                corvene_core::HistoryFileList::Beside
+            }
+        };
+        if place != corvene_core::HistoryFileList::Beside {
+            let header = self.file_switcher(id, place, cx);
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .min_h_0()
+                .bg(t.background)
+                .children(self.summary(id, cx))
+                .child(header)
+                .child(div().flex_1().min_h_0().child(diff_pane))
                 .into_any_element();
         }
         div()
