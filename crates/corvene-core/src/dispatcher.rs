@@ -4559,7 +4559,9 @@ impl Dispatcher {
         };
         Self::show_section(id, Section::Changes, cx);
         Self::state(cx).update(cx, |s, cx| {
-            let github = s.hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
+            let github = s
+                .hosted_repository(id)
+                .is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
             let rs = s.repo_state_mut(id);
             // GHD `prepareToAmendCommit` → `restoreCoAuthorsFromCommit`
             if github {
@@ -4746,7 +4748,10 @@ impl Dispatcher {
                         // the next refresh lists it; the switch needs it now
                         Self::state(cx).update(cx, |s, _| {
                             if let Some(info) = s.repo_state_mut(id).info.as_mut()
-                                && !info.branches.iter().any(|b| b.full_name == created.full_name)
+                                && !info
+                                    .branches
+                                    .iter()
+                                    .any(|b| b.full_name == created.full_name)
                             {
                                 info.branches.push(created);
                             }
@@ -7023,7 +7028,10 @@ impl Dispatcher {
                 && !s.settings.hide_whitespace_in_changes_diff)
                 .then(|| s.flags.bool(crate::flags::ids::RENAMED_DIFF_AGAINST_HEAD))
         };
-        let github = Self::state(cx).read(cx).hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
+        let github = Self::state(cx)
+            .read(cx)
+            .hosted_repository(id)
+            .is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
         let task = cx.background_executor().spawn(async move {
             let head = corvene_git::get_commits(&workdir, "HEAD", 0, 1)?
                 .into_iter()

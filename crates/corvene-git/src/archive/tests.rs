@@ -505,7 +505,10 @@ fn entries_get_the_rich_diffs_of_plain_files() {
     crate::markdown_file::set_read_markdown_files(true);
     let dir = tempfile::tempdir().unwrap();
     let git = git();
-    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../corvene-fonts/tests/fixtures");
+    let fixtures = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../corvene-fonts/tests/fixtures"
+    );
     let font_old = std::fs::read(format!("{fixtures}/var-v1.ttf")).unwrap();
     let font_new = std::fs::read(format!("{fixtures}/var-v2.ttf")).unwrap();
     let old = zip_of(&[

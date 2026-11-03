@@ -393,7 +393,11 @@ pub(crate) fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<
 
 /// `1322-pdf-diff`: the Pages / Text switch of a PDF file's header (one
 /// setting for every PDF file), when its diff shows pages.
-pub(crate) fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn pdf_switch(
+    path: &str,
+    view: &Entity<DiffView>,
+    cx: &App,
+) -> Option<impl IntoElement + use<>> {
     let s = AppState::try_global(cx)?.read(cx);
     if !corvene_git::is_pdf(path) || !s.flags.bool(corvene_core::flags::ids::PDF_DIFF) {
         return None;
@@ -418,7 +422,10 @@ pub(crate) fn pdf_switch(path: &str, view: &Entity<DiffView>, cx: &App) -> Optio
 /// `1324-document-diff`: the Rendered (/ Pages) / Text switch of a
 /// document file's header (one setting for every document), while its diff
 /// is a document diff.
-pub(crate) fn document_switch(view: &Entity<DiffView>, cx: &App) -> Option<impl IntoElement + use<>> {
+pub(crate) fn document_switch(
+    view: &Entity<DiffView>,
+    cx: &App,
+) -> Option<impl IntoElement + use<>> {
     use corvene_core::DocumentDiffView as V;
     let s = AppState::try_global(cx)?.read(cx);
     view.read(cx).document_source.as_ref()?;
