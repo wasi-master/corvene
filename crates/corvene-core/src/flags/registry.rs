@@ -89,6 +89,15 @@ fn android_built_in() -> Availability {
     }
 }
 
+/// Unix file modes: Git for Windows never trusts them.
+fn unix_file_modes() -> Availability {
+    if cfg!(windows) {
+        Availability::BuiltIn("Git for Windows ignores file modes already.")
+    } else {
+        Availability::Available
+    }
+}
+
 /// The wgpu renderer's switches: macOS and Windows draw with another one.
 fn wgpu_renderer_only() -> Availability {
     if cfg!(any(
@@ -8054,6 +8063,25 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(20440)],
         code: &["crates/corvene-ui/src/browse_files.rs", "crates/corvene-git/src/file_browser.rs"],
+    },
+
+    /// git's `core.fileMode` probe for repositories it did not create there.
+    FILE_MODE_PROBE = 1119 "file-mode-probe" {
+        title: "Ignore file modes on drives that keep none",
+        summary: "When a repository is added or opened, Corvene runs git's own test of whether \
+                  its drive keeps the executable bit (the one git init and git clone run). On \
+                  drives that do not (FAT and exFAT, network shares, some virtual machine \
+                  mounts) it sets core.fileMode to false in the repository, so files no longer \
+                  show as changed because of a file mode the drive cannot store.",
+        ghd_behaviour: "A repository copied to or opened from such a drive keeps \
+                        core.fileMode=true and lists files whose only change is the mode, with \
+                        \"No content changes found\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: unix_file_modes,
+        upstream: &[Upstream::issue(9443)],
+        code: &["crates/corvene-git/src/file_mode.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
 

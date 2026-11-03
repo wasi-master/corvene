@@ -19,6 +19,7 @@ pub mod diff;
 pub mod document_file;
 pub mod error;
 pub mod file_browser;
+pub mod file_mode;
 pub mod font_file;
 pub mod git_errors;
 pub mod handle;
