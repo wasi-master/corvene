@@ -79,6 +79,15 @@ impl Dispatcher {
         });
     }
 
+    /// Back to the preset's values for every flag of `category` (the Flags
+    /// dialog's group header).
+    pub fn reset_category_flags(category: super::Category, cx: &mut dyn Host) {
+        Self::update_flags(cx, |o| {
+            o.overrides
+                .retain(|slug, _| super::by_slug(slug).is_none_or(|d| d.category() != category));
+        });
+    }
+
     /// Drop every override, keep the preset.
     pub fn reset_all_flags(cx: &mut dyn Host) {
         Self::update_flags(cx, |o| o.overrides.clear());

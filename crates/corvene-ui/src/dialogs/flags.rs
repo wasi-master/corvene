@@ -20,6 +20,11 @@
 //!
 //! The list is virtualized (`gpui::list`): only the rows on screen are built
 //! each frame, so wheel scrolling stays at frame rate with hundreds of flags.
+//!
+//! ↑ / ↓ (from the search box too) move a keyboard cursor through the flags,
+//! Enter in the search box switches its toggle or puts the caret in its
+//! number or text field. A
+//! category header with modified flags offers "Reset to preset" for them.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -32,7 +37,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::actions::{CloseFoldout, Find};
+use crate::actions::{CloseFoldout, Find, SelectNextFile, SelectPreviousFile};
 use crate::autocompletion::highlighted;
 use crate::context_menu::MenuItem;
 use crate::dialog::window_title;
@@ -221,6 +226,8 @@ pub struct FlagsDialog {
     measured_overrides: FlagOverrides,
     /// The zoom factor the rows were measured at.
     zoom_seen: f32,
+    /// The flag ↑ / ↓ last moved to.
+    cursor: Option<FlagId>,
 }
 
 impl FlagsDialog {
@@ -237,6 +244,18 @@ impl FlagsDialog {
                 .default_value(query.unwrap_or_default())
         });
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        // Enter in the search box: the cursor's flag (`activate_cursor`)
+        cx.subscribe_in(&search, window, |this, _, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter {
+                secondary: false,
+                shift: false,
+            } = ev
+                && this.confirm.is_none()
+            {
+                this.activate_cursor(window, cx);
+            }
+        })
+        .detach();
 
         let (editable, overrides): (Vec<(&'static FlagDef, Value)>, FlagOverrides) = {
             let s = state.read(cx);
@@ -299,7 +318,61 @@ impl FlagsDialog {
             view_key: ViewKey::default(),
             measured_overrides: overrides,
             zoom_seen: crate::theme::sizes::zoom_factor(),
+            cursor: None,
         }
+    }
+
+    /// ↑ / ↓: the keyboard cursor to the next or previous listed flag
+    /// (from nothing, the first or last), scrolled into view.
+    fn move_cursor(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let flags: Vec<(usize, FlagId)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, item)| match item {
+                Item::Flag(def, _) => Some((ix, def.id)),
+                Item::Header(..) => None,
+            })
+            .collect();
+        let current = self
+            .cursor
+            .and_then(|id| flags.iter().position(|(_, f)| *f == id));
+        let Some(next) = crate::filter_list::step(current, delta, flags.len()) else {
+            return;
+        };
+        let (ix, id) = flags[next];
+        self.cursor = Some(id);
+        self.list.scroll_to_reveal_item(ix);
+        self.remeasure_flag(id.0);
+        if let Some(old) = current.map(|c| flags[c].1) {
+            self.remeasure_flag(old.0);
+        }
+        cx.notify();
+    }
+
+    /// Enter on the cursor's flag: a toggle flips, a number or text field
+    /// takes the caret.
+    fn activate_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self
+            .cursor
+            .filter(|id| self.items.iter().any(|i| i.key() == u32::from(id.0)))
+        else {
+            return;
+        };
+        match flags::def(id).kind {
+            Kind::Bool => {
+                let on = matches!(self.state.read(cx).flags.value(id), Value::Bool(true));
+                let _ = Dispatcher::set_flag(id, Value::Bool(!on), cx);
+            }
+            Kind::Number { .. } | Kind::Text { .. } => {
+                if let Some(input) = self.inputs.get(&id.0) {
+                    let handle = input.read(cx).focus_handle(cx);
+                    window.focus(&handle, cx);
+                }
+            }
+            Kind::Select { .. } => {}
+        }
+        cx.notify();
     }
 
     /// A Number / Text input changed: validate, and commit when it fits.
@@ -596,7 +669,7 @@ impl FlagsDialog {
             .into_any_element()
     }
 
-    fn group_header(category: Category, count: usize, cx: &App) -> AnyElement {
+    fn group_header(category: Category, count: usize, modified: usize, cx: &App) -> AnyElement {
         let t = cx.ghd();
         div()
             .id(("flags-group", category.block() as usize))
@@ -627,6 +700,22 @@ impl FlagsDialog {
                     .text_color(t.text)
                     .child(format!("{} · {}", category.block(), category.title())),
             )
+            .when(modified > 0, |d| {
+                d.child(
+                    link_button(
+                        SharedString::from(format!("flags-reset-group-{}", category.block())),
+                        "Reset to preset",
+                        cx,
+                    )
+                    .ghd_tooltip(format!(
+                        "Put the {} modified {} back to the preset's values",
+                        modified,
+                        if modified == 1 { "flag" } else { "flags" }
+                    ))
+                    .text_size(FONT_SIZE_SM())
+                    .on_click(move |_, _, cx| Dispatcher::reset_category_flags(category, cx)),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -1000,6 +1089,11 @@ impl FlagsDialog {
             .border_color(t.box_border_contrast.opacity(0.35))
             .when(overridden, |d| d.bg(t.accent.opacity(0.06)))
             .hover(|d| d.bg(t.list_item_hover_background))
+            // the keyboard cursor (↑ / ↓)
+            .when(self.cursor == Some(id), |d| {
+                d.bg(t.box_selected_background)
+                    .shadow(crate::keyboard_nav::inset_ring_shadows(cx))
+            })
             .when(overridden, |d| {
                 d.child(
                     div()
@@ -1784,7 +1878,20 @@ impl Render for FlagsDialog {
                                     };
                                     match item {
                                         Item::Header(category, count) => {
-                                            FlagsDialog::group_header(*category, *count, cx)
+                                            let modified = {
+                                                let flags = &AppState::global(cx).read(cx).flags;
+                                                REGISTRY
+                                                    .iter()
+                                                    .filter(|d| {
+                                                        d.category() == *category
+                                                            && flags.is_overridden(d.id)
+                                                            && !flags.is_env_locked(d.id)
+                                                    })
+                                                    .count()
+                                            };
+                                            FlagsDialog::group_header(
+                                                *category, *count, modified, cx,
+                                            )
                                         }
                                         Item::Flag(def, hit) => match weak.upgrade() {
                                             Some(this) => {
@@ -1982,6 +2089,16 @@ impl Render for FlagsDialog {
                             .child(window_title("Flags"))
                             .track_focus(&self.focus_handle)
                             .key_context("FlagsDialog")
+                            .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
+                                if this.confirm.is_none() {
+                                    this.move_cursor(1, cx);
+                                }
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| {
+                                if this.confirm.is_none() {
+                                    this.move_cursor(-1, cx);
+                                }
+                            }))
                             .on_action(cx.listener(|this, _: &Find, window, cx| {
                                 if this.confirm.is_none() {
                                     let handle = this.search.read(cx).focus_handle(cx);

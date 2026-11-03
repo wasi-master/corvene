@@ -1,0 +1,20 @@
+# Flags dialog keyboard (Corvene only): ↓ from the search box moves the row
+# cursor, a category header with modified flags offers "Reset to preset".
+name: flags-keyboard
+description: Flags dialog row cursor with ↓ / ↑ and Enter
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: flags}}
+    wait: 1200
+  - key: down
+    wait: 400
+  - key: down
+    wait: 400
+  - snap: {name: cursor, corvene_only: true}
+  - key: enter
+    wait: 600
+  - snap: {name: toggled, corvene_only: true}
+  - key: up
+    wait: 400
+  - snap: {name: cursor-up, corvene_only: true}

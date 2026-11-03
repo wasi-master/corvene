@@ -413,6 +413,9 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("down", SelectNextFile, Some("WorktreeFilter")),
         KeyBinding::new("up", SelectPreviousFile, Some("WorktreeFilter")),
         KeyBinding::new("enter", FilterListPick, Some("WorktreeFilter")),
+        // the Flags dialog's keyboard cursor, from its search box too
+        KeyBinding::new("down", SelectNextFile, Some("FlagsDialog")),
+        KeyBinding::new("up", SelectPreviousFile, Some("FlagsDialog")),
         KeyBinding::new("secondary-,", OpenSettings, MENU),
         // ⌘⇧, - macOS delivers the shifted character, so the chord is `cmd-<`
         KeyBinding::new("secondary-<", OpenFlags, MENU),
