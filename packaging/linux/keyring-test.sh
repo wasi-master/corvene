@@ -4,6 +4,9 @@
 # prompt is needed:
 #
 #   dbus-run-session -- packaging/linux/keyring-test.sh
+#
+# keyring-test-oo7.sh does the same against oo7-daemon, with locked
+# keyrings and their unlock prompts.
 set -euo pipefail
 
 scratch="$(mktemp -d)"

@@ -30,6 +30,8 @@ pub mod keychain;
 pub mod locale;
 pub mod notifications;
 pub mod proxy;
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+pub mod secret_service;
 pub mod services;
 pub mod shells;
 #[cfg(not(windows))]
