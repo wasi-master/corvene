@@ -839,8 +839,14 @@ pub fn fetch_with_prune_tags(
 /// command.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FetchOptions {
-    /// `--prune-tags` (see [`fetch_with_prune_tags`]).
+    /// `--prune-tags` (see [`fetch_with_prune_tags`]). Also `--force`, so
+    /// a tag moved on the remote follows it instead of failing the fetch
+    /// ("would clobber existing tag").
     pub prune_tags: bool,
+    /// `--tags --force`: every tag of the remote, and a local tag the
+    /// remote moved follows it (`1120-fetch-updates-moved-tags`,
+    /// desktop/desktop#22953). Git leaves moved tags alone otherwise.
+    pub update_moved_tags: bool,
     /// `--write-commit-graph`: git extends the commit-graph file, which
     /// speeds up history walks and ahead/behind counts (desktop#22045).
     pub write_commit_graph: bool,
@@ -866,6 +872,12 @@ pub fn fetch_with(
     let mut args = vec!["fetch", "--progress", "--prune"];
     if options.prune_tags {
         args.push("--prune-tags");
+    }
+    if options.update_moved_tags {
+        args.push("--tags");
+    }
+    if options.prune_tags || options.update_moved_tags {
+        args.push("--force");
     }
     if options.write_commit_graph {
         args.push("--write-commit-graph");
@@ -2682,8 +2694,37 @@ mod tests {
                 .success()
         };
         assert!(has_tag());
+        // a tag moved on the remote fails a --prune-tags fetch without
+        // --force, and stays put in a plain fetch
+        run(&other, &["tag", "moved", "HEAD~1"]);
+        run(&other, &["push", "-q", "origin", "moved"]);
+        fetch(git.clone(), &work, "origin", None, &mut |_, _| {}).unwrap();
+        run(&other, &["tag", "-f", "moved", "HEAD"]);
+        run(&other, &["push", "-q", "-f", "origin", "moved"]);
+        let tag_target = |dir: &Path| {
+            String::from_utf8(
+                std::process::Command::new("git")
+                    .args(["rev-parse", "refs/tags/moved"])
+                    .current_dir(dir)
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+        };
+        fetch(git.clone(), &work, "origin", None, &mut |_, _| {}).unwrap();
+        assert_ne!(tag_target(&work), tag_target(&other));
         fetch_with_prune_tags(git.clone(), &work, "origin", true, None, &mut |_, _| {}).unwrap();
         assert!(!has_tag());
+        assert_eq!(tag_target(&work), tag_target(&other));
+        run(&other, &["tag", "-f", "moved", "HEAD~1"]);
+        run(&other, &["push", "-q", "-f", "origin", "moved"]);
+        let moved = FetchOptions {
+            update_moved_tags: true,
+            ..FetchOptions::default()
+        };
+        fetch_with(git.clone(), &work, "origin", moved, None, &mut |_, _| {}).unwrap();
+        assert_eq!(tag_target(&work), tag_target(&other));
         let graph = FetchOptions {
             write_commit_graph: true,
             ..FetchOptions::default()

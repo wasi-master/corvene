@@ -952,6 +952,10 @@ impl Dispatcher {
             // be lost)
             prune_tags: s.flags.bool(crate::flags::ids::FETCH_PRUNE_TAGS)
                 && s.repository(id).is_some_and(|r| r.tags_to_push.is_empty()),
+            // `1120-fetch-updates-moved-tags`: same guard, a tag created
+            // here and not pushed yet must not be overwritten
+            update_moved_tags: s.flags.bool(crate::flags::ids::FETCH_UPDATES_MOVED_TAGS)
+                && s.repository(id).is_some_and(|r| r.tags_to_push.is_empty()),
             // `249-fetch-writes-commit-graph`
             write_commit_graph: s.flags.bool(crate::flags::ids::FETCH_WRITES_COMMIT_GRAPH),
             // `250-sync-skips-submodules`
@@ -1896,6 +1900,7 @@ impl Dispatcher {
         // GHD's plain fetch after a push, plus `249` / `250`
         let fetch_options = corvene_git::FetchOptions {
             prune_tags: false,
+            update_moved_tags: false,
             ..Self::fetch_options(Self::state(cx).read(cx), id)
         };
         let retry = RetryAction::Push {
@@ -2173,6 +2178,7 @@ impl Dispatcher {
         );
         let fetch_options = corvene_git::FetchOptions {
             prune_tags: false,
+            update_moved_tags: false,
             ..Self::fetch_options(Self::state(cx).read(cx), id)
         };
         let cancel = Self::network_cancel_token(id, PushPullKind::Push, false, cx);

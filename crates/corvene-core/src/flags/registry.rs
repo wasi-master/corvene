@@ -8146,6 +8146,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/confirm_sensitive_clone.rs"],
     },
 
+    /// Fetch moves local tags that were moved on the remote.
+    FETCH_UPDATES_MOVED_TAGS = 1120 "fetch-updates-moved-tags" {
+        title: "Fetch updates tags moved on the remote",
+        summary: "Fetch (and the background fetch) gets every tag of the remote, and a tag \
+                  that was deleted and created again on another commit there moves here too. \
+                  Not while tags created in Corvene are waiting to be pushed.",
+        ghd_behaviour: "A tag that already exists locally keeps pointing at the old commit after \
+                        every fetch.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22953), Upstream::issue(18456)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.
