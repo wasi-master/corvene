@@ -467,6 +467,9 @@ pub struct CloneOptions {
     /// Count git's `Updating files` lines as GHD's `Checking out files`
     /// step (`281-clone-updating-files-step`); off is GHD's parser.
     pub updating_files_step: bool,
+    /// Skip the [`is_clone_path_sensitive`] backstop: the user confirmed
+    /// the destination (`1123-confirm-sensitive-clone`).
+    pub allow_sensitive_path: bool,
 }
 
 /// GHD `isClonePathSensitive`: `path`, resolved and lower-cased, is the
@@ -571,7 +574,7 @@ pub fn clone_with_options(
     cancel: Option<crate::CancelToken>,
     mut on_progress: impl FnMut(CloneProgress),
 ) -> Result<()> {
-    if is_clone_path_sensitive(path) {
+    if !options.allow_sensitive_path && is_clone_path_sensitive(path) {
         return Err(GitError::SensitiveClonePath(path.to_path_buf()));
     }
     if let Some(parent) = path.parent() {

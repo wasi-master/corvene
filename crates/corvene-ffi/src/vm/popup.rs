@@ -402,6 +402,9 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("sha", sha);
         }
+        Popup::ConfirmSensitiveClone { url, path, .. } => {
+            f.put("url", url).put("path", path.display());
+        }
         Popup::ConfirmForceUnlock {
             repo: r,
             path,

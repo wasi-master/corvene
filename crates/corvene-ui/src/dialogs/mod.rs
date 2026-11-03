@@ -28,6 +28,7 @@ mod confirm_delete_untrashable;
 mod confirm_force_unlock;
 mod confirm_push_to_upstream;
 mod confirm_quit;
+mod confirm_sensitive_clone;
 mod crash_report_found;
 mod create_release;
 mod create_repository;
@@ -691,6 +692,21 @@ impl DialogHost {
                 .into(),
             Popup::SparseCheckout { repo } => cx
                 .new(|cx| sparse_checkout::SparseCheckoutDialog::new(state, *repo, cx))
+                .into(),
+            Popup::ConfirmSensitiveClone {
+                url,
+                path,
+                default_branch,
+                depth,
+            } => cx
+                .new(|_| {
+                    confirm_sensitive_clone::ConfirmSensitiveCloneDialog::new(
+                        url.clone(),
+                        path.clone(),
+                        default_branch.clone(),
+                        *depth,
+                    )
+                })
                 .into(),
             Popup::ConfirmForceUnlock { repo, path, owner } => cx
                 .new(|_| {

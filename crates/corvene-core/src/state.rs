@@ -683,6 +683,15 @@ pub enum Popup {
     SparseCheckout {
         repo: u64,
     },
+    /// Corvene (`1123-confirm-sensitive-clone`): a clone into the home
+    /// directory or a credentials / configuration folder
+    /// (`corvene_git::is_clone_path_sensitive`) asks first.
+    ConfirmSensitiveClone {
+        url: String,
+        path: PathBuf,
+        default_branch: Option<String>,
+        depth: Option<u32>,
+    },
     /// Corvene (`1113-lfs-locks`): release a lock someone else holds.
     ConfirmForceUnlock {
         repo: u64,

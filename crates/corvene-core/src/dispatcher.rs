@@ -6177,6 +6177,47 @@ impl Dispatcher {
         depth: Option<u32>,
         cx: &mut dyn Host,
     ) {
+        // Corvene `1123-confirm-sensitive-clone`: GHD refuses these outright
+        if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CONFIRM_SENSITIVE_CLONE)
+            && corvene_git::is_clone_path_sensitive(&path)
+        {
+            Self::close_popup(cx);
+            return Self::show_popup(
+                Popup::ConfirmSensitiveClone {
+                    url,
+                    path,
+                    default_branch,
+                    depth,
+                },
+                cx,
+            );
+        }
+        Self::clone_repository_checked(url, path, default_branch, depth, false, cx);
+    }
+
+    /// Corvene `1123-confirm-sensitive-clone`: the clone the user confirmed
+    /// in `Popup::ConfirmSensitiveClone`.
+    pub fn clone_into_sensitive_path(
+        url: String,
+        path: PathBuf,
+        default_branch: Option<String>,
+        depth: Option<u32>,
+        cx: &mut dyn Host,
+    ) {
+        Self::clone_repository_checked(url, path, default_branch, depth, true, cx);
+    }
+
+    fn clone_repository_checked(
+        url: String,
+        path: PathBuf,
+        default_branch: Option<String>,
+        depth: Option<u32>,
+        allow_sensitive_path: bool,
+        cx: &mut dyn Host,
+    ) {
         if Self::state(cx).read(cx).git.is_none() {
             Self::show_error("Git is not available", "Install git and retry.", cx);
             return;
@@ -6195,6 +6236,7 @@ impl Dispatcher {
             default_branch,
             depth,
             None,
+            allow_sensitive_path,
             move |outcome, cx| match outcome {
                 CloneOutcome::Added | CloneOutcome::Cancelled => {}
                 CloneOutcome::SubmodulesFailed(err) => Self::show_error(
@@ -6340,6 +6382,7 @@ impl Dispatcher {
                     info.default_branch,
                     depth,
                     Some((ix + 1, total)),
+                    false,
                     move |outcome, cx| {
                         match outcome {
                             CloneOutcome::Added => {}
@@ -6380,12 +6423,14 @@ impl Dispatcher {
     /// Run one clone: progress into `AppState::cloning` (`queue`: its place
     /// in a `293-clone-multiple` queue), the repository added when it is
     /// done, then `then` with the outcome.
+    #[allow(clippy::too_many_arguments)]
     fn start_clone(
         url: String,
         path: PathBuf,
         default_branch: Option<String>,
         depth: Option<u32>,
         queue: Option<(usize, usize)>,
+        allow_sensitive_path: bool,
         then: impl FnOnce(CloneOutcome, &mut dyn Host) + 'static,
         cx: &mut dyn Host,
     ) {
@@ -6422,6 +6467,7 @@ impl Dispatcher {
                 .read(cx)
                 .flags
                 .bool(crate::flags::ids::CLONE_UPDATING_FILES_STEP),
+            allow_sensitive_path,
             ..corvene_git::CloneOptions::default()
         };
         let (tx, rx) = std::sync::mpsc::channel::<corvene_git::CloneProgress>();
