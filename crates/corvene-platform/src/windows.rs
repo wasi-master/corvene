@@ -220,3 +220,99 @@ pub fn visual_studio_installed() -> bool {
             .is_ok_and(|out| out.status.success() && !out.stdout.trim_ascii().is_empty())
     })
 }
+
+/// Whether `ReadDirectoryChangesW` takes `dir`, asked the way the file
+/// watcher (`notify`) asks: recursively, overlapped, with a 16 KiB buffer.
+/// Some redirectors refuse it (a VDI user profile on an SMB share,
+/// desktop/desktop#22972), and `notify` then reports no change at all
+/// instead of an error. The request is cancelled at once.
+pub fn directory_changes_supported(dir: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
+        FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME,
+        FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SECURITY,
+        FILE_NOTIFY_CHANGE_SIZE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING, ReadDirectoryChangesW,
+    };
+    use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+    use windows::Win32::System::Threading::CreateEventW;
+    use windows::core::PCWSTR;
+
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call
+    let handle = match unsafe {
+        CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            FILE_LIST_DIRECTORY.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            None,
+        )
+    } {
+        Ok(handle) => handle,
+        Err(err) => {
+            tracing::debug!(%err, dir = %dir.display(), "could not open the folder to watch");
+            return false;
+        }
+    };
+    // SAFETY: an unnamed manual-reset event, closed below
+    let event = match unsafe { CreateEventW(None, true, false, PCWSTR::null()) } {
+        Ok(event) => event,
+        Err(_) => {
+            // SAFETY: the handle opened above
+            let _ = unsafe { CloseHandle(handle) };
+            return true;
+        }
+    };
+    let mut buffer = vec![0u32; 4096];
+    let mut overlapped = OVERLAPPED {
+        hEvent: event,
+        ..Default::default()
+    };
+    let filter = FILE_NOTIFY_CHANGE_FILE_NAME
+        | FILE_NOTIFY_CHANGE_DIR_NAME
+        | FILE_NOTIFY_CHANGE_ATTRIBUTES
+        | FILE_NOTIFY_CHANGE_SIZE
+        | FILE_NOTIFY_CHANGE_LAST_WRITE
+        | FILE_NOTIFY_CHANGE_CREATION
+        | FILE_NOTIFY_CHANGE_SECURITY;
+    // SAFETY: `buffer` and `overlapped` stay alive until the request has
+    // completed or been cancelled (`GetOverlappedResult` waits for it)
+    let started = unsafe {
+        ReadDirectoryChangesW(
+            handle,
+            buffer.as_mut_ptr().cast(),
+            (buffer.len() * 4) as u32,
+            true,
+            filter,
+            None,
+            Some(&raw mut overlapped),
+            None,
+        )
+    };
+    let supported = match started {
+        Ok(()) => {
+            let mut transferred = 0u32;
+            // SAFETY: the pending request on `handle` uses `overlapped`
+            unsafe {
+                let _ = CancelIoEx(handle, Some(&raw const overlapped));
+                let _ = GetOverlappedResult(handle, &raw const overlapped, &mut transferred, true);
+            }
+            true
+        }
+        Err(err) => {
+            tracing::info!(%err, dir = %dir.display(), "the folder cannot be watched for changes");
+            false
+        }
+    };
+    // SAFETY: both handles were opened above and are not used after this
+    unsafe {
+        let _ = CloseHandle(event);
+        let _ = CloseHandle(handle);
+    }
+    supported
+}

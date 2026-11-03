@@ -11,6 +11,12 @@
 //! on the watcher thread and rebuilt after a `.gitignore`, `info/exclude`, the
 //! config or the index changes. Inside `.git/` the name rules of
 //! [`is_relevant`] apply as before.
+//!
+//! Where the system cannot report changes in the folder it is polled every
+//! [`POLL_INTERVAL`] instead (`notify`'s `PollWatcher`): Windows refuses
+//! `ReadDirectoryChangesW` on some network redirectors (a VDI user profile
+//! on an SMB share, desktop/desktop#22972, where GHD fails with "UNKNOWN:
+//! unknown error, watch"), and inotify runs out of watches in big trees.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -23,8 +29,11 @@ use tracing::{debug, warn};
 /// The default debounce (`904-fs-watcher-debounce-ms` sets the real one).
 pub const DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// How often a folder the system cannot watch is looked at again.
+pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
+
 pub struct RepoWatcher {
-    _watcher: RecommendedWatcher,
+    _watcher: Box<dyn Watcher>,
 }
 
 /// Start watching `workdir`, coalescing bursts closer than `debounce`.
@@ -39,15 +48,26 @@ pub fn watch(
     leading: bool,
 ) -> anyhow::Result<(RepoWatcher, async_channel::Receiver<Instant>)> {
     let (raw_tx, raw_rx) = mpsc::channel::<Vec<PathBuf>>();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res
-            && !is_open(&event.kind)
-            && !(cfg!(windows) && is_directory_touch(&event.kind, &event.paths))
-        {
-            let _ = raw_tx.send(event.paths);
+    let handler = |raw_tx: mpsc::Sender<Vec<PathBuf>>| {
+        move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res
+                && !is_open(&event.kind)
+                && !(cfg!(windows) && is_directory_touch(&event.kind, &event.paths))
+            {
+                let _ = raw_tx.send(event.paths);
+            }
         }
-    })?;
-    watcher.watch(&workdir, RecursiveMode::Recursive)?;
+    };
+    let watcher: Box<dyn Watcher> = match native_watcher(&workdir, handler(raw_tx.clone())) {
+        Ok(watcher) => Box::new(watcher),
+        Err(err) => {
+            warn!(?err, path = %workdir.display(), "no change events for the repository; polling it");
+            let config = notify::Config::default().with_poll_interval(POLL_INTERVAL);
+            let mut watcher = notify::PollWatcher::new(handler(raw_tx), config)?;
+            watcher.watch(&workdir, RecursiveMode::Recursive)?;
+            Box::new(watcher)
+        }
+    };
 
     // unbounded: every burst's time reaches the dispatcher (a refresh that
     // started before it must not swallow it)
@@ -97,6 +117,24 @@ pub fn watch(
         })?;
 
     Ok((RepoWatcher { _watcher: watcher }, rx))
+}
+
+/// The system's change events for `workdir`. On Windows the folder is first
+/// asked whether it takes them: `notify` starts without an error where it
+/// does not, and then never reports anything.
+fn native_watcher(
+    workdir: &Path,
+    handler: impl notify::EventHandler,
+) -> notify::Result<RecommendedWatcher> {
+    #[cfg(windows)]
+    if !corvene_platform::windows::directory_changes_supported(workdir) {
+        return Err(notify::Error::generic(
+            "the folder does not report changes (ReadDirectoryChangesW)",
+        ));
+    }
+    let mut watcher = notify::recommended_watcher(handler)?;
+    watcher.watch(workdir, RecursiveMode::Recursive)?;
+    Ok(watcher)
 }
 
 /// inotify also reports files being opened (FSEvents never does): git reading
