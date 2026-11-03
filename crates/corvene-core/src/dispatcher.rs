@@ -4603,6 +4603,20 @@ impl Dispatcher {
         // `1114-hook-results`: post-checkout's outcome goes to the hook list
         let hooks = crate::hooks::hook_ui(id, false, Some(format!("Switch to {name}")), cx);
         let sink = Self::progress_sink(id, |rs| &mut rs.checkout_progress, cx);
+        // GHD `_createBranch` → `_checkoutBranch`: with uncommitted changes
+        // the switch goes through the changes strategy (Switch Branch asks
+        // by default), so the branch is only created here
+        let defer_checkout = !unborn && Self::working_directory_dirty(id, cx);
+        let created = corvene_models::Branch {
+            name: name.clone(),
+            kind: corvene_models::BranchKind::Local,
+            full_name: format!("refs/heads/{name}"),
+            tip: None,
+            upstream: None,
+            tip_time: None,
+            tip_author: None,
+            remote_name: None,
+        };
         let task = cx.background_executor().spawn(async move {
             if unborn {
                 return corvene_git::checkout_new_branch(git, &workdir, &name);
@@ -4620,6 +4634,9 @@ impl Dispatcher {
             {
                 warn!(%err, "could not record the branch's parent");
             }
+            if defer_checkout {
+                return Ok(());
+            }
             let branch = corvene_models::Branch {
                 name: name.clone(),
                 kind: corvene_models::BranchKind::Local,
@@ -4636,10 +4653,12 @@ impl Dispatcher {
                 })
             })
         });
-        Self::state(cx).update(cx, |s, cx| {
-            s.repo_state_mut(id).checkout_target = Some(branch_name);
-            cx.notify();
-        });
+        if !defer_checkout {
+            Self::state(cx).update(cx, |s, cx| {
+                s.repo_state_mut(id).checkout_target = Some(branch_name);
+                cx.notify();
+            });
+        }
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
@@ -4649,6 +4668,20 @@ impl Dispatcher {
                     rs.checkout_progress = None;
                 });
                 match result {
+                    Ok(()) if defer_checkout => {
+                        Self::record_issue_branch(id, &branch_done, cx);
+                        // the next refresh lists it; the switch needs it now
+                        Self::state(cx).update(cx, |s, _| {
+                            if let Some(info) = s.repo_state_mut(id).info.as_mut()
+                                && !info.branches.iter().any(|b| b.full_name == created.full_name)
+                            {
+                                info.branches.push(created);
+                            }
+                        });
+                        Self::checkout_branch(id, branch_done, None, cx);
+                        Self::refresh_repository(id, cx);
+                        return;
+                    }
                     // `345-issues`: a branch made from an issue remembers it
                     Ok(()) => Self::record_issue_branch(id, &branch_done, cx),
                     Err(err) => {

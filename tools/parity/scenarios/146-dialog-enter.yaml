@@ -1,0 +1,14 @@
+# Enter in a dialog's text box takes its default button: Create a Branch
+# creates and checks out the typed branch (GHD's `<form>` submit).
+name: dialog-enter
+description: Enter in Create a Branch's name box creates the branch
+setup: repo
+steps:
+  - menu: create-branch
+    corvene: {key: cmd-shift-n}
+    wait: 800
+  - type: "enter-test"
+    wait: 300
+  - key: enter
+    wait: 1500
+  - snap: created
