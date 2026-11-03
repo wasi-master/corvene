@@ -196,3 +196,27 @@ pub fn hold_running_mutex() {
         Err(err) => tracing::warn!(%err, "could not create the running mutex"),
     }
 }
+
+/// Corvene (`1122-visual-studio-clone-folder`): whether the Visual Studio
+/// IDE is installed. `vswhere` comes with the Visual Studio Installer and,
+/// without `-products`, lists Community, Professional and Enterprise only
+/// (Build Tools alone do not count). Asked once per run.
+pub fn visual_studio_installed() -> bool {
+    static INSTALLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        let Some(programs) = std::env::var_os("ProgramFiles(x86)") else {
+            return false;
+        };
+        let vswhere = Path::new(&programs).join(r"Microsoft Visual Studio\Installer\vswhere.exe");
+        if !vswhere.is_file() {
+            return false;
+        }
+        Command::new(vswhere)
+            .args(["-nologo", "-property", "instanceId"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .is_ok_and(|out| out.status.success() && !out.stdout.trim_ascii().is_empty())
+    })
+}

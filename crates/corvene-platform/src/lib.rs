@@ -180,6 +180,21 @@ pub mod paths {
         }
     }
 
+    /// Corvene (`1122-visual-studio-clone-folder`, desktop/desktop#23103):
+    /// Visual Studio's default clone folder, `%USERPROFILE%\source\repos`,
+    /// when the Visual Studio IDE is installed. A folder changed in Visual
+    /// Studio's Git settings is not read. Blocking the first time (runs
+    /// `vswhere`); `None` off Windows.
+    pub fn visual_studio_clone_dir() -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            if crate::windows::visual_studio_installed() {
+                return dirs::home_dir().map(|home| home.join("source").join("repos"));
+            }
+        }
+        None
+    }
+
     /// `<documents>\GitHub`, or `<home>\GitHub` when a folder on the way to
     /// Documents is OneDrive's (`OneDrive`, `OneDrive - Contoso`).
     pub fn clone_dir_beside_onedrive(documents: &Path, home: &Path) -> PathBuf {

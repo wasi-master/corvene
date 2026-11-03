@@ -8179,6 +8179,23 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-git/src/hooks.rs"],
     },
 
+    /// Clone a Repository offers Visual Studio's clone folder.
+    VISUAL_STUDIO_CLONE_FOLDER = 1122 "visual-studio-clone-folder" {
+        title: "Clone into Visual Studio's folder",
+        summary: "On Windows with Visual Studio installed, Clone a Repository offers \
+                  %USERPROFILE%\\source\\repos (where Visual Studio clones) beside the local \
+                  path in one click, and the way back to the usual folder.",
+        ghd_behaviour: "Only the last clone folder or Documents\\GitHub; Visual Studio's folder \
+                        must be picked with Choose….",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: cfg!(windows), availability: available,
+        upstream: &[Upstream::issue(23103)],
+        code: &["crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-platform/src/lib.rs", "crates/corvene-platform/src/windows.rs"],
+    },
+
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.

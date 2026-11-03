@@ -46,6 +46,11 @@
 //! nearest existing parent is a writable folder); GHD only checks that the
 //! path is not a non-empty folder, so `~/x` clones into a folder named `~`
 //! next to the app and other bad paths fail inside git.
+//!
+//! Deviation (`1122-visual-studio-clone-folder`, desktop/desktop#23103):
+//! with Visual Studio installed, a link under the local path switches the
+//! folder the path is derived in to Visual Studio's `source\repos` and
+//! back; GHD has only the last clone folder and Choose….
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -120,6 +125,12 @@ pub struct CloneRepositoryDialog {
     /// `293-clone-multiple`: the destinations that already exist and are
     /// not empty (or that two picks share).
     multi_conflicts: Vec<String>,
+    /// `1122-visual-studio-clone-folder`: Visual Studio's clone folder,
+    /// once found (Windows with Visual Studio installed).
+    visual_studio: Option<PathBuf>,
+    /// The path is derived in [`Self::visual_studio`] instead of the clone
+    /// folder.
+    in_visual_studio: bool,
 }
 
 thread_local! {
@@ -220,9 +231,56 @@ impl CloneRepositoryDialog {
             multi_conflicts: Vec::new(),
             clone_error: None,
             alias: cx.new(|cx| InputState::new(window, cx).placeholder("optional")),
+            visual_studio: None,
+            in_visual_studio: false,
         };
         this.ensure_loaded(cx);
+        this.find_visual_studio(cx);
         this
+    }
+
+    /// `1122-visual-studio-clone-folder`: `vswhere` runs off the main thread.
+    fn find_visual_studio(&self, cx: &mut Context<Self>) {
+        if !cfg!(windows)
+            || !self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::VISUAL_STUDIO_CLONE_FOLDER)
+        {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async { corvene_platform::paths::visual_studio_clone_dir() })
+                .await;
+            this.update(cx, |d, cx| {
+                d.visual_studio = found;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The folder the path is derived in: the clone folder, or Visual
+    /// Studio's while picked.
+    fn base_dir(&self, cx: &App) -> PathBuf {
+        match &self.visual_studio {
+            Some(dir) if self.in_visual_studio => dir.clone(),
+            _ => self.state.read(cx).clone_dir(),
+        }
+    }
+
+    /// Switch the path between the clone folder and Visual Studio's,
+    /// deriving it again (a path typed by hand included).
+    fn toggle_visual_studio(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.in_visual_studio = !self.in_visual_studio;
+        self.path_edited = false;
+        self.last_derived = self.path.read(cx).value().to_string();
+        self.derive_path(window, cx);
+        self.validate(cx);
+        cx.notify();
     }
 
     /// `235-clone-failure-keeps-input`: the URL tab with the failed clone's
@@ -355,7 +413,7 @@ impl CloneRepositoryDialog {
         if self.path_edited {
             return;
         }
-        let base = self.state.read(cx).clone_dir();
+        let base = self.base_dir(cx);
         let url = self.url.read(cx).value().to_string();
         let with_owner = self
             .state
@@ -831,10 +889,41 @@ impl CloneRepositoryDialog {
                         }),
                 )
         });
+        let visual_studio =
+            self.visual_studio
+                .as_ref()
+                .filter(|_| {
+                    self.state
+                        .read(cx)
+                        .flags
+                        .bool(corvene_core::flags::ids::VISUAL_STUDIO_CLONE_FOLDER)
+                })
+                .map(|dir| {
+                    let t = cx.ghd();
+                    let label = if self.in_visual_studio {
+                        format!(
+                            "Clone into {} instead",
+                            self.state.read(cx).clone_dir().display()
+                        )
+                    } else {
+                        format!("Clone into Visual Studio's folder ({})", dir.display())
+                    };
+                    div().mt(SPACING()).child(
+                        div()
+                            .id("clone-visual-studio")
+                            .text_color(t.link)
+                            .cursor_pointer()
+                            .child(label)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_visual_studio(window, cx)
+                            })),
+                    )
+                });
         div()
             .flex()
             .flex_col()
             .child(self.path_field(window, cx))
+            .children(visual_studio)
             .children(
                 crate::widgets::android_storage_note(
                     crate::widgets::StorageNote::NewRepository,
