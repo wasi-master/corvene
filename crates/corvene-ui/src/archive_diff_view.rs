@@ -37,7 +37,7 @@ use gpui_kit::*;
 
 use crate::actions::{
     ArchiveUp, CollapseFolder, ExpandFolder, OpenArchiveEntry, SelectFirstFile, SelectLastFile,
-    SelectNextFile, SelectPreviousFile,
+    SelectNextFile, SelectPageDown, SelectPageUp, SelectPreviousFile,
 };
 use crate::diff_view::{
     DiffSource, DiffView, archive_entry_kind, diff_options_button, status_icon,
@@ -458,6 +458,10 @@ impl ArchiveDiffView {
             None => 0,
         };
         self.select_row(row, cx);
+    }
+
+    fn row_count(&self) -> usize {
+        self.tree.as_ref().map_or(0, |t| t.tree.rows.len())
     }
 
     fn edge(&mut self, last: bool, cx: &mut Context<Self>) {
@@ -1094,6 +1098,14 @@ impl ArchiveDiffView {
             .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| this.step(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| this.edge(false, cx)))
             .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| this.edge(true, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| {
+                let page = crate::filter_list::page_rows(&this.scroll, this.row_count());
+                this.step(-page, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| {
+                let page = crate::filter_list::page_rows(&this.scroll, this.row_count());
+                this.step(page, cx)
+            }))
             .on_action(
                 cx.listener(|this, _: &CollapseFolder, window, cx| {
                     this.tree_key(false, window, cx)

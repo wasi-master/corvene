@@ -57,7 +57,7 @@ impl Render for StashWithMessageDialog {
         dialog(
             "stash-with-message",
             mac_or("Stash All Changes", "Stash all changes"),
-            div()
+            crate::dialog::own_enter(div())
                 .w(crate::theme::fit_width(400.))
                 .flex()
                 .flex_col()
@@ -175,7 +175,7 @@ impl Render for CreateBranchFromStashDialog {
         dialog(
             "create-branch-from-stash",
             mac_or("Create Branch from Stash", "Create branch from stash"),
-            div()
+            crate::dialog::own_enter(div())
                 .w(crate::theme::fit_width(400.))
                 .flex()
                 .flex_col()

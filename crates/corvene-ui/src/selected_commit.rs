@@ -41,9 +41,10 @@ use crate::widgets::ListRowA11y;
 use corvene_core::archive_browse::ArchiveSurface;
 
 use crate::actions::{
-    CopySelectedFilePaths, CopySelectedRelativeFilePaths, ExtendSelectionDown, ExtendSelectionUp,
-    OpenSelectedFileInEditor, OpenSelectedFileWithDefaultProgram, SelectAllFiles, SelectFirstFile,
-    SelectLastFile, SelectNextFile, SelectPreviousFile,
+    CopySelectedFilePaths, CopySelectedRelativeFilePaths, ExtendSelectionDown,
+    ExtendSelectionPageDown, ExtendSelectionPageUp, ExtendSelectionUp, OpenSelectedFileInEditor,
+    OpenSelectedFileWithDefaultProgram, SelectAllFiles, SelectFirstFile, SelectLastFile,
+    SelectNextFile, SelectPageDown, SelectPageUp, SelectPreviousFile,
 };
 use crate::diff_view::{DiffSource, DiffView, diff_header, status_icon};
 use crate::icons::{Octicon, octicon};
@@ -2377,6 +2378,34 @@ impl Render for SelectedCommitView {
                             }))
                             .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
                                 this.extend_selection(-1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| {
+                                let page = crate::filter_list::page_rows(
+                                    &this.file_scroll,
+                                    this.archive_splice.len(),
+                                );
+                                this.select_relative(-page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| {
+                                let page = crate::filter_list::page_rows(
+                                    &this.file_scroll,
+                                    this.archive_splice.len(),
+                                );
+                                this.select_relative(page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionPageUp, _, cx| {
+                                let page = crate::filter_list::page_rows(
+                                    &this.file_scroll,
+                                    this.archive_splice.len(),
+                                );
+                                this.extend_selection(-page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionPageDown, _, cx| {
+                                let page = crate::filter_list::page_rows(
+                                    &this.file_scroll,
+                                    this.archive_splice.len(),
+                                );
+                                this.extend_selection(page, cx)
                             }))
                             .on_action(cx.listener(|this, _: &SelectAllFiles, _, cx| {
                                 this.select_all_files(cx)

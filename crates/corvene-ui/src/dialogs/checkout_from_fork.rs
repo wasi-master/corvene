@@ -374,7 +374,7 @@ impl Render for CheckoutFromForkDialog {
             }
         };
 
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .w(crate::theme::fit_width(480.))
             .flex()
             .flex_col()

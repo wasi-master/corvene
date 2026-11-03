@@ -1082,10 +1082,18 @@ pub fn hairline(window: &Window) -> Pixels {
     px(scale.floor().max(1.) / scale)
 }
 
+thread_local! {
+    /// The filter boxes whose ✕ emptied them, until they get a value again
+    /// (GHD `TextBox` `valueCleared`).
+    static CLEARED_BOXES: std::cell::RefCell<std::collections::HashSet<EntityId>> =
+        Default::default();
+}
+
 /// GHD `TextBox` with `displayClearButton` (filter lists, the changes
 /// filter, compare, diff search): the text stops 25 px before the end and a
 /// 25 px ✕ button (`button.clear-button`, `--text-color`) clears the value
-/// while there is one.
+/// while there is one, after which an `AriaLiveContainer` announces "Input
+/// cleared" until something is typed.
 pub fn filter_text_box(
     id: impl Into<ElementId>,
     state: &Entity<InputState>,
@@ -1096,10 +1104,28 @@ pub fn filter_text_box(
     let t = cx.ghd();
     let has_value = !state.read(cx).value().is_empty();
     let clear_state = state.clone();
+    let entity = state.entity_id();
+    let cleared = CLEARED_BOXES.with(|c| {
+        let mut c = c.borrow_mut();
+        if has_value {
+            c.remove(&entity);
+        }
+        c.contains(&entity)
+    });
     text_box_with_menu(id, state, prefix, None, window, cx)
         .relative()
         // `padding-inline-end: var(--text-field-height)`, less the kit's 4 px
         .pr(TEXT_FIELD_HEIGHT() - zpx(4.))
+        .when(cleared, |d| {
+            d.child(
+                div()
+                    .id("input-cleared")
+                    .absolute()
+                    .size_0()
+                    .overflow_hidden()
+                    .a11y_live("Input cleared"),
+            )
+        })
         .when(has_value, |d| {
             d.child(
                 div()
@@ -1115,6 +1141,7 @@ pub fn filter_text_box(
                     .cursor_pointer()
                     .child(crate::icons::octicon(crate::icons::Octicon::X, t.text))
                     .on_click(move |_, window, cx| {
+                        CLEARED_BOXES.with(|c| c.borrow_mut().insert(entity));
                         clear_state.update(cx, |input, cx| input.set_value("", window, cx));
                     }),
             )

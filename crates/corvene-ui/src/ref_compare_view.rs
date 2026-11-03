@@ -15,7 +15,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::actions::{
-    ExtendSelectionDown, ExtendSelectionUp, SelectFirstFile, SelectLastFile, SelectNextFile,
+    ExtendSelectionDown, ExtendSelectionPageDown, ExtendSelectionPageUp, ExtendSelectionUp,
+    SelectFirstFile, SelectLastFile, SelectNextFile, SelectPageDown, SelectPageUp,
     SelectPreviousFile,
 };
 use crate::dialogs::open_pull_request::{range_file_list, range_file_order};
@@ -221,6 +222,22 @@ impl Render for RefCompareView {
                             }))
                             .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
                                 this.select_relative(-1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| {
+                                let page = crate::filter_list::page_rows_in(&this.file_scroll);
+                                this.select_relative(-page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| {
+                                let page = crate::filter_list::page_rows_in(&this.file_scroll);
+                                this.select_relative(page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionPageUp, _, cx| {
+                                let page = crate::filter_list::page_rows_in(&this.file_scroll);
+                                this.select_relative(-page, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionPageDown, _, cx| {
+                                let page = crate::filter_list::page_rows_in(&this.file_scroll);
+                                this.select_relative(page, cx)
                             }))
                             .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| {
                                 this.select_edge(false, cx)

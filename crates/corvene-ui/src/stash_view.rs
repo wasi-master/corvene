@@ -24,7 +24,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::actions::{
-    ExtendSelectionDown, ExtendSelectionUp, SelectFirstFile, SelectLastFile, SelectNextFile,
+    ExtendSelectionDown, ExtendSelectionPageDown, ExtendSelectionPageUp, ExtendSelectionUp,
+    SelectFirstFile, SelectLastFile, SelectNextFile, SelectPageDown, SelectPageUp,
     SelectPreviousFile,
 };
 use crate::diff_view::{DiffSource, DiffView, status_icon};
@@ -803,6 +804,36 @@ impl Render for StashDiffViewer {
                                 .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
                                     this.select_relative(-1, cx)
                                 }))
+                                .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| {
+                                    let page = crate::filter_list::page_rows(
+                                        &this.file_scroll,
+                                        this.archive_splice.len(),
+                                    );
+                                    this.select_relative(-page, cx)
+                                }))
+                                .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| {
+                                    let page = crate::filter_list::page_rows(
+                                        &this.file_scroll,
+                                        this.archive_splice.len(),
+                                    );
+                                    this.select_relative(page, cx)
+                                }))
+                                .on_action(cx.listener(|this, _: &ExtendSelectionPageUp, _, cx| {
+                                    let page = crate::filter_list::page_rows(
+                                        &this.file_scroll,
+                                        this.archive_splice.len(),
+                                    );
+                                    this.select_relative(-page, cx)
+                                }))
+                                .on_action(cx.listener(
+                                    |this, _: &ExtendSelectionPageDown, _, cx| {
+                                        let page = crate::filter_list::page_rows(
+                                            &this.file_scroll,
+                                            this.archive_splice.len(),
+                                        );
+                                        this.select_relative(page, cx)
+                                    },
+                                ))
                                 .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| {
                                     this.select_edge(false, cx)
                                 }))

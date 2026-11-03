@@ -140,16 +140,18 @@ use crate::widgets::IconButtonA11y;
 use crate::widgets::ListRowA11y;
 
 use crate::actions::{
-    Commit, DiscardSelectedFiles, ExtendSelectionDown, ExtendSelectionUp, OpenSelectedFileInEditor,
+    Commit, DiscardSelectedFiles, ExtendSelectionDown, ExtendSelectionPageDown,
+    ExtendSelectionPageUp, ExtendSelectionUp, OpenSelectedFileInEditor,
     OpenSelectedFileWithDefaultProgram, SelectAllFiles, SelectFirstFile, SelectLastFile,
-    SelectNextFile, SelectPreviousFile, SpellAddToDictionary, SpellSuggestion0, SpellSuggestion1,
-    SpellSuggestion2, SpellSuggestion3, SpellSuggestion4, ToggleCoAuthors, ToggleCommitSpellcheck,
-    ToggleIncludeSelected,
+    SelectNextFile, SelectPageDown, SelectPageUp, SelectPreviousFile, SpellAddToDictionary,
+    SpellSuggestion0, SpellSuggestion1, SpellSuggestion2, SpellSuggestion3, SpellSuggestion4,
+    ToggleCoAuthors, ToggleCommitSpellcheck, ToggleIncludeSelected,
 };
 use crate::autocompletion::{self, Autocompletion, Hit, PickHandler};
 use crate::context_menu::{ContextMenu, IS_MAC, MenuItem, labels, mac_or};
 use crate::diff_view::status_icon;
 use crate::icons::{Octicon, octicon, spin};
+use crate::keyboard_nav::ControlFocus;
 use crate::relative_time::relative;
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
@@ -2314,7 +2316,15 @@ impl ChangesSidebar {
     }
 
     /// Arrow keys move the selection through the visible files.
+    /// The rows PageUp / PageDown move ([`crate::filter_list::page_rows`]).
+    fn page_rows(&self) -> isize {
+        crate::filter_list::page_rows(&self.list_scroll, self.archive_splice.borrow().len())
+    }
+
     pub(crate) fn select_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if delta == 0 {
+            return;
+        }
         let files = self.visible(cx);
         if files.is_empty() {
             return;
@@ -2779,6 +2789,7 @@ impl ChangesSidebar {
                 .text_color(color)
                 .hover(|s| s.bg(t.box_hover_background))
                 .a11y_button("Commit type")
+                .control_focus(cx)
                 .ghd_tooltip("Commit type")
                 .on_click(cx.listener(|this, ev: &ClickEvent, window, cx| {
                     this.open_conventional_type_menu(ev.position(), window, cx)
@@ -4772,6 +4783,8 @@ impl ChangesSidebar {
                                 crate::widgets::TooltipDirection::North,
                             )
                             .group("filter-options")
+                            // a `<button>`: a tab stop (`keyboard_nav`)
+                            .control_focus(cx)
                             .relative()
                             .h(TEXT_FIELD_HEIGHT())
                             .w(zpx(48.))
@@ -6909,6 +6922,7 @@ impl ChangesSidebar {
                                         .text_color(color)
                                         .hover(move |s| s.text_color(hover))
                                         .a11y_button(toggle_label)
+                                        .control_focus(cx)
                                         .ghd_tooltip(toggle_label)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.toggle_co_authors(window, cx)
@@ -6920,7 +6934,16 @@ impl ChangesSidebar {
                             .child(
                                 div()
                                     .id("commit-options-button")
-                                    .track_focus(&self.commit_options_focus)
+                                    .track_focus(
+                                        &self
+                                            .commit_options_focus
+                                            .clone()
+                                            .tab_stop(crate::keyboard_nav::controls_reachable(cx)),
+                                    )
+                                    .when(crate::keyboard_nav::controls_reachable(cx), |d| {
+                                        let ring = crate::keyboard_nav::focus_ring_shadows(cx);
+                                        d.focus_visible(move |s| s.shadow(ring))
+                                    })
                                     .icon_button_label("Configure commit options")
                                     .w(zpx(18.))
                                     .h(zpx(17.))
@@ -6958,6 +6981,7 @@ impl ChangesSidebar {
                                         .text_color(color)
                                         .hover(move |s| s.text_color(hover))
                                         .a11y_button(label)
+                                        .control_focus(cx)
                                         .ghd_tooltip(label)
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.set_description_expanded(!expanded, window, cx)
@@ -7417,6 +7441,18 @@ impl Render for ChangesSidebar {
                     }))
                     .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| {
                         this.select_relative(1 << 30, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| {
+                        this.select_relative(-this.page_rows(), cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| {
+                        this.select_relative(this.page_rows(), cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &ExtendSelectionPageUp, _, cx| {
+                        this.extend_relative(-this.page_rows(), cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &ExtendSelectionPageDown, _, cx| {
+                        this.extend_relative(this.page_rows(), cx)
                     }))
                     // Space: "Select or deselect all highlighted files"
                     .on_action(cx.listener(|this, _: &ToggleIncludeSelected, _, cx| {

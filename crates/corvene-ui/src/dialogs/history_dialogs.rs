@@ -404,7 +404,7 @@ impl Render for CreateTagDialog {
             )
         };
         let t = cx.ghd();
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .flex()
             .flex_col()
             .gap(SPACING_HALF())

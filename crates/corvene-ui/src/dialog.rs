@@ -13,6 +13,7 @@ use gpui_kit::*;
 use crate::widgets::IconButtonA11y;
 
 use crate::icons::{Octicon, loading as loading_icon, octicon};
+use crate::keyboard_nav::ControlFocus;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme};
 
@@ -342,6 +343,12 @@ fn ghd_dialog_max_width(id: &str) -> Option<f32> {
 
 /// `421-larger-dialogs`: the dialogs whose lists grow with the window.
 const LARGER_DIALOGS: &[&str] = &["dialog-conflicts"];
+
+/// For a dialog whose text boxes answer Enter themselves (`InputEvent::PressEnter`):
+/// the Enter stops at `el`, so the frame does not take the default button too.
+pub fn own_enter<E: InteractiveElement>(el: E) -> E {
+    el.on_action(|_: &gpui_kit::component::input::Enter, _, _| {})
+}
 
 /// `421-larger-dialogs` is on.
 pub fn larger_dialogs(cx: &App) -> bool {
@@ -743,19 +750,27 @@ fn dialog_impl(
                     canvas(
                         |_, _, _| {},
                         move |_, _, window, cx| {
-                            crate::keyboard_nav::claim_dialog_focus(
-                                id,
-                                &trap_for_claim,
-                                window,
-                                cx,
-                            )
+                            crate::keyboard_nav::claim_dialog_focus(id, &trap_for_claim, window, cx)
                         },
                     )
                     .absolute()
                     .size_0(),
                 )
                 .when_some(submit, |d, submit| {
-                    d.on_key_down(move |ev: &KeyDownEvent, window, cx| {
+                    // Enter in a one-line text box: the kit's `Enter` bubbles
+                    // up from it (multi-line boxes insert a newline and stop
+                    // it; [`own_enter`] dialogs stop it themselves)
+                    let for_input = submit.clone();
+                    d.on_action(
+                        move |action: &gpui_kit::component::input::Enter, window, cx| {
+                            if action.secondary || action.shift {
+                                cx.propagate();
+                                return;
+                            }
+                            for_input(window, cx);
+                        },
+                    )
+                    .on_key_down(move |ev: &KeyDownEvent, window, cx| {
                         let keystroke = &ev.keystroke;
                         if keystroke.key == "enter"
                             && !ev.is_held
@@ -853,6 +868,7 @@ fn dialog_impl(
                                             .id("dialog-close")
                                             .relative()
                                             .icon_button_label("Close")
+                                            .control_focus(cx)
                                             .size(zpx(16.))
                                             // `close-button` mixin: `margin-right:
                                             // -10px` pulls it into the header's padding

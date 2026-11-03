@@ -127,7 +127,7 @@ impl Render for SubmitPullRequestReviewDialog {
             );
             if disabled { row.opacity(0.6) } else { row }
         };
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .flex()
             .flex_col()
             .gap(SPACING())

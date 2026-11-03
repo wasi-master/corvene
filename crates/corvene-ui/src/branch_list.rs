@@ -133,6 +133,8 @@ pub struct BranchFoldout {
     /// `335-pull-request-list-filters`, kept while Corvene runs.
     pr_list_filter: crate::pull_request_list::PullRequestListFilter,
     pr_scroll: ScrollHandle,
+    /// Shift+F10 / Menu on the pull request list's keyboard row
+    pr_menu_anchor: crate::context_menu::RowMenuAnchor,
 }
 
 /// The pull request whose quick view is shown, its parsed body, and the
@@ -762,6 +764,7 @@ impl BranchFoldout {
         })
         .detach();
         let scroll = UniformListScrollHandle::new();
+        let pr_scroll = ScrollHandle::new();
         Self {
             state,
             filter,
@@ -785,7 +788,8 @@ impl BranchFoldout {
             scroll,
             pr_highlighted: None,
             pr_list_filter: Default::default(),
-            pr_scroll: ScrollHandle::new(),
+            pr_menu_anchor: crate::context_menu::RowMenuAnchor::new(&pr_scroll),
+            pr_scroll,
         }
     }
 
@@ -1258,6 +1262,11 @@ impl BranchFoldout {
                         })
                 })
                 .relative()
+                // Shift+F10 / Menu: the keyboard row, else the checked-out one
+                .when(
+                    highlighted.map_or(current == Some(pr.number), |h| h == ix),
+                    |d| d.child(self.pr_menu_anchor.track()),
+                )
                 .on_hover(move |hovered, _, cx| {
                     let pr = hovered_pr.clone();
                     entity
@@ -1294,6 +1303,7 @@ impl BranchFoldout {
                     .p(SPACING())
                     .pb(SPACING_HALF())
                     .key_context("PullRequestFilter")
+                    .on_action(self.pr_menu_anchor.action_handler())
                     .on_action(
                         cx.listener(|this, _: &SelectNextFile, _, cx| {
                             this.move_pr_highlight(1, cx)

@@ -22,6 +22,12 @@ gpui_kit::actions!(
         // ⌘↑ / ⌘↓ (Home / End): the first / last row (GHD `List` isHomeKey / isEndKey)
         SelectFirstFile,
         SelectLastFile,
+        // PageUp / PageDown, ⇧PageUp / ⇧PageDown (GHD `moveSelectionByPage`,
+        // `addSelectionByPage`)
+        SelectPageUp,
+        SelectPageDown,
+        ExtendSelectionPageUp,
+        ExtendSelectionPageDown,
         // Space in the changes list: include / exclude the highlighted files
         ToggleIncludeSelected,
         // ← / → on a file tree's row (`1310-file-list-tree`)

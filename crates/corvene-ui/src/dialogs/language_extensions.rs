@@ -1564,7 +1564,7 @@ impl Render for LanguageExtensionsDialog {
             .pending_consent
             .as_ref()
             .map(|c| self.consent_sheet(c, cx));
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .w(crate::theme::fit_width(WIDTH))
             .max_w_full()
             .min_w_0()

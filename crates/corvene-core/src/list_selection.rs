@@ -40,6 +40,9 @@ pub fn selection_between(order: &[String], from: usize, to: usize) -> Vec<String
 /// the filter box above the list: ↓ starts at the first row, ↑ at the last
 /// (GHD: the second-to-last, see the module doc). `None` for an empty list,
 /// when no other row can be selected, or (without `wrap`) at the edge.
+///
+/// A `delta` of more than one row is a page (PageUp / PageDown) or Home /
+/// End: [`find_next_page_selectable_row`], which never wraps.
 pub fn find_next_selectable_row(
     row_count: usize,
     row: Option<usize>,
@@ -49,6 +52,12 @@ pub fn find_next_selectable_row(
 ) -> Option<usize> {
     if row_count == 0 {
         return None;
+    }
+    if delta.unsigned_abs() > 1 {
+        let from = row.filter(|&r| r < row_count);
+        let next =
+            find_next_page_selectable_row(row_count, from.unwrap_or(0), delta, can_select_row);
+        return (Some(next) != from).then_some(next);
     }
     let len = row_count as isize;
     let up = delta < 0;
@@ -76,6 +85,29 @@ pub fn find_next_selectable_row(
         }
     }
     None
+}
+
+/// GHD `List.findNextPageSelectableRow`: the farthest row `can_select_row`
+/// accepts within `delta` rows of `from` (up when negative), clamped to the
+/// ends; `from` when there is none. The caller turns the list's height into
+/// `delta` (`moveSelectionByPage` / `addSelectionByPage` go from the last
+/// selected row, GHD's `selectedRows.at(-1) ?? 0`).
+pub fn find_next_page_selectable_row(
+    row_count: usize,
+    from: usize,
+    delta: isize,
+    can_select_row: impl Fn(usize) -> bool,
+) -> usize {
+    if row_count == 0 {
+        return from;
+    }
+    let target = (from as isize + delta).clamp(0, row_count as isize - 1) as usize;
+    if target >= from {
+        (from..=target).rev().find(|&r| can_select_row(r))
+    } else {
+        (target..=from).find(|&r| can_select_row(r))
+    }
+    .unwrap_or(from)
 }
 
 /// `moveSelection` (`findNextSelectableRow`, which wraps by default) on a
@@ -178,6 +210,50 @@ mod tests {
             None
         );
         assert_eq!(find_next_selectable_row(0, None, 1, true, |_| true), None);
+    }
+
+    #[test]
+    fn a_page_clamps_and_lands_on_the_farthest_selectable_row() {
+        assert_eq!(
+            find_next_selectable_row(10, Some(2), 4, true, |_| true),
+            Some(6)
+        );
+        // never wraps, Home / End included
+        assert_eq!(
+            find_next_selectable_row(10, Some(8), 4, true, |_| true),
+            Some(9)
+        );
+        assert_eq!(
+            find_next_selectable_row(10, Some(9), 4, true, |_| true),
+            None
+        );
+        assert_eq!(
+            find_next_selectable_row(10, Some(5), -(1 << 30), true, |_| true),
+            Some(0)
+        );
+        // GHD `selectedRows.at(-1) ?? 0`
+        assert_eq!(
+            find_next_selectable_row(10, None, 3, true, |_| true),
+            Some(3)
+        );
+        let even = |row: usize| row.is_multiple_of(2);
+        assert_eq!(find_next_page_selectable_row(10, 2, 3, even), 4);
+        assert_eq!(find_next_page_selectable_row(10, 4, -3, even), 2);
+        assert_eq!(find_next_page_selectable_row(10, 4, 1, |r| r == 4), 4);
+    }
+
+    #[test]
+    fn extend_by_a_page() {
+        let o = order();
+        assert_eq!(
+            extend_selection(&o, "a", &v(&["a"]), 3),
+            Some(v(&["a", "b", "c", "d"]))
+        );
+        assert_eq!(
+            extend_selection(&o, "c", &v(&["c"]), -9),
+            Some(v(&["c", "b", "a"]))
+        );
+        assert_eq!(extend_selection(&o, "e", &v(&["e"]), 3), None);
     }
 
     fn order() -> Vec<String> {

@@ -574,7 +574,7 @@ impl Render for ActionsJobLogDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_log(cx);
         let close = |_: &mut Window, cx: &mut App| Self::close(cx);
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .flex()
             .flex_col()
             .child(self.header(cx))

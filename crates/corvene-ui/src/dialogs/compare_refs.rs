@@ -241,7 +241,7 @@ impl Render for CompareRefsDialog {
         dialog(
             "compare-refs",
             "Compare",
-            div()
+            crate::dialog::own_enter(div())
                 .w(crate::theme::fit_width(420.))
                 .flex()
                 .flex_col()

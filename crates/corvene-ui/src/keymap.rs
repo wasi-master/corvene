@@ -473,6 +473,8 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("shift-f10", OpenRowContextMenu, Some("RepositoryFilter")),
         KeyBinding::new("shift-f10", OpenRowContextMenu, Some("BranchFilter")),
         KeyBinding::new("shift-f10", OpenRowContextMenu, Some("BranchList")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("PullRequestFilter")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("WorktreeFilter")),
         // In-app
         KeyBinding::new("secondary-enter", Commit, Some("CommitMessage")),
         KeyBinding::new("escape", CloseFoldout, None),
@@ -481,6 +483,26 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("tab", FocusNext, None),
         KeyBinding::new("shift-tab", FocusPrevious, None),
     ];
+    // GHD `List.handleKeyDown` PageUp / PageDown; ⇧ extends in the
+    // multi-select lists
+    for context in [
+        "ChangesList",
+        "HistoryList",
+        "CommitFileList",
+        "StashFileList",
+        "PullRequestFileList",
+    ] {
+        bindings.extend([
+            KeyBinding::new("pageup", SelectPageUp, Some(context)),
+            KeyBinding::new("pagedown", SelectPageDown, Some(context)),
+            KeyBinding::new("shift-pageup", ExtendSelectionPageUp, Some(context)),
+            KeyBinding::new("shift-pagedown", ExtendSelectionPageDown, Some(context)),
+        ]);
+    }
+    bindings.extend([
+        KeyBinding::new("pageup", SelectPageUp, Some("ArchiveEntryList")),
+        KeyBinding::new("pagedown", SelectPageDown, Some("ArchiveEntryList")),
+    ]);
     // Corvene flags. Added last: at equal depth a later binding wins, and a
     // context-free binding counts as the deepest context.
     if flags.discard_selected_files {
@@ -605,6 +627,8 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         "RepositoryFilter",
         "BranchFilter",
         "BranchList",
+        "PullRequestFilter",
+        "WorktreeFilter",
     ] {
         bindings.push(KeyBinding::new("menu", OpenRowContextMenu, Some(context)));
     }

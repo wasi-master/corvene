@@ -155,7 +155,7 @@ impl Render for NewChangelistDialog {
             } else {
                 mac_or("New Changelist", "New changelist")
             },
-            div()
+            crate::dialog::own_enter(div())
                 .w(crate::theme::fit_width(400.))
                 .flex()
                 .flex_col()

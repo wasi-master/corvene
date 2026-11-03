@@ -36,7 +36,8 @@ use crate::widgets::GhdTooltip;
 use crate::widgets::{IconButtonA11y, ListRowA11y};
 
 use crate::actions::{
-    ExtendSelectionDown, ExtendSelectionUp, SelectFirstFile, SelectLastFile, SelectNextFile,
+    ExtendSelectionDown, ExtendSelectionPageDown, ExtendSelectionPageUp, ExtendSelectionUp,
+    SelectFirstFile, SelectLastFile, SelectNextFile, SelectPageDown, SelectPageUp,
     SelectPreviousFile,
 };
 use crate::branch_list::group_branches;
@@ -554,74 +555,73 @@ impl Render for OpenPullRequestDialog {
                 .flags
                 .bool(corvene_core::flags::ids::PR_PREVIEW_EMPTY_FILES_MESSAGE);
         // `renderContent`: no base branch / no changes / files + diff
-        let content: AnyElement =
-            if preview.base_branch.is_none() {
-                self.message(
-                    "Could not find a default branch to compare against.",
-                    div()
-                        .child("Select a base branch above.")
-                        .into_any_element(),
-                    cx,
-                )
-            } else if preview.commit_shas.as_ref().is_some_and(|s| s.is_empty()) {
-                let base = preview.base_branch.clone().unwrap_or_default();
-                let current = preview.current_branch.clone();
-                let body = if preview.merge_status == Some(MergeStatus::Invalid) {
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_center()
-                        .gap(zpx(3.))
-                        .child(code_ref(base, cx))
-                        .child("and")
-                        .child(code_ref(current, cx))
-                        .child("are entirely different commit histories.")
-                        .into_any_element()
-                } else {
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_center()
-                        .gap(zpx(3.))
-                        .child(code_ref(base, cx))
-                        .child("is up to date with all commits from")
-                        .child(code_ref(current, cx))
-                        .child(".")
-                        .into_any_element()
-                };
-                self.message("There are no changes.", body, cx)
-            } else if no_file_changes && preview.commit_shas.is_some() {
-                let base = preview.base_branch.clone().unwrap_or_default();
-                let current = preview.current_branch.clone();
-                let body = div()
+        let content: AnyElement = if preview.base_branch.is_none() {
+            self.message(
+                "Could not find a default branch to compare against.",
+                div()
+                    .child("Select a base branch above.")
+                    .into_any_element(),
+                cx,
+            )
+        } else if preview.commit_shas.as_ref().is_some_and(|s| s.is_empty()) {
+            let base = preview.base_branch.clone().unwrap_or_default();
+            let current = preview.current_branch.clone();
+            let body = if preview.merge_status == Some(MergeStatus::Invalid) {
+                div()
                     .flex()
                     .flex_row()
                     .flex_wrap()
                     .items_center()
                     .justify_center()
                     .gap(zpx(3.))
-                    .child("No file changes between")
                     .child(code_ref(base, cx))
                     .child("and")
                     .child(code_ref(current, cx))
-                    .child(".")
-                    .into_any_element();
-                self.message("There are no file changes.", body, cx)
-            } else if preview.commit_shas.is_none() {
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(t.text_secondary)
-                    .child("Loading…")
+                    .child("are entirely different commit histories.")
                     .into_any_element()
             } else {
                 div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_center()
+                    .gap(zpx(3.))
+                    .child(code_ref(base, cx))
+                    .child("is up to date with all commits from")
+                    .child(code_ref(current, cx))
+                    .child(".")
+                    .into_any_element()
+            };
+            self.message("There are no changes.", body, cx)
+        } else if no_file_changes && preview.commit_shas.is_some() {
+            let base = preview.base_branch.clone().unwrap_or_default();
+            let current = preview.current_branch.clone();
+            let body = div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .justify_center()
+                .gap(zpx(3.))
+                .child("No file changes between")
+                .child(code_ref(base, cx))
+                .child("and")
+                .child(code_ref(current, cx))
+                .child(".")
+                .into_any_element();
+            self.message("There are no file changes.", body, cx)
+        } else if preview.commit_shas.is_none() {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(t.text_secondary)
+                .child("Loading…")
+                .into_any_element()
+        } else {
+            div()
                 .size_full()
                 .flex()
                 .flex_col()
@@ -686,41 +686,81 @@ impl Render for OpenPullRequestDialog {
                                     resizable_panel()
                                         .size(self.file_list_width)
                                         .size_range(FILE_LIST_MIN()..FILE_LIST_MAX())
-                                        .child(crate::active_resizable::active_resizable(
-                                            "pr-file-list-resizable",
-                                            &self.resizable,
-                                            Some(&self.file_list_focus),
-                                            crate::active_resizable::ResizableDescription::new(
-                                                "Pull request file list",
-                                                FILE_LIST_MIN()..FILE_LIST_MAX(),
-                                            ),
-                                            self.file_list(&preview, cx),
-                                        )
-                                        .key_context("PullRequestFileList")
-                                        .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
-                                            this.select_relative(1, cx)
-                                        }))
-                                        .on_action(cx.listener(
-                                            |this, _: &SelectPreviousFile, _, cx| {
-                                                this.select_relative(-1, cx)
-                                            },
-                                        ))
-                                        .on_action(cx.listener(
-                                            |this, _: &ExtendSelectionDown, _, cx| {
-                                                this.select_relative(1, cx)
-                                            },
-                                        ))
-                                        .on_action(cx.listener(
-                                            |this, _: &ExtendSelectionUp, _, cx| {
-                                                this.select_relative(-1, cx)
-                                            },
-                                        ))
-                                        .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| {
-                                            this.select_edge(false, cx)
-                                        }))
-                                        .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| {
-                                            this.select_edge(true, cx)
-                                        }))),
+                                        .child(
+                                            crate::active_resizable::active_resizable(
+                                                "pr-file-list-resizable",
+                                                &self.resizable,
+                                                Some(&self.file_list_focus),
+                                                crate::active_resizable::ResizableDescription::new(
+                                                    "Pull request file list",
+                                                    FILE_LIST_MIN()..FILE_LIST_MAX(),
+                                                ),
+                                                self.file_list(&preview, cx),
+                                            )
+                                            .key_context("PullRequestFileList")
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectNextFile, _, cx| {
+                                                    this.select_relative(1, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectPreviousFile, _, cx| {
+                                                    this.select_relative(-1, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &ExtendSelectionDown, _, cx| {
+                                                    this.select_relative(1, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &ExtendSelectionUp, _, cx| {
+                                                    this.select_relative(-1, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectPageUp, _, cx| {
+                                                    let page = crate::filter_list::page_rows_in(
+                                                        &this.file_scroll,
+                                                    );
+                                                    this.select_relative(-page, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectPageDown, _, cx| {
+                                                    let page = crate::filter_list::page_rows_in(
+                                                        &this.file_scroll,
+                                                    );
+                                                    this.select_relative(page, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &ExtendSelectionPageUp, _, cx| {
+                                                    let page = crate::filter_list::page_rows_in(
+                                                        &this.file_scroll,
+                                                    );
+                                                    this.select_relative(-page, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &ExtendSelectionPageDown, _, cx| {
+                                                    let page = crate::filter_list::page_rows_in(
+                                                        &this.file_scroll,
+                                                    );
+                                                    this.select_relative(page, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectFirstFile, _, cx| {
+                                                    this.select_edge(false, cx)
+                                                },
+                                            ))
+                                            .on_action(cx.listener(
+                                                |this, _: &SelectLastFile, _, cx| {
+                                                    this.select_edge(true, cx)
+                                                },
+                                            )),
+                                        ),
                                 )
                                 .child(
                                     resizable_panel().child(
@@ -735,7 +775,7 @@ impl Render for OpenPullRequestDialog {
                         ),
                 )
                 .into_any_element()
-            };
+        };
         let close = cx.listener(|this, _, _, cx| this.close(cx));
         let compare_only = preview.compare_only;
         let title = if compare_only {

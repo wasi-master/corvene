@@ -328,7 +328,7 @@ impl Render for NewIssueDialog {
             cx,
         );
         let title_empty = self.title.read(cx).value().trim().is_empty();
-        let content = div()
+        let content = crate::dialog::own_enter(div())
             .w(crate::theme::fit_width(560.))
             .flex()
             .flex_col()

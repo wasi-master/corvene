@@ -38,6 +38,8 @@ mod ui_rulesets_and_publish_surfaces;
 mod ui_small_action_and_dialog_surfaces;
 mod ui_static_status_and_link_components;
 mod ui_structural_and_text_components;
+mod ui_tab_bar;
+mod ui_tab_bar_item;
 mod ui_tutorial_welcome_surfaces;
 mod ui_visual_helper_surfaces;
 mod ui_welcome_and_sign_in_wrappers;

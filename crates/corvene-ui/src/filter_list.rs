@@ -6,7 +6,7 @@
 //! caret in the filter box and highlights the row, so typing keeps
 //! filtering.
 
-use gpui_kit::{Pixels, ScrollHandle};
+use gpui_kit::{Pixels, ScrollHandle, UniformListScrollHandle};
 
 /// GHD `ui/lib/filter-list.tsx` `onFilterKeyDown` (ArrowDown / ArrowUp): the
 /// next highlighted row of `count` rows. ↓ from the filter starts at the
@@ -39,12 +39,46 @@ pub fn step_selectable(
 
 /// GHD `List.moveSelection` (`findNextSelectableRow`, `wrap` defaults to
 /// true): ↓ on the last row goes to the first, ↑ on the first to the last.
-/// Extending a range (`addSelection`, `wrap: false`) clamps instead.
+/// Extending a range (`addSelection`, `wrap: false`) clamps instead, and so
+/// does a move of more than one row: a page (`moveSelectionByPage`) or
+/// Home / End.
 pub fn wrap_step(ix: usize, delta: isize, count: usize) -> usize {
     if count == 0 {
         return 0;
     }
+    if delta.unsigned_abs() > 1 {
+        return (ix as isize + delta).clamp(0, count as isize - 1) as usize;
+    }
     (ix as isize + delta).rem_euclid(count as isize) as usize
+}
+
+/// PageUp / PageDown in a uniform list (GHD `List.findNextPageSelectableRow`):
+/// the rows one page moves from the selected row, the rows that fit in the
+/// list's height less the one it starts on. `0` before the first layout
+/// (GHD: no height yet, no move). A list too short for two rows moves one
+/// row, as ↓ / ↑ do.
+pub fn page_rows(scroll: &UniformListScrollHandle, count: usize) -> isize {
+    let Some(size) = scroll.0.borrow().last_item_size else {
+        return 0;
+    };
+    if count == 0 {
+        return 0;
+    }
+    rows_per_page(size.item.height, size.contents.height / count as f32)
+}
+
+/// [`page_rows`] for a scrolled column of equal rows (its children).
+pub fn page_rows_in(scroll: &ScrollHandle) -> isize {
+    scroll.bounds_for_item(0).map_or(0, |row| {
+        rows_per_page(scroll.bounds().size.height, row.size.height)
+    })
+}
+
+fn rows_per_page(height: Pixels, row: Pixels) -> isize {
+    if row <= Pixels::ZERO {
+        return 0;
+    }
+    ((height / row).floor() as isize - 1).max(1)
 }
 
 /// [`wrap_step`], or with `stop_at_ends` (Corvene `620-lists-stop-at-ends`)
@@ -113,6 +147,9 @@ mod tests {
         assert_eq!(list_step(0, -1, 3, true), 0);
         assert_eq!(list_step(1, 1, 3, true), 2);
         assert_eq!(list_step(0, 1, 0, true), 0);
+        // a page and Home / End clamp even when ↓ / ↑ wrap
+        assert_eq!(list_step(1, 5, 3, false), 2);
+        assert_eq!(list_step(1, -(1 << 30), 3, false), 0);
     }
 
     #[test]

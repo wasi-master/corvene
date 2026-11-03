@@ -152,6 +152,8 @@ pub struct WorktreeFoldout {
     /// the filter box (an index into the rows as shown, groups flattened).
     highlighted: Option<usize>,
     scroll: ScrollHandle,
+    /// Shift+F10 / Menu on the keyboard row, else the current worktree
+    menu_anchor: crate::context_menu::RowMenuAnchor,
 }
 
 impl WorktreeFoldout {
@@ -163,12 +165,14 @@ impl WorktreeFoldout {
             cx.notify()
         })
         .detach();
+        let scroll = ScrollHandle::new();
         Self {
             state,
             filter,
             context_menu: None,
             highlighted: None,
-            scroll: ScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::new(&scroll),
+            scroll,
         }
     }
 
@@ -335,6 +339,10 @@ impl WorktreeFoldout {
                 Dispatcher::close_foldout(cx);
                 Dispatcher::switch_worktree(repo, path.clone(), cx);
             })
+            .when(
+                highlighted || (current && self.highlighted.is_none()),
+                |d| d.relative().child(self.menu_anchor.track()),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
@@ -449,6 +457,7 @@ impl Render for WorktreeFoldout {
                     .gap(SPACING())
                     .p(SPACING())
                     .key_context("WorktreeFilter")
+                    .on_action(self.menu_anchor.action_handler())
                     .on_action(
                         cx.listener(|this, _: &SelectNextFile, _, cx| this.move_highlight(1, cx)),
                     )

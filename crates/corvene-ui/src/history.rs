@@ -48,9 +48,10 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::actions::{
-    CompareClear, CompareSelect, ExtendSelectionDown, ExtendSelectionUp, ReorderCancel,
-    ReorderConfirm, ReorderMoveDown, ReorderMoveUp, SelectFirstFile, SelectLastFile,
-    SelectNextFile, SelectPreviousFile,
+    CompareClear, CompareSelect, ExtendSelectionDown, ExtendSelectionPageDown,
+    ExtendSelectionPageUp, ExtendSelectionUp, ReorderCancel, ReorderConfirm, ReorderMoveDown,
+    ReorderMoveUp, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPageDown, SelectPageUp,
+    SelectPreviousFile,
 };
 use crate::branch_list::group_branches;
 use crate::context_menu::{ContextMenu, IS_MAC, MenuItem, mac_or};
@@ -2466,12 +2467,16 @@ impl HistorySidebar {
             } else {
                 "HistoryList"
             })
-            .on_action(cx.listener(|this, _: &crate::actions::CollapseFolder, _, cx| {
-                this.fold_key(false, cx)
-            }))
-            .on_action(cx.listener(|this, _: &crate::actions::ExpandFolder, _, cx| {
-                this.fold_key(true, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &crate::actions::CollapseFolder, _, cx| {
+                    this.fold_key(false, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::actions::ExpandFolder, _, cx| {
+                    this.fold_key(true, cx)
+                }),
+            )
             .on_action(self.menu_anchor.action_handler())
             .track_focus(&self.list_focus)
             .on_action(cx.listener(|this, _: &ReorderMoveUp, _, cx| this.move_insertion(-1, cx)))
@@ -2509,6 +2514,21 @@ impl HistorySidebar {
             .on_action(cx.listener(move |this, _: &ExtendSelectionUp, _, cx| {
                 this.extend_selection(id, -1, cx)
             }))
+            // PageUp / PageDown (GHD `moveSelectionByPage` / `addSelectionByPage`)
+            .on_action(cx.listener(move |this, _: &SelectPageUp, _, cx| {
+                this.step_selection(id, -this.page_rows(id, cx), cx)
+            }))
+            .on_action(cx.listener(move |this, _: &SelectPageDown, _, cx| {
+                this.step_selection(id, this.page_rows(id, cx), cx)
+            }))
+            .on_action(cx.listener(move |this, _: &ExtendSelectionPageUp, _, cx| {
+                this.extend_selection(id, -this.page_rows(id, cx), cx)
+            }))
+            .on_action(
+                cx.listener(move |this, _: &ExtendSelectionPageDown, _, cx| {
+                    this.extend_selection(id, this.page_rows(id, cx), cx)
+                }),
+            )
             .relative()
             .flex_1()
             .min_h_0()
@@ -2644,7 +2664,21 @@ impl HistorySidebar {
         }
     }
 
+    /// The rows PageUp / PageDown move ([`crate::filter_list::page_rows`]).
+    fn page_rows(&self, id: u64, cx: &App) -> isize {
+        let count = self
+            .state
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .map_or(0, |rs| rs.visible_commits().len());
+        crate::filter_list::page_rows(&self.list_scroll, count)
+    }
+
     fn step_selection(&self, id: u64, delta: isize, cx: &mut App) {
+        if delta == 0 {
+            return;
+        }
         let next = {
             let s = self.state.read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
@@ -2662,9 +2696,11 @@ impl HistorySidebar {
                 Some(ix) => crate::filter_list::list_step(ix, delta, commits.len(), stop),
                 None => 0,
             };
-            commits.get(ix).map(|c| c.sha.clone())
+            commits.get(ix).map(|c| (ix, c.sha.clone()))
         };
-        if let Some(sha) = next {
+        // GHD `moveSelectionTo` scrolls the row into view
+        if let Some((ix, sha)) = next {
+            self.list_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             Dispatcher::select_commit(id, sha, cx);
         }
     }
@@ -2685,9 +2721,10 @@ impl HistorySidebar {
                 .and_then(|sha| commits.iter().position(|c| &c.sha == sha));
             let Some(end) = end else { return };
             let ix = (end as isize + delta).clamp(0, commits.len() as isize - 1) as usize;
-            commits.get(ix).map(|c| c.sha.clone())
+            commits.get(ix).map(|c| (ix, c.sha.clone()))
         };
-        if let Some(sha) = next {
+        if let Some((ix, sha)) = next {
+            self.list_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             Dispatcher::extend_commit_selection(id, sha, cx);
         }
     }
@@ -3277,7 +3314,14 @@ struct CommitTooltip {
 impl Render for CommitTooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.ghd().clone();
-        let label = || div().flex_none().w(zpx(40.)).flex().flex_row().justify_end();
+        let label = || {
+            div()
+                .flex_none()
+                .w(zpx(40.))
+                .flex()
+                .flex_row()
+                .justify_end()
+        };
         let row = || div().flex().flex_row().gap(SPACING_HALF());
         div()
             .flex()
@@ -3551,9 +3595,9 @@ fn commit_row(
             let fold_room = hint.fold.map_or(zpx(0.), |fold| {
                 zpx(if fold.child { 18. + 14. } else { 18. })
             });
-            let graph_width = graph
-                .as_ref()
-                .map_or(zpx(0.), |(_, columns, _)| crate::commit_graph::column_width(*columns));
+            let graph_width = graph.as_ref().map_or(zpx(0.), |(_, columns, _)| {
+                crate::commit_graph::column_width(*columns)
+            });
             let fold_arrow = hint.fold.and_then(|fold| fold.merge).map(|(open, count)| {
                 let sha = commit.sha.clone();
                 div()
