@@ -134,10 +134,36 @@ fn find_hyper() -> Option<PathBuf> {
     }
 }
 
-/// GHD `findGitBash`.
+/// GHD `findGitBash`, which reads only the machine-wide `InstallPath`.
+/// Corvene also finds a per-user Git for Windows (desktop/desktop#23107):
+/// its installer writes the same value under HKCU, both kinds of install
+/// leave `InstallLocation` in their uninstall entry, and a portable or
+/// unregistered one is found from the `git.exe` on the PATH.
 pub fn find_git_bash() -> Option<PathBuf> {
-    let install = registry_string(LOCAL_MACHINE, r"SOFTWARE\GitForWindows", "InstallPath")?;
-    existing(Path::new(&install).join("git-bash.exe"))
+    const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1";
+    let roots = [LOCAL_MACHINE, CURRENT_USER];
+    let install_paths = roots
+        .iter()
+        .filter_map(|root| registry_string(root, r"SOFTWARE\GitForWindows", "InstallPath"));
+    let install_locations = roots
+        .iter()
+        .filter_map(|root| registry_string(root, UNINSTALL, "InstallLocation"));
+    install_paths
+        .chain(install_locations)
+        .map(PathBuf::from)
+        .chain(git_install_on_path())
+        .find_map(|install| existing(install.join("git-bash.exe")))
+}
+
+/// The Git for Windows folder of the `git.exe` on the PATH: `cmd\git.exe`,
+/// `bin\git.exe` and `mingw64\bin\git.exe` sit one or two levels below it.
+fn git_install_on_path() -> Option<PathBuf> {
+    let git = git_on_path()?;
+    git.ancestors()
+        .skip(1)
+        .take(3)
+        .find(|dir| dir.join("git-bash.exe").is_file())
+        .map(Path::to_path_buf)
 }
 
 fn find_cygwin() -> Option<PathBuf> {
