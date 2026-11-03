@@ -145,7 +145,8 @@ pub use repository_settings::{
 pub use request_reviewers::RequestReviewersDialog;
 pub use run_workflow::RunWorkflowDialog;
 pub use sign_in::{
-    ExistingAccountWarning, SignInAction, SignInContent, SignInDialog, sign_in_content,
+    EmbeddedLook, ExistingAccountWarning, SignInAction, SignInContent, SignInDialog,
+    sign_in_content,
 };
 pub use simple::{CliInstalledAction, CliInstalledContent, SimpleDialog, cli_installed};
 pub use start_bisect::StartBisectDialog;

@@ -289,17 +289,23 @@ impl WelcomeView {
                 Dispatcher::begin_sign_in_flow(true, cx);
                 let state = self.state.clone();
                 let welcome = cx.entity().downgrade();
-                self.enterprise_form = Some(cx.new(|cx| {
-                    crate::dialogs::SignInDialog::new_embedded(
-                        state,
-                        move |window, cx| {
-                            let _ = welcome
-                                .update(cx, |w, cx| w.advance_to(WelcomeStep::Start, window, cx));
-                        },
-                        window,
-                        cx,
-                    )
-                }));
+                let look = crate::dialogs::EmbeddedLook {
+                    text_box: welcome_text_box,
+                    button: |id, primary, cx| {
+                        welcome_button(id, primary, false, cx)
+                            .px(px(10.))
+                            .mr(px(10.))
+                    },
+                    font_size: px(WELCOME_FONT_MD()),
+                    on_cancel: std::rc::Rc::new(move |window, cx| {
+                        let _ = welcome
+                            .update(cx, |w, cx| w.advance_to(WelcomeStep::Start, window, cx));
+                    }),
+                };
+                self.enterprise_form =
+                    Some(cx.new(|cx| {
+                        crate::dialogs::SignInDialog::new_embedded(state, look, window, cx)
+                    }));
                 cx.notify();
             }
         }
@@ -497,8 +503,9 @@ impl WelcomeView {
         div().id("sign-in-enterprise").flex().flex_col().when_some(
             content.zip(self.enterprise_form.clone()),
             |d, (content, form)| {
+                // `form { margin-top: 5px }` below the title's 10 px
                 d.child(welcome_title(content.title))
-                    .child(div().mt(px(20.)).child(form))
+                    .child(div().mt(px(5.)).child(form))
             },
         )
     }

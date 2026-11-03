@@ -130,14 +130,25 @@ enum Method {
 /// A click handler shared between buttons.
 type SharedHandler = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// How the Welcome flow draws an embedded [`SignInDialog`]: its own text
+/// boxes and buttons (GHD's `#welcome` sizes), its font size, and what
+/// Cancel does (GHD's `SignIn` children).
+#[derive(Clone)]
+pub struct EmbeddedLook {
+    pub text_box: fn(&'static str, &Entity<InputState>, &Window, &App) -> Stateful<Div>,
+    /// `(id, primary)`: a button without its label.
+    pub button: fn(&'static str, bool, &App) -> Stateful<Div>,
+    pub font_size: Pixels,
+    pub on_cancel: SharedHandler,
+}
+
 pub struct SignInDialog {
     state: Entity<AppState>,
     enterprise: bool,
     /// Drawn inside the Welcome flow's "Sign in to your GitHub Enterprise"
     /// step (GHD `SignInEnterprise` around the shared `SignIn`) instead of
-    /// as a dialog: no frame, and Cancel runs the step's handler (GHD's
-    /// `SignIn` children).
-    embedded: Option<SharedHandler>,
+    /// as a dialog.
+    embedded: Option<EmbeddedLook>,
     method: Method,
     address: Entity<InputState>,
     token: Entity<InputState>,
@@ -153,8 +164,9 @@ impl SignInDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        // GHD `EnterpriseServerEntry`
         let address =
-            cx.new(|cx| InputState::new(window, cx).placeholder("https://github.example.com"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://example.ghe.com"));
         let token = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("ghp_…")
@@ -185,16 +197,16 @@ impl SignInDialog {
         }
     }
 
-    /// The Enterprise form for the Welcome flow's sign-in step, whose
-    /// Cancel runs `on_cancel`.
+    /// The Enterprise form for the Welcome flow's sign-in step, drawn the
+    /// way `look` says.
     pub fn new_embedded(
         state: Entity<AppState>,
-        on_cancel: impl Fn(&mut Window, &mut App) + 'static,
+        look: EmbeddedLook,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
-            embedded: Some(std::rc::Rc::new(on_cancel)),
+            embedded: Some(look),
             ..Self::new(state, true, window, cx)
         }
     }
@@ -567,11 +579,30 @@ impl Render for SignInDialog {
                     .flex()
                     .flex_col()
                     .gap(SPACING())
-                    .child(labeled(
-                        "Enterprise address",
-                        text_box("sign-in-address", &self.address, None, window, cx),
-                        cx,
-                    ))
+                    .child(match &self.embedded {
+                        // `#welcome label` (16.8 px, 3.33 px above the box)
+                        Some(look) => div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_size(look.font_size)
+                                    .line_height(look.font_size * 1.5)
+                                    .mb(px(10. / 3.))
+                                    .child("Enterprise address"),
+                            )
+                            .child((look.text_box)(
+                                "sign-in-address",
+                                &self.address,
+                                window,
+                                cx,
+                            )),
+                        None => labeled(
+                            "Enterprise address",
+                            text_box("sign-in-address", &self.address, None, window, cx),
+                            cx,
+                        ),
+                    })
                     .when_some(address_error, |d, m| {
                         d.child(div().text_color(t.error).child(m))
                     })
@@ -715,43 +746,45 @@ impl Render for SignInDialog {
             })
             .child(body);
 
-        if let Some(on_cancel) = self.embedded.clone() {
-            return embedded_form(body.into_any_element(), buttons, on_cancel, cx);
+        if let Some(look) = self.embedded.clone() {
+            return embedded_form(body.into_any_element(), buttons, look, cx);
         }
         dialog("sign-in", self.title(), body, buttons, close, window, cx).into_any_element()
     }
 }
 
-/// The form of an embedded [`SignInDialog`]: the body, then its buttons,
-/// Cancel running `on_cancel`, Enter in a text box taking the primary one
-/// (a `<form>`).
+/// The form of an embedded [`SignInDialog`] (GHD `SignIn` in a
+/// `<form>`): the body, then the submit button before Cancel, which runs
+/// `look.on_cancel`; Enter in a text box takes the submit button.
 fn embedded_form(
     body: AnyElement,
     buttons: Vec<DialogButton>,
-    on_cancel: SharedHandler,
+    look: EmbeddedLook,
     cx: &App,
 ) -> AnyElement {
     let mut submit: Option<SharedHandler> = None;
-    let row: Vec<AnyElement> = buttons
+    let (primary, others): (Vec<_>, Vec<_>) = buttons.into_iter().partition(|b| b.primary);
+    let row: Vec<AnyElement> = primary
         .into_iter()
+        .chain(others)
         .map(|b| {
             let on_click: SharedHandler = if b.id == "sign-in-cancel" {
-                on_cancel.clone()
+                look.on_cancel.clone()
             } else {
                 std::rc::Rc::from(b.on_click)
             };
             if b.primary && !b.disabled {
                 submit = Some(on_click.clone());
             }
-            let el = if b.primary {
-                primary_button(b.id, b.label, b.disabled, cx)
-            } else {
-                button(b.id, b.label, cx)
-            };
-            el.when(!b.disabled, |d| {
-                d.on_click(move |_, window, cx| on_click(window, cx))
-            })
-            .into_any_element()
+            (look.button)(b.id, b.primary, cx)
+                .text_size(look.font_size)
+                .child(b.label)
+                // GHD `okButtonDisabled`
+                .when(b.disabled, |d| d.opacity(0.6).cursor_default())
+                .when(!b.disabled, |d| {
+                    d.on_click(move |_, window, cx| on_click(window, cx))
+                })
+                .into_any_element()
         })
         .collect();
     div()
@@ -759,7 +792,6 @@ fn embedded_form(
         .w_full()
         .flex()
         .flex_col()
-        .gap(SPACING_DOUBLE())
         .when_some(submit, |d, submit| {
             d.on_action(
                 move |action: &gpui_kit::component::input::Enter, window, cx| {
@@ -771,7 +803,8 @@ fn embedded_form(
                 },
             )
         })
+        // the field group's 10 px bottom margin + the row's 20 px top one
         .child(body)
-        .child(div().flex().flex_row().gap(SPACING()).children(row))
+        .child(div().mt(px(30.)).flex().flex_row().children(row))
         .into_any_element()
 }

@@ -1,0 +1,14 @@
+# First launch: "Sign in to GitHub Enterprise" opens GHD's SignInToEnterprise
+# step (the address form inside the Welcome flow), Cancel goes back to Start.
+name: welcome-enterprise
+description: Welcome flow Enterprise sign-in step and its Cancel
+setup: welcome
+steps:
+  - wait: 2000
+  - click: {text: "Sign in to GitHub Enterprise", within: "#welcome"}
+    wait: 600
+  - dump: enterprise
+  - snap: {name: enterprise, note: "Corvene's form is the sign-in dialog's (deviations.md › Welcome)"}
+  - click: {text: "Cancel", within: "#welcome"}
+    wait: 600
+  - snap: {name: back-to-start, mask: [[40, 719, 600, 44]], note: "Corvene states it sends no usage metrics (deviations.md › Welcome)"}
