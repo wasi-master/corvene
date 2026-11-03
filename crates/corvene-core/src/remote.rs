@@ -166,6 +166,40 @@ fn save_indicators(s: &crate::state::AppState) {
     }
 }
 
+/// GHD `updateSidebarIndicator` after every `_loadStatus`
+/// (desktop/desktop#22997): a loaded status also updates the repository's
+/// indicator, so its row is right once another repository is selected.
+pub(crate) fn note_loaded_status(s: &mut crate::state::AppState, id: u64) {
+    if !s.settings.repository_indicators_enabled {
+        return;
+    }
+    let Some(rs) = s.repo_states.get(&id) else {
+        return;
+    };
+    let Some(status) = rs.status.as_deref() else {
+        return;
+    };
+    let changed_files = status.files.len();
+    let ahead_behind = rs.ahead_behind;
+    let branch = rs
+        .info
+        .as_ref()
+        .map(|i| i.current_branch().map(|b| b.name.clone()));
+    let indicator = s.indicators.entry(id).or_default();
+    let mut next = RepoIndicator {
+        ahead_behind,
+        changed_files,
+        ..indicator.clone()
+    };
+    if let Some(branch) = branch {
+        next.branch = branch;
+    }
+    if *indicator != next {
+        *indicator = next;
+        save_indicators(s);
+    }
+}
+
 /// Sidebar indicators (`ILocalRepositoryState`); saved between launches
 /// with `271-persist-repository-indicators`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -2147,6 +2147,7 @@ impl Dispatcher {
                         }
                     }
                     if status_applied {
+                        crate::remote::note_loaded_status(s, id);
                         s.excluded_files_restored.insert(id);
                         crate::drafts::note_excluded(s, id, cx);
                         Self::capture_new_changelist_paths(s, id, new_paths, cx);

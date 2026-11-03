@@ -1744,11 +1744,15 @@ pub fn bold_ranges(
 }
 
 /// The row's indicators: ahead / behind (when either is non-zero) and the
-/// number of uncommitted changes, from the loaded state or the background
-/// indicator refresh.
+/// number of uncommitted changes, from the loaded state of a repository a
+/// window shows, else the indicator refresh. A repository no window shows
+/// keeps the state it last loaded, which goes stale (desktop/desktop#22997).
 fn indicators(s: &AppState, id: u64) -> (Option<corvene_core::AheadBehind>, usize) {
     let indicator = s.indicators.get(&id);
-    let rs = s.repo_states.get(&id);
+    let rs = s
+        .repo_states
+        .get(&id)
+        .filter(|_| indicator.is_none() || s.workspace_showing(id).is_some());
     let ab = rs
         .and_then(|r| r.ahead_behind)
         .or_else(|| indicator.and_then(|i| i.ahead_behind))
