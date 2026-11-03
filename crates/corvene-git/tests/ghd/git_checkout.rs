@@ -6,9 +6,10 @@
 //!   allowFileProtocol)` (`lib/git/checkout.ts`) is
 //!   `corvene_git::checkout_branch(git, path, branch)` with GitHub Desktop's
 //!   defaults, or `corvene_git::checkout_branch_with(git, path, branch,
-//!   &CheckoutOptions { allow_file_protocol, .. })`; neither takes a remote
-//!   or a progress callback. Both update the submodules afterwards, as
-//!   GitHub Desktop 3.6.6 does. An `Err` is a rejection; its message is
+//!   &CheckoutOptions { allow_file_protocol, .. })`; neither takes a remote,
+//!   and the progress callback is a scope around the call
+//!   (`corvene_git::op_progress::with_progress`). Both update the
+//!   submodules afterwards, as GitHub Desktop 3.6.6 does. An `Err` is a rejection; its message is
 //!   [`git_error_message`].
 //! - `getBranches(repository, ...prefixes)` is [`get_branches`]
 //!   (`corvene_git::open_repository(..).branches`).

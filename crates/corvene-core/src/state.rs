@@ -1474,6 +1474,11 @@ pub struct RepositoryState {
     pub stacked_refs: Option<std::sync::Arc<crate::stacked_refs::StackedRefs>>,
     /// Branch a checkout is switching to (`checkoutProgress.target`).
     pub checkout_target: Option<String>,
+    /// The rest of GHD `checkoutProgress` while git reports it
+    /// (`corvene_git::op_progress`): description and value.
+    pub checkout_progress: Option<corvene_git::op_progress::OperationProgress>,
+    /// GHD `revertProgress`: a revert is running; its last report, if any.
+    pub revert_progress: Option<corvene_git::op_progress::OperationProgress>,
     /// Corvene/GHD stash entry for the current branch (`changesState.stashEntry`);
     /// with `728-show-latest-other-stash`, else the newest stash no Desktop made.
     pub stash: Option<corvene_models::StashEntry>,

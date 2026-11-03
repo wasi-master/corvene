@@ -3685,6 +3685,50 @@ impl Dispatcher {
         Self::run_history_op_then(id, error_title, op, |_| {}, cx);
     }
 
+    /// GHD `updateCheckoutProgress` / `updateRevertProgress`: a sink for
+    /// [`corvene_git::op_progress::with_progress`] on a background thread
+    /// whose reports land in `slot` of repository `id`'s state, the latest
+    /// one about 30 times a second. The pump ends when the sink is dropped,
+    /// without applying what was still queued, so the caller's clearing of
+    /// `slot` when the operation is done stays.
+    pub(crate) fn progress_sink(
+        id: u64,
+        slot: fn(&mut RepositoryState) -> &mut Option<corvene_git::op_progress::OperationProgress>,
+        cx: &mut dyn Host,
+    ) -> impl FnMut(corvene_git::op_progress::OperationProgress) + Send + 'static {
+        use std::sync::mpsc::TryRecvError;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let state = Self::state(cx);
+        cx.spawn(async move |cx: &mut AsyncCtx| {
+            loop {
+                let mut latest = None;
+                let gone = loop {
+                    match rx.try_recv() {
+                        Ok(p) => latest = Some(p),
+                        Err(TryRecvError::Empty) => break false,
+                        Err(TryRecvError::Disconnected) => break true,
+                    }
+                };
+                if gone {
+                    break;
+                }
+                if let Some(p) = latest {
+                    state.update(cx, |s, cx| {
+                        *slot(s.repo_state_mut(id)) = Some(p);
+                        cx.notify();
+                    });
+                }
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(33))
+                    .await;
+            }
+        })
+        .detach();
+        move |p| {
+            let _ = tx.send(p);
+        }
+    }
+
     /// [`Self::run_history_op`], then `then` when `op` succeeded.
     pub(crate) fn run_history_op_then(
         id: u64,
@@ -3766,12 +3810,31 @@ impl Dispatcher {
     /// `Revert Changes in Commit`
     pub fn revert_commit(id: u64, sha: String, cx: &mut dyn Host) {
         let is_merge = Self::commit_by_sha(id, &sha, cx).is_some_and(|c| c.is_merge());
-        Self::run_history_op(
-            id,
-            "Could not revert commit",
-            move |git, workdir| corvene_git::revert_commit(git, &workdir, &sha, is_merge),
-            cx,
-        );
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        // GHD `_revertCommit`: once git reports progress (Git LFS, mostly)
+        // the push / pull button shows "Reverting…" until it is done
+        let sink = Self::progress_sink(id, |rs| &mut rs.revert_progress, cx);
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::op_progress::with_progress(sink, || {
+                corvene_git::revert_commit(git, &workdir, &sha, is_merge)
+            })
+        });
+        cx.spawn(async move |cx: &mut AsyncCtx| {
+            let result = task.await;
+            cx.update(|cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.repo_state_mut(id).revert_progress = None;
+                    cx.notify();
+                });
+                if let Err(err) = result {
+                    Self::show_error("Could not revert commit", &err, cx);
+                }
+                Self::refresh_repository(id, cx);
+            });
+        })
+        .detach();
     }
 
     /// Corvene addition (flag `815`): revert `shas` without committing, the
@@ -4519,6 +4582,7 @@ impl Dispatcher {
         let no_track = Self::create_branch_no_track(id, &name, start_point.as_deref(), cx);
         // `1114-hook-results`: post-checkout's outcome goes to the hook list
         let hooks = crate::hooks::hook_ui(id, false, Some(format!("Switch to {name}")), cx);
+        let sink = Self::progress_sink(id, |rs| &mut rs.checkout_progress, cx);
         let task = cx.background_executor().spawn(async move {
             if unborn {
                 return corvene_git::checkout_new_branch(git, &workdir, &name);
@@ -4547,7 +4611,9 @@ impl Dispatcher {
                 remote_name: None,
             };
             corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || {
-                corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
+                corvene_git::op_progress::with_progress(sink, || {
+                    corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
+                })
             })
         });
         Self::state(cx).update(cx, |s, cx| {
@@ -4557,7 +4623,11 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
-                Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
+                Self::state(cx).update(cx, |s, _| {
+                    let rs = s.repo_state_mut(id);
+                    rs.checkout_target = None;
+                    rs.checkout_progress = None;
+                });
                 match result {
                     // `345-issues`: a branch made from an issue remembers it
                     Ok(()) => Self::record_issue_branch(id, &branch_done, cx),
@@ -4693,119 +4763,135 @@ impl Dispatcher {
             Some(format!("Switch to {}", branch.name_without_remote())),
             cx,
         );
+        let sink = Self::progress_sink(id, |rs| &mut rs.checkout_progress, cx);
         let task = cx.background_executor().spawn(async move {
-            let mut kept: Option<(corvene_models::StashEntry, Vec<String>)> = None;
-            // `1313-changelists`: the stash `729` restored, for its lists
-            let mut popped: Option<String> = None;
-            let result =
-                corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || match strategy {
-                    UncommittedChangesStrategy::StashOnCurrentBranch => {
-                        if let Some(current) = current.as_deref()
-                            && has_changes
-                        {
-                            if guard {
-                                corvene_git::ensure_no_modified_assume_unchanged(
+            corvene_git::op_progress::with_progress(sink, || {
+                let mut kept: Option<(corvene_models::StashEntry, Vec<String>)> = None;
+                // `1313-changelists`: the stash `729` restored, for its lists
+                let mut popped: Option<String> = None;
+                let result =
+                    corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || match strategy {
+                        UncommittedChangesStrategy::StashOnCurrentBranch => {
+                            if let Some(current) = current.as_deref()
+                                && has_changes
+                            {
+                                if guard {
+                                    corvene_git::ensure_no_modified_assume_unchanged(
+                                        git.clone(),
+                                        &workdir,
+                                    )?;
+                                }
+                                // `createStashAndDropPreviousEntry`: the old entry
+                                // goes once the new one is made
+                                if corvene_git::create_desktop_stash(
                                     git.clone(),
                                     &workdir,
-                                )?;
+                                    current,
+                                    false,
+                                )? && let Some(old) = previous_stash
+                                {
+                                    let _ = corvene_git::drop_desktop_stash_entry(
+                                        git.clone(),
+                                        &workdir,
+                                        &old,
+                                    );
+                                }
                             }
-                            // `createStashAndDropPreviousEntry`: the old entry
-                            // goes once the new one is made
-                            if corvene_git::create_desktop_stash(
+                            corvene_git::checkout_branch_with(
+                                git,
+                                &workdir,
+                                &branch,
+                                &checkout_options,
+                            )
+                        }
+                        _ => {
+                            // `checkoutAndBringChanges`: plain checkout, else stash → checkout → pop
+                            match corvene_git::checkout_branch_with(
                                 git.clone(),
                                 &workdir,
-                                current,
-                                false,
-                            )? && let Some(old) = previous_stash
-                            {
-                                let _ = corvene_git::drop_desktop_stash_entry(
-                                    git.clone(),
-                                    &workdir,
-                                    &old,
-                                );
-                            }
-                        }
-                        corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
-                    }
-                    _ => {
-                        // `checkoutAndBringChanges`: plain checkout, else stash → checkout → pop
-                        match corvene_git::checkout_branch_with(
-                            git.clone(),
-                            &workdir,
-                            &branch,
-                            &checkout_options,
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
-                                let target = branch.name_without_remote().to_string();
-                                if !corvene_git::create_desktop_stash(
-                                    git.clone(),
-                                    &workdir,
-                                    &target,
-                                    guard,
-                                )? {
-                                    return Err(err);
-                                }
-                                corvene_git::checkout_branch_with(
-                                    git.clone(),
-                                    &workdir,
-                                    &branch,
-                                    &checkout_options,
-                                )?;
-                                if let Some(entry) =
-                                    corvene_git::get_last_desktop_stash_entry_for_branch(
+                                &branch,
+                                &checkout_options,
+                            ) {
+                                Ok(()) => Ok(()),
+                                Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
+                                    let target = branch.name_without_remote().to_string();
+                                    if !corvene_git::create_desktop_stash(
                                         git.clone(),
                                         &workdir,
                                         &target,
-                                    )?
-                                {
-                                    let pop = corvene_git::pop_stash_entry_with(
+                                        guard,
+                                    )? {
+                                        return Err(err);
+                                    }
+                                    corvene_git::checkout_branch_with(
                                         git.clone(),
                                         &workdir,
-                                        &entry.sha,
-                                        pop_options,
+                                        &branch,
+                                        &checkout_options,
                                     )?;
-                                    kept = Self::kept_after_pop(git.clone(), &workdir, &entry, pop);
+                                    if let Some(entry) =
+                                        corvene_git::get_last_desktop_stash_entry_for_branch(
+                                            git.clone(),
+                                            &workdir,
+                                            &target,
+                                        )?
+                                    {
+                                        let pop = corvene_git::pop_stash_entry_with(
+                                            git.clone(),
+                                            &workdir,
+                                            &entry.sha,
+                                            pop_options,
+                                        )?;
+                                        kept = Self::kept_after_pop(
+                                            git.clone(),
+                                            &workdir,
+                                            &entry,
+                                            pop,
+                                        );
+                                    }
+                                    Ok(())
                                 }
-                                Ok(())
+                                Err(err) => Err(err),
                             }
-                            Err(err) => Err(err),
                         }
-                    }
-                });
-            let submodule_error = result.as_ref().ok().and_then(|()| {
-                corvene_git::update_submodules_after_checkout(
-                    git_for_submodules,
-                    &workdir_for_submodules,
-                    &submodule_options,
-                )
-                .err()
-            });
-            let pop_error = match (&result, pop_stash_for) {
-                (Ok(()), Some((git, target))) => {
-                    corvene_git::get_last_desktop_stash_entry_for_branch(
-                        git.clone(),
-                        &workdir_for_submodules,
-                        &target,
-                    )
-                    .and_then(|entry| match entry {
-                        Some(entry) => corvene_git::pop_stash_entry_with(
-                            git.clone(),
+                    });
+                let submodule_error = result.as_ref().ok().and_then(|()| {
+                    corvene_git::op_progress::submodule_step(|| {
+                        corvene_git::update_submodules_after_checkout(
+                            git_for_submodules,
                             &workdir_for_submodules,
-                            &entry.sha,
-                            pop_options,
+                            &submodule_options,
                         )
-                        .map(|pop| {
-                            popped = Some(entry.sha.clone());
-                            kept = Self::kept_after_pop(git, &workdir_for_submodules, &entry, pop);
-                        }),
-                        None => Ok(()),
                     })
                     .err()
-                }
-                _ => None,
-            };
-            (result, submodule_error, pop_error, kept, popped)
+                });
+                let pop_error = match (&result, pop_stash_for) {
+                    (Ok(()), Some((git, target))) => {
+                        corvene_git::get_last_desktop_stash_entry_for_branch(
+                            git.clone(),
+                            &workdir_for_submodules,
+                            &target,
+                        )
+                        .and_then(|entry| match entry {
+                            Some(entry) => corvene_git::pop_stash_entry_with(
+                                git.clone(),
+                                &workdir_for_submodules,
+                                &entry.sha,
+                                pop_options,
+                            )
+                            .map(|pop| {
+                                popped = Some(entry.sha.clone());
+                                kept =
+                                    Self::kept_after_pop(git, &workdir_for_submodules, &entry, pop);
+                            }),
+                            None => Ok(()),
+                        })
+                        .err()
+                    }
+                    _ => None,
+                };
+                (result, submodule_error, pop_error, kept, popped)
+            })
         });
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).checkout_target = Some(target);
@@ -4815,7 +4901,11 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let (result, submodule_error, pop_error, kept, popped) = task.await;
             cx.update(|cx| {
-                Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
+                Self::state(cx).update(cx, |s, _| {
+                    let rs = s.repo_state_mut(id);
+                    rs.checkout_target = None;
+                    rs.checkout_progress = None;
+                });
                 if let Err(err) = result {
                     Self::show_error("Could not switch branch", &err, cx);
                 }

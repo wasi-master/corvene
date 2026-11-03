@@ -16,7 +16,7 @@ use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
 use crate::git_errors::KnownGitError;
 use crate::process::GitCommand;
-use crate::remote_ops::AskpassEnv;
+use crate::remote_ops::{AskpassEnv, GitProgressEvent};
 
 /// Corvene `787-commit-to-new-branch` (History › Create Branch from
 /// Commits…, "Remove them from <branch>"): move `branch`, which is not
@@ -156,7 +156,10 @@ pub fn checkout_branch(git: Arc<GitBinary>, workdir: &Path, branch: &Branch) -> 
 /// tracking local branch (`checkout -b <short> <remote/short>`). Then the
 /// submodules follow the checkout as `options.submodules` says (GHD 3.6.6
 /// `updateSubmodulesAfterOperation`); a failure there is returned although
-/// the branch is checked out, as in GHD.
+/// the branch is checked out, as in GHD. Inside
+/// [`crate::op_progress::with_progress`] it runs with `--progress` and
+/// reports "Checking out files" and Git LFS transfers as the first 90 %,
+/// the submodule update the rest (GHD `CheckoutStepWeight`).
 pub fn checkout_branch_with(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -164,9 +167,13 @@ pub fn checkout_branch_with(
     options: &CheckoutOptions,
 ) -> Result<()> {
     // GHD `checkoutBranch`: `envForRemoteOperation(getFallbackUrlForProxyResolve)`
+    let progress = crate::op_progress::active();
     let mut cmd = GitCommand::new(git.clone())
         .args(["checkout"])
         .current_dir(workdir);
+    if progress {
+        cmd = cmd.arg("--progress");
+    }
     for (key, value) in crate::proxy::env_for_fallback(git.clone(), workdir, false) {
         cmd = cmd.env(key, value);
     }
@@ -182,6 +189,27 @@ pub fn checkout_branch_with(
     // hooks; post-checkout's outcome is shown when the caller asks for it
     if crate::hooks::scoped_reports_results() {
         cmd = cmd.intercept_hooks(&["post-checkout"]);
+    }
+    if progress {
+        let title = format!("Checking out branch {}", branch.name);
+        crate::op_progress::clamped(0., crate::op_progress::CHECKOUT_STEP_WEIGHT, || {
+            let initial = if cfg!(target_os = "macos") {
+                "Switching to Branch"
+            } else {
+                "Switching to branch"
+            };
+            crate::op_progress::report(&title, initial, 0.);
+            let mut parser = crate::op_progress::checkout_parser();
+            // GHD forwards only the parser's steps and Git LFS
+            crate::lfs_progress::run_with_progress(cmd, &mut parser, &mut |event| {
+                if let GitProgressEvent::Progress { percent, details } = event {
+                    crate::op_progress::report(&title, &details.text, percent);
+                }
+            })
+        })?;
+        return crate::op_progress::submodule_step(|| {
+            update_submodules_after_checkout(git, workdir, options)
+        });
     }
     cmd.run()?;
     update_submodules_after_checkout(git, workdir, options)
@@ -1494,5 +1522,60 @@ eeee commit: something\n";
             std::fs::read_to_string(path.join("a.txt")).unwrap(),
             "local only\n"
         );
+    }
+
+    #[test]
+    fn checkout_reports_progress_inside_with_progress() {
+        let (dir, git) = repo();
+        let status = Command::new("git")
+            .args(["branch", "other"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let branch = Branch {
+            name: "other".into(),
+            kind: BranchKind::Local,
+            full_name: "refs/heads/other".into(),
+            tip: None,
+            upstream: None,
+            tip_time: None,
+            tip_author: None,
+            remote_name: None,
+        };
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        crate::op_progress::with_progress(
+            move |p| sink.borrow_mut().push((p.description, p.value)),
+            || checkout_branch(git.clone(), dir.path(), &branch),
+        )
+        .unwrap();
+        let seen = seen.borrow();
+        let initial = if cfg!(target_os = "macos") {
+            "Switching to Branch"
+        } else {
+            "Switching to branch"
+        };
+        // GHD: the initial report, then the submodule update in 90..100 %
+        assert_eq!(seen.first(), Some(&(initial.to_string(), 0.)));
+        let tail: Vec<_> = seen.iter().rev().take(2).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                ("Updating submodules".to_string(), 0.9),
+                ("Submodules updated".to_string(), 1.)
+            ]
+        );
+        // and without a sink nothing is asked for
+        checkout_branch(
+            git,
+            dir.path(),
+            &Branch {
+                name: "main".into(),
+                full_name: "refs/heads/main".into(),
+                ..branch
+            },
+        )
+        .unwrap();
     }
 }

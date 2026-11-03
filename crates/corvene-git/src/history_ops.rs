@@ -9,6 +9,8 @@ use crate::error::Result;
 use crate::process::GitCommand;
 
 /// `revertCommit`: `git revert [-m 1] <sha>` (mainline 1 for merge commits).
+/// Inside [`crate::op_progress::with_progress`] git's lines and Git LFS
+/// transfers are reported (GHD `RevertProgressParser`, `trackLFSProgress`).
 pub fn revert_commit(git: Arc<GitBinary>, workdir: &Path, sha: &str, is_merge: bool) -> Result<()> {
     // GHD: `envForRemoteOperation(getFallbackUrlForProxyResolve)`
     let proxy_env = crate::proxy::env_for_fallback(git.clone(), workdir, false);
@@ -19,7 +21,19 @@ pub fn revert_commit(git: Arc<GitBinary>, workdir: &Path, sha: &str, is_merge: b
     if is_merge {
         cmd = cmd.args(["-m", "1"]);
     }
-    cmd.arg(sha).run()?;
+    let cmd = cmd.arg(sha);
+    if !crate::op_progress::active() {
+        cmd.run()?;
+        return Ok(());
+    }
+    let mut parser = crate::op_progress::revert_parser();
+    crate::lfs_progress::run_with_progress(cmd, &mut parser, &mut |event| {
+        let title = match &event {
+            crate::remote_ops::GitProgressEvent::Progress { details, .. } => details.title.clone(),
+            crate::remote_ops::GitProgressEvent::Context { .. } => String::new(),
+        };
+        crate::op_progress::report(&title, event.text(), event.percent());
+    })?;
     Ok(())
 }
 

@@ -387,6 +387,9 @@ pub fn toolbar_models(
         };
     // `checkoutProgress`: title = target branch, description = "Switching to Branch"
     let switching_to = repo_state.and_then(|s| s.checkout_target.clone());
+    let checkout_progress = repo_state
+        .and_then(|s| s.checkout_progress.clone())
+        .filter(|_| switching_to.is_some());
     let switching_to_tooltip = switching_to.clone();
     // `412-merge-progress-in-branch-button`: a running merge (Merge into…,
     // Update from Default Branch) spins the button, "Merging <branch>"
@@ -408,9 +411,16 @@ pub fn toolbar_models(
     let switching = switching_to.is_some() || merging_from.is_some();
     let (branch_icon, branch_desc, branch_title): (Octicon, SharedString, SharedString) =
         match (switching_to, &merging_from) {
+            // `checkoutProgress.description`, with the percent once there is one
             (Some(target), _) => (
                 Octicon::SyncClockwise,
-                mac_or("Switching to Branch", "Switching to branch").into(),
+                match checkout_progress.as_ref() {
+                    Some(p) if p.value > 0. => {
+                        format!("{} ({}%)", p.description, (p.value * 100.).round()).into()
+                    }
+                    Some(p) => p.description.clone().into(),
+                    None => mac_or("Switching to Branch", "Switching to branch").into(),
+                },
                 SharedString::from(target),
             ),
             (None, Some(source)) => (
@@ -457,7 +467,8 @@ pub fn toolbar_models(
         badge: None,
         push_pull: false,
         arrow: false,
-        progress: None,
+        // `progressValue={checkoutProgress.value}`
+        progress: checkout_progress.as_ref().map(|p| p.value as f32),
         spin: switching,
         pr_badge,
         resize: Some((ResizeTarget::Branch, widths.branch)),
@@ -539,9 +550,25 @@ pub fn toolbar_models(
         cancel: false,
         load_push_size: false,
     };
+    let revert_progress = repo_state.and_then(|s| s.revert_progress.clone());
     let push_pull = if repo.is_none() {
         ToolbarButtonModel {
             disabled: true,
+            ..base
+        }
+    } else if let Some(p) = revert_progress {
+        // GHD `RevertProgress`, drawn instead of the push / pull button
+        ToolbarButtonModel {
+            icon: Octicon::SyncClockwise,
+            title: "Reverting…".into(),
+            description: if p.title.is_empty() {
+                "Hang on…".into()
+            } else {
+                p.title.into()
+            },
+            disabled: true,
+            progress: Some(p.value as f32),
+            spin: true,
             ..base
         }
     } else if let Some(p) = progress {

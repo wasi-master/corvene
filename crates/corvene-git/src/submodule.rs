@@ -1,9 +1,9 @@
 //! Submodules - GHD `lib/git/submodule.ts` (`updateSubmodulesAfterOperation`,
 //! `listSubmodules`, `resetSubmodulePaths`) and `models/submodule.ts`.
 //!
-//! `update_submodules_after_operation` takes no progress callback: Corvene's
-//! checkout shows no progress (GHD reports "Updating submodules" in its
-//! checkout progress). Discard (`commit::discard_changes`) tells submodules
+//! `update_submodules_after_operation` reports "Updating submodules" and
+//! Git LFS transfers inside [`crate::op_progress::with_progress`] (GHD's
+//! `progressCallback`). Discard (`commit::discard_changes`) tells submodules
 //! apart by their status (`FileStatus::submodule`, the same information)
 //! instead of `list_submodules`, which saves a git call per discard.
 
@@ -62,7 +62,17 @@ pub fn update_submodules_after_operation(
     if let Some(askpass) = askpass {
         cmd = askpass.apply(cmd);
     }
-    cmd.run()?;
+    if !crate::op_progress::active() {
+        cmd.run()?;
+        return Ok(());
+    }
+    let title = crate::op_progress::title();
+    crate::op_progress::report(&title, "Updating submodules", 0.);
+    let mut parser = crate::op_progress::SubmoduleUpdateParser::default();
+    crate::lfs_progress::run_with_progress(cmd, &mut parser, &mut |event| {
+        crate::op_progress::report(&title, event.text(), event.percent());
+    })?;
+    crate::op_progress::report(&title, "Submodules updated", 1.);
     Ok(())
 }
 

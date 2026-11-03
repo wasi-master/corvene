@@ -206,8 +206,21 @@ enum Streamed {
 
 /// GHD `createProgressProcessCallback`: the progress to report for one
 /// line, or `None` for a line GHD drops while LFS progress is showing.
+/// What [`run_with_progress`] turns git's stderr lines into: GHD's
+/// `IGitProgressParser` (a [`ProgressParser`], or the submodule update's
+/// own, `crate::op_progress::SubmoduleUpdateParser`).
+pub(crate) trait LineParser {
+    fn parse_event(&mut self, line: &str) -> GitProgressEvent;
+}
+
+impl LineParser for ProgressParser {
+    fn parse_event(&mut self, line: &str) -> GitProgressEvent {
+        ProgressParser::parse_event(self, line)
+    }
+}
+
 struct ProgressMerger<'a> {
-    parser: &'a mut ProgressParser,
+    parser: &'a mut dyn LineParser,
     lfs: GitLfsProgressParser,
     lfs_active: bool,
 }
@@ -251,7 +264,7 @@ impl ProgressMerger<'_> {
 /// error and goes on the same way).
 pub(crate) fn run_with_progress(
     cmd: GitCommand,
-    parser: &mut ProgressParser,
+    parser: &mut dyn LineParser,
     on_event: &mut dyn FnMut(GitProgressEvent),
 ) -> Result<GitOutput> {
     let mut merger = ProgressMerger {

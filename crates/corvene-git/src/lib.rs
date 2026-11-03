@@ -39,6 +39,7 @@ pub mod markdown_file;
 pub mod media_file;
 pub mod merge_file;
 pub mod notebook_file;
+pub mod op_progress;
 pub mod ops;
 pub mod partial_stash;
 pub mod patch;
