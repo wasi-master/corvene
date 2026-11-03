@@ -89,6 +89,25 @@ fn android_built_in() -> Availability {
     }
 }
 
+/// The freedesktop.org launcher's desktop entry actions (the Windows jump
+/// list and the macOS Dock menu are not built).
+fn linux_launcher() -> Availability {
+    if cfg!(any(target_os = "macos", windows, target_os = "android")) {
+        Availability::BuiltIn("Only the Linux version has this so far.")
+    } else {
+        Availability::Available
+    }
+}
+
+/// Unix file modes: Git for Windows never trusts them.
+fn unix_file_modes() -> Availability {
+    if cfg!(windows) {
+        Availability::BuiltIn("Git for Windows ignores file modes already.")
+    } else {
+        Availability::Available
+    }
+}
+
 /// The wgpu renderer's switches: macOS and Windows draw with another one.
 fn wgpu_renderer_only() -> Availability {
     if cfg!(any(
@@ -3646,6 +3665,24 @@ registry! {
         code: &["crates/corvene-core/src/widgets.rs", "packaging/widgets/CorveneWidgets.swift", "packaging/widgets/WidgetViews.swift"],
     },
 
+    /// Recent repositories in the Linux launcher's context menu.
+    LAUNCHER_RECENT_REPOSITORIES = 434 "launcher-recent-repositories" {
+        title: "Recent repositories in the launcher",
+        summary: "Right-clicking Corvene in the GNOME, KDE Plasma, Cinnamon or Budgie launcher \
+                  lists the recently opened repositories; picking one opens it in Corvene. \
+                  For this Corvene keeps a copy of its desktop entry with those repositories in \
+                  ~/.local/share/applications, and removes it when the list is empty or this is \
+                  off. Not in Flatpak or Snap builds.",
+        ghd_behaviour: "GitHub Desktop has no Linux build; on Windows its taskbar entry has no \
+                        jump list of repositories.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: linux_launcher,
+        upstream: &[Upstream::issue(20943)],
+        code: &["crates/corvene-platform/src/desktop_entry.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
@@ -4084,6 +4121,25 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvene-core/src/gh_cli_account.rs", "crates/corvene-platform/src/gh_cli.rs", "crates/corvene-core/src/askpass.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
+    /// Credentials for a proxy in front of a GitHub Enterprise server.
+    FRONT_DOOR_CREDENTIALS = 530 "front-door-credentials" {
+        title: "Sign in to proxies in front of GitHub Enterprise",
+        summary: "When a GitHub Enterprise server sits behind a proxy that asks for a username \
+                  and password of its own (it answers 401 without being GitHub), Corvene asks \
+                  for them and keeps them in the keychain. Corvene's requests and Git then send \
+                  them as Proxy-Authorization, with the session cookies the proxy hands out for \
+                  them, next to the token instead of in its place.",
+        ghd_behaviour: "Sends only the token: the proxy refuses sign-in and every request, and \
+                        Git's password prompt cannot hold both the proxy's password and the \
+                        token.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8783)],
+        code: &["crates/corvene-core/src/front_door.rs", "crates/corvene-platform/src/front_door.rs", "crates/corvene-platform/src/proxy.rs", "crates/corvene-git/src/proxy.rs", "crates/corvene-ui/src/dialogs/proxy_authentication.rs"],
     },
 
     // ---- 600 Keyboard & accessibility ----
@@ -8054,6 +8110,25 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(20440)],
         code: &["crates/corvene-ui/src/browse_files.rs", "crates/corvene-git/src/file_browser.rs"],
+    },
+
+    /// git's `core.fileMode` probe for repositories it did not create there.
+    FILE_MODE_PROBE = 1119 "file-mode-probe" {
+        title: "Ignore file modes on drives that keep none",
+        summary: "When a repository is added or opened, Corvene runs git's own test of whether \
+                  its drive keeps the executable bit (the one git init and git clone run). On \
+                  drives that do not (FAT and exFAT, network shares, some virtual machine \
+                  mounts) it sets core.fileMode to false in the repository, so files no longer \
+                  show as changed because of a file mode the drive cannot store.",
+        ghd_behaviour: "A repository copied to or opened from such a drive keeps \
+                        core.fileMode=true and lists files whose only change is the mode, with \
+                        \"No content changes found\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: unix_file_modes,
+        upstream: &[Upstream::issue(9443)],
+        code: &["crates/corvene-git/src/file_mode.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
 

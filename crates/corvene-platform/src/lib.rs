@@ -23,6 +23,7 @@ pub mod desktop_entry;
 pub mod editors;
 pub mod file_hash;
 pub mod file_url;
+pub mod front_door;
 pub mod gh_cli;
 pub mod ghd_import;
 pub mod image_decode;
@@ -30,6 +31,8 @@ pub mod keychain;
 pub mod locale;
 pub mod notifications;
 pub mod proxy;
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+pub mod secret_service;
 pub mod services;
 pub mod shells;
 #[cfg(not(windows))]

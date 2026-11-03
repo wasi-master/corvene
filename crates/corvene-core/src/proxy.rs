@@ -68,12 +68,18 @@ pub struct ProxyState {
     /// run again after Save too (the open prompt is not rebuilt, which
     /// would lose what was typed).
     pub pending: HashMap<String, Vec<ProxyRetry>>,
+    /// `530-front-door-credentials`: saved usernames per server
+    /// `host:port` (passwords: the keychain), and the servers whose prompt
+    /// was cancelled.
+    pub front_doors: HashMap<String, String>,
+    pub dismissed_front_doors: HashSet<String>,
 }
 
 impl ProxyState {
     pub fn load(store: &Store) -> Self {
         Self {
             logins: store.proxy_logins().unwrap_or_default(),
+            front_doors: store.front_door_logins().unwrap_or_default(),
             ..Self::default()
         }
     }
@@ -112,6 +118,7 @@ impl Dispatcher {
             .detach();
         }
         Self::sync_proxy_credentials(cx);
+        Self::start_front_doors(cx);
     }
 
     /// `528-proxy-credentials` on: git gets the saved usernames, Corvene's
@@ -171,7 +178,7 @@ impl Dispatcher {
             return;
         }
         let open = s.popups.all_popups().iter().any(|p| {
-            matches!(&p.popup, Popup::ProxyAuthentication { proxy: open, .. } if *open == proxy)
+            matches!(&p.popup, Popup::ProxyAuthentication { proxy: open, server: false, .. } if *open == proxy)
         });
         if open {
             if retry != ProxyRetry::None {
@@ -195,6 +202,7 @@ impl Dispatcher {
         Self::show_popup(
             Popup::ProxyAuthentication {
                 proxy,
+                server: false,
                 username,
                 rejected,
                 retry,
@@ -253,7 +261,10 @@ impl Dispatcher {
                 s.proxy.pending.remove(&proxy).unwrap_or_default(),
             )
         });
-        Self::close_popup_if(|p| matches!(p, Popup::ProxyAuthentication { .. }), cx);
+        Self::close_popup_if(
+            |p| matches!(p, Popup::ProxyAuthentication { server: false, .. }),
+            cx,
+        );
         let stored = (proxy.clone(), username.clone(), password.clone());
         spawn_bg(
             cx,
@@ -306,7 +317,10 @@ impl Dispatcher {
             s.proxy.pending.remove(&proxy);
             s.proxy.dismissed.insert(proxy);
         });
-        Self::close_popup_if(|p| matches!(p, Popup::ProxyAuthentication { .. }), cx);
+        Self::close_popup_if(
+            |p| matches!(p, Popup::ProxyAuthentication { server: false, .. }),
+            cx,
+        );
     }
 
     /// Settings › Advanced › Forget: the saved password and username.

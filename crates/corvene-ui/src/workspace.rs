@@ -287,11 +287,14 @@ impl Workspace {
         let browse_files =
             cx.new(|cx| crate::browse_files::BrowseFilesView::new(state.clone(), window, cx));
         let repository_column = cx.new(|_| ResizableState::default());
-        cx.subscribe(&repository_column, |_, state, _: &ResizablePanelEvent, cx| {
-            if let Some(width) = state.read(cx).sizes().first().copied() {
-                Dispatcher::update_settings(cx, |s| s.repository_sidebar_width = unzoom(width));
-            }
-        })
+        cx.subscribe(
+            &repository_column,
+            |_, state, _: &ResizablePanelEvent, cx| {
+                if let Some(width) = state.read(cx).sizes().first().copied() {
+                    Dispatcher::update_settings(cx, |s| s.repository_sidebar_width = unzoom(width));
+                }
+            },
+        )
         .detach();
         let pinned_repositories = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
         let changes = cx.new(|cx| ChangesSidebar::new(state.clone(), window, cx));

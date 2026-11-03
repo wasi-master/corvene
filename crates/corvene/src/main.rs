@@ -142,6 +142,12 @@ pub(crate) fn main() {
         // bundle's Info.plist)
         #[cfg(not(target_os = "macos"))]
         std::thread::spawn(corvene_platform::url_schemes::register);
+        // Corvene (`434-launcher-recent-repositories`): this process keeps
+        // the launcher's actions (tests and harness instances do not)
+        #[cfg(not(target_os = "macos"))]
+        if std::env::var_os("CORVENE_DATA_DIR").is_none() {
+            corvene_platform::desktop_entry::manage_launcher_actions();
+        }
     }
     // Windows: what the installer relies on (packaging/windows/corvene.iss).
     // The running mutex keeps the uninstaller from pulling files from under
@@ -2237,6 +2243,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             Dispatcher::show_popup(
                 Popup::ProxyAuthentication {
                     proxy: "proxy.example.com:3128".into(),
+                    server: false,
                     username: user.then(|| "octocat".into()),
                     rejected: user,
                     retry,

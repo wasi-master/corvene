@@ -300,7 +300,68 @@ impl Dispatcher {
             Self::set_banner(banner, cx);
         }
         Self::sync_repository_list_file(cx);
+        Self::sync_launcher_actions(cx);
         state
+    }
+
+    /// Corvene (`1119-file-mode-probe`): a repository selected for the first
+    /// time this session gets git's file mode test; when that turns
+    /// `core.fileMode` off, the status is read again without the mode-only
+    /// changes.
+    fn check_file_mode(id: u64, cx: &mut dyn Host) {
+        let probe = {
+            let s = Self::state(cx).read(cx);
+            s.flags
+                .bool(crate::flags::ids::FILE_MODE_PROBE)
+                .then(|| s.git.clone().zip(s.repository(id).map(|r| r.path.clone())))
+                .flatten()
+        };
+        let Some((git, workdir)) = probe else {
+            return;
+        };
+        crate::remote::spawn_bg(
+            cx,
+            move || probe_file_mode(git, &workdir),
+            move |changed, cx| {
+                if changed {
+                    Self::refresh_repository(id, cx);
+                }
+            },
+        );
+    }
+
+    /// Corvene (`434-launcher-recent-repositories`, desktop#20943): the
+    /// launcher's actions follow the recent repositories
+    /// (`corvene_platform::desktop_entry::set_recent_repositories`), or go
+    /// away while the flag is off. GHD has neither a Linux build nor a
+    /// Windows jump list.
+    pub(crate) fn sync_launcher_actions(cx: &mut dyn Host) {
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+        {
+            use corvene_platform::desktop_entry::RecentRepository;
+            let list = {
+                let s = Self::state(cx).read(cx);
+                s.flags
+                    .bool(crate::flags::ids::LAUNCHER_RECENT_REPOSITORIES)
+                    .then(|| {
+                        s.recent
+                            .iter()
+                            .filter_map(|id| s.repository(*id))
+                            .map(|repo| RecentRepository {
+                                name: repo.name(),
+                                url: crate::app_url::open_local_repo_url(&repo.path),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            };
+            crate::remote::spawn_bg(
+                cx,
+                move || corvene_platform::desktop_entry::set_recent_repositories(list),
+                |(), _| {},
+            );
+        }
+        #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "android")))))]
+        let _ = cx;
     }
 
     /// Corvene (`425-cli-list-repositories`): the repository list files
@@ -1048,11 +1109,19 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::STALE_CORE_WORKTREE_HINT);
+        // Corvene (`1119-file-mode-probe`): before the first status read
+        let file_mode_probe = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FILE_MODE_PROBE);
         let probe = cx.background_executor().spawn(async move {
             // GHD `_addRepositories`: a subdirectory of a working directory
             // adds the repository (`getRepositoryType`'s
             // `topLevelWorkingDirectory`)
             let path = corvene_git::top_level_working_directory(&path).unwrap_or(path);
+            if file_mode_probe && let Some(git) = git.clone() {
+                probe_file_mode(git, &path);
+            }
             #[cfg(target_os = "android")]
             if let Some(git) = git.clone() {
                 android_prepare_repository(git, &path);
@@ -1182,6 +1251,8 @@ impl Dispatcher {
         });
         if changed {
             Self::stop_unwatched(cx);
+            Self::sync_launcher_actions(cx);
+            Self::check_file_mode(id, cx);
             Self::refresh_repository(id, cx);
             Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
@@ -1266,6 +1337,7 @@ impl Dispatcher {
             Self::start_watching(next, cx);
         }
         Self::restart_pull_request_updater(cx);
+        Self::sync_launcher_actions(cx);
     }
 
     /// GHD `startBackgroundPruner` (`_selectRepositoryRefreshTasks`, which
@@ -4185,6 +4257,7 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+        Self::sync_launcher_actions(cx);
     }
 
     /// Corvene (`267-pinned-repositories`): pin or unpin a repository.
@@ -4486,7 +4559,9 @@ impl Dispatcher {
         };
         Self::show_section(id, Section::Changes, cx);
         Self::state(cx).update(cx, |s, cx| {
-            let github = s.hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
+            let github = s
+                .hosted_repository(id)
+                .is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
             let rs = s.repo_state_mut(id);
             // GHD `prepareToAmendCommit` → `restoreCoAuthorsFromCommit`
             if github {
@@ -4673,7 +4748,10 @@ impl Dispatcher {
                         // the next refresh lists it; the switch needs it now
                         Self::state(cx).update(cx, |s, _| {
                             if let Some(info) = s.repo_state_mut(id).info.as_mut()
-                                && !info.branches.iter().any(|b| b.full_name == created.full_name)
+                                && !info
+                                    .branches
+                                    .iter()
+                                    .any(|b| b.full_name == created.full_name)
                             {
                                 info.branches.push(created);
                             }
@@ -6950,7 +7028,10 @@ impl Dispatcher {
                 && !s.settings.hide_whitespace_in_changes_diff)
                 .then(|| s.flags.bool(crate::flags::ids::RENAMED_DIFF_AGAINST_HEAD))
         };
-        let github = Self::state(cx).read(cx).hosted_repository(id).is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
+        let github = Self::state(cx)
+            .read(cx)
+            .hosted_repository(id)
+            .is_some_and(|h| h.kind == corvene_models::HostKind::GitHub);
         let task = cx.background_executor().spawn(async move {
             let head = corvene_git::get_commits(&workdir, "HEAD", 0, 1)?
                 .into_iter()
@@ -9462,6 +9543,30 @@ mod replace_diff_tests {
             ),
         ));
     }
+}
+
+/// Corvene (`1119-file-mode-probe`): working directories whose drive was
+/// probed this session.
+static FILE_MODE_PROBED: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Corvene (`1119-file-mode-probe`, desktop#9443): git's `core.fileMode`
+/// test (`corvene_git::file_mode`) for the repository at `workdir`, once
+/// per session. `true` when `core.fileMode` was set to false. GHD runs no
+/// such test: only `git init` and `git clone` do, when they create the
+/// repository.
+pub(crate) fn probe_file_mode(git: Arc<corvene_git::GitBinary>, workdir: &Path) -> bool {
+    let first = FILE_MODE_PROBED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(workdir.to_path_buf());
+    if !first {
+        return false;
+    }
+    corvene_git::file_mode::distrust_unkept_file_modes(git, workdir).unwrap_or_else(|err| {
+        warn!(%err, workdir = %workdir.display(), "could not set core.fileMode");
+        false
+    })
 }
 
 /// Android: what a repository outside the app-private filesystem needs

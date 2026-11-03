@@ -218,7 +218,8 @@ fn proxy_env(
     credentials: bool,
 ) -> Vec<(String, String)> {
     let logins = proxy_logins().filter(|logins| credentials && !logins.is_empty());
-    if system_proxy_resolver().is_none() && logins.is_none() {
+    let extra_headers = extra_headers();
+    if system_proxy_resolver().is_none() && logins.is_none() && extra_headers.is_none() {
         return Vec::new();
     }
     let Some(url) = remote_url() else {
@@ -232,7 +233,87 @@ fn proxy_env(
         let count = base.get("GIT_CONFIG_COUNT");
         env.extend(credential_env_at(&proxy, &url, &logins, count));
     }
+    if let Some(extra_headers) = extra_headers {
+        let headers = extra_headers(&url);
+        let count = env
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "GIT_CONFIG_COUNT")
+            .map(|(_, value)| value)
+            .or_else(|| base.get("GIT_CONFIG_COUNT"));
+        env.extend(extra_header_env(&url, &headers, count));
+    }
     env
+}
+
+// ---------------------------------------------------------------------------
+// extra headers (`530-front-door-credentials`)
+// ---------------------------------------------------------------------------
+
+/// The headers git sends to a remote URL's server: Corvene
+/// (`530-front-door-credentials`), the credentials of a proxy in front of
+/// a GitHub Enterprise server (`corvene_platform::front_door::git_headers`).
+pub type ExtraHeaders = fn(&str) -> Vec<String>;
+
+static EXTRA_HEADERS: RwLock<Option<ExtraHeaders>> = RwLock::new(None);
+
+/// Sets (or clears) where the remote operations' extra headers come from.
+pub fn set_extra_headers(provider: Option<ExtraHeaders>) {
+    if let Ok(mut slot) = EXTRA_HEADERS.write() {
+        *slot = provider;
+    }
+}
+
+fn extra_headers() -> Option<ExtraHeaders> {
+    EXTRA_HEADERS.read().ok().and_then(|slot| *slot)
+}
+
+/// `headers` as `http.<remote URL>.extraHeader` values through
+/// `GIT_CONFIG_COUNT` (after the `count` entries already there): only
+/// the remote's server gets them, and they stay out of the command line.
+fn extra_header_env(
+    remote_url: &str,
+    headers: &[String],
+    count: Option<&String>,
+) -> Vec<(String, String)> {
+    let lower = remote_url.to_ascii_lowercase();
+    if headers.is_empty() || !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Vec::new();
+    }
+    let first = count
+        .and_then(|n| n.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let match_url = config_match_url(remote_url);
+    let mut env = Vec::with_capacity(2 * headers.len() + 1);
+    for (i, header) in headers.iter().enumerate() {
+        env.push((
+            format!("GIT_CONFIG_KEY_{}", first + i),
+            format!("http.{match_url}.extraHeader"),
+        ));
+        env.push((format!("GIT_CONFIG_VALUE_{}", first + i), header.clone()));
+    }
+    env.push((
+        "GIT_CONFIG_COUNT".to_string(),
+        (first + headers.len()).to_string(),
+    ));
+    env
+}
+
+/// The URL as git matches `http.<url>.*`: no credentials, query or
+/// fragment.
+fn config_match_url(remote_url: &str) -> String {
+    let (scheme, rest) = remote_url
+        .split_once("://")
+        .unwrap_or(("https", remote_url));
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let rest = match rest.split_once('/') {
+        Some((authority, path)) => format!(
+            "{}/{path}",
+            authority.rsplit_once('@').map_or(authority, |(_, h)| h)
+        ),
+        None => rest.rsplit_once('@').map_or(rest, |(_, h)| h).to_string(),
+    };
+    format!("{scheme}://{rest}")
 }
 
 /// GHD `getFallbackUrlForProxyResolve` for the operations that are not
@@ -495,22 +576,7 @@ fn credential_env_at(
     let Some(user) = logins.get(&proxy.key) else {
         return Vec::new();
     };
-    // the URL as git matches `http.<url>.*`: no credentials, query or
-    // fragment
-    let match_url = {
-        let (scheme, rest) = remote_url
-            .split_once("://")
-            .unwrap_or(("https", remote_url));
-        let rest = rest.split(['?', '#']).next().unwrap_or(rest);
-        let rest = match rest.split_once('/') {
-            Some((authority, path)) => format!(
-                "{}/{path}",
-                authority.rsplit_once('@').map_or(authority, |(_, h)| h)
-            ),
-            None => rest.rsplit_once('@').map_or(rest, |(_, h)| h).to_string(),
-        };
-        format!("{scheme}://{rest}")
-    };
+    let match_url = config_match_url(remote_url);
     let index = count
         .and_then(|n| n.trim().parse::<usize>().ok())
         .unwrap_or(0);
@@ -556,6 +622,38 @@ pub fn is_proxy_auth_failure(stderr: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extra_headers_go_to_the_remote_after_other_config_entries() {
+        let headers = vec![
+            "Proxy-Authorization: Basic dTpw".to_string(),
+            "Cookie: s=1".to_string(),
+        ];
+        let env = extra_header_env(
+            "https://me:token@ghe.corp/org/repo.git?x#y",
+            &headers,
+            Some(&"2".to_string()),
+        );
+        let pairs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(
+            pairs,
+            [
+                (
+                    "GIT_CONFIG_KEY_2",
+                    "http.https://ghe.corp/org/repo.git.extraHeader"
+                ),
+                ("GIT_CONFIG_VALUE_2", "Proxy-Authorization: Basic dTpw"),
+                (
+                    "GIT_CONFIG_KEY_3",
+                    "http.https://ghe.corp/org/repo.git.extraHeader"
+                ),
+                ("GIT_CONFIG_VALUE_3", "Cookie: s=1"),
+                ("GIT_CONFIG_COUNT", "4"),
+            ]
+        );
+        assert!(extra_header_env("git@ghe.corp:org/repo.git", &headers, None).is_empty());
+        assert!(extra_header_env("https://ghe.corp/r.git", &[], None).is_empty());
+    }
 
     #[test]
     fn resolves_the_first_usable_proxy() {

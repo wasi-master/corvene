@@ -3,6 +3,10 @@
 //! 3.6.6 has no such dialog (git's 407 is a plain error), so it is built
 //! like `GenericGitAuthentication` (`ui/generic-git-auth/generic-git-auth.tsx`,
 //! `dialog#generic-git-auth`): the same width, fields and buttons.
+//!
+//! Corvene (`530-front-door-credentials`, desktop#8783): the same dialog
+//! asks for the credentials of a proxy in front of a server (`server`),
+//! which answered 401 with its own challenge. GHD shows the failed request.
 
 use corvene_core::Dispatcher;
 use corvene_core::proxy::ProxyRetry;
@@ -28,6 +32,7 @@ fn keychain_name() -> &'static str {
 
 pub struct ProxyAuthenticationDialog {
     proxy: String,
+    server: bool,
     rejected: bool,
     retry: ProxyRetry,
     username: Entity<InputState>,
@@ -37,6 +42,7 @@ pub struct ProxyAuthenticationDialog {
 impl ProxyAuthenticationDialog {
     pub fn new(
         proxy: String,
+        server: bool,
         username: Option<String>,
         rejected: bool,
         retry: ProxyRetry,
@@ -60,6 +66,7 @@ impl ProxyAuthenticationDialog {
         window.focus(&handle, cx);
         Self {
             proxy,
+            server,
             rejected,
             retry,
             username: username_state,
@@ -76,22 +83,40 @@ impl Render for ProxyAuthenticationDialog {
         let proxy = self.proxy.clone();
         let retry = self.retry.clone();
         let cancel_proxy = self.proxy.clone();
+        let server = self.server;
         let close = move |_: &mut Window, cx: &mut App| {
-            Dispatcher::dismiss_proxy_credentials(cancel_proxy.clone(), cx)
+            if server {
+                Dispatcher::dismiss_front_door_credentials(cancel_proxy.clone(), cx)
+            } else {
+                Dispatcher::dismiss_proxy_credentials(cancel_proxy.clone(), cx)
+            }
         };
         let ok_label = match self.retry {
             ProxyRetry::None => "Save",
             _ => "Save and Retry",
         };
+        let what = if self.server {
+            "The server "
+        } else {
+            "The proxy server "
+        };
         let intro: Vec<Inline> = if self.rejected {
             vec![
-                "The proxy server ".into(),
+                what.into(),
                 code_ref(self.proxy.clone(), cx).into_any_element().into(),
                 " did not accept the username and password. Please enter them again.".into(),
             ]
+        } else if self.server {
+            vec![
+                what.into(),
+                code_ref(self.proxy.clone(), cx).into_any_element().into(),
+                " asks for a username and password of its own before it lets requests through \
+                 to GitHub."
+                    .into(),
+            ]
         } else {
             vec![
-                "The proxy server ".into(),
+                what.into(),
                 code_ref(self.proxy.clone(), cx).into_any_element().into(),
                 " requires a username and password.".into(),
             ]
@@ -143,13 +168,22 @@ impl Render for ProxyAuthenticationDialog {
                         if disabled {
                             return;
                         }
-                        Dispatcher::save_proxy_credentials(
-                            proxy.clone(),
-                            username.clone(),
-                            password.clone(),
-                            retry.clone(),
-                            cx,
-                        );
+                        if server {
+                            Dispatcher::save_front_door_credentials(
+                                proxy.clone(),
+                                username.clone(),
+                                password.clone(),
+                                cx,
+                            );
+                        } else {
+                            Dispatcher::save_proxy_credentials(
+                                proxy.clone(),
+                                username.clone(),
+                                password.clone(),
+                                retry.clone(),
+                                cx,
+                            );
+                        }
                     }),
                 },
             }

@@ -216,12 +216,20 @@ impl Dispatcher {
         if now.bool(ids::CLI_LIST_REPOSITORIES) != previous.bool(ids::CLI_LIST_REPOSITORIES) {
             Self::sync_repository_list_file(cx);
         }
+        if now.bool(ids::LAUNCHER_RECENT_REPOSITORIES)
+            != previous.bool(ids::LAUNCHER_RECENT_REPOSITORIES)
+        {
+            Self::sync_launcher_actions(cx);
+        }
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
         corvene_git::set_status_timeout(
             u32::try_from(now.number(ids::GIT_STATUS_TIMEOUT)).unwrap_or(0),
         );
         if now.bool(ids::PROXY_CREDENTIALS) != previous.bool(ids::PROXY_CREDENTIALS) {
             Self::sync_proxy_credentials(cx);
+        }
+        if now.bool(ids::FRONT_DOOR_CREDENTIALS) != previous.bool(ids::FRONT_DOOR_CREDENTIALS) {
+            Self::sync_front_door_credentials(cx);
         }
         if now.bool(ids::GH_CLI_ACCOUNT) != previous.bool(ids::GH_CLI_ACCOUNT) {
             Self::sync_gh_cli_account(cx);

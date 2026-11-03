@@ -75,11 +75,17 @@ windows = { version = "0.62", features = [
 libc = "0.2"
 # org.freedesktop.Notifications (the crate GPUI's Linux backend uses)
 notify-rust = "4"
-# the XDG desktop portal's appearance settings (high contrast)
+# the XDG desktop portal's appearance settings (high contrast), the
+# secret service's errors (`secret_service`)
 zbus = "5"
 # Hunspell dictionaries for the commit form's spellcheck (what Chromium
 # checks with on Linux)
 spellbook = "0.4"
+
+# the secret service `keyring` uses on Linux and the BSDs: its errors, and
+# the default collection's state for the messages of `secret_service`
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))'.dependencies]
+secret-service = "5"
 
 # Android Keystore: `keyring`'s own API has no store there, its Android
 # store plugs into keyring-core

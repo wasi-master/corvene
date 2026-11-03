@@ -327,8 +327,14 @@ mod tests {
             ),
             Some(SshPrompt::Host(_))
         ));
-        assert_eq!(classify_ssh_prompt("Username for 'https://github.com': "), None);
-        assert_eq!(classify_ssh_prompt("Password for 'https://u@x.com': "), None);
+        assert_eq!(
+            classify_ssh_prompt("Username for 'https://github.com': "),
+            None
+        );
+        assert_eq!(
+            classify_ssh_prompt("Password for 'https://u@x.com': "),
+            None
+        );
     }
 
     #[test]

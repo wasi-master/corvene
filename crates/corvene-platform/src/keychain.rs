@@ -1,6 +1,14 @@
 //! Access tokens live in the OS keychain (macOS Keychain via `keyring`,
 //! the secret service on Linux, the Android Keystore), one item per
 //! (host, login), like GitHub Desktop's token store.
+//!
+//! Linux (desktop#22762): every call runs through
+//! [`crate::secret_service`], which gives up on a call that waits for a
+//! password prompt nobody answers and turns a locked collection, a failed
+//! or dismissed unlock prompt, a missing default collection or a missing
+//! service into a sentence ([`KeychainError::SecretService`]). GHD shows
+//! libsecret's "User interaction failed" there. Nothing falls back to a
+//! file: when the keyring cannot be used, the operation fails.
 
 use tracing::debug;
 
@@ -41,20 +49,87 @@ fn ensure_store() -> keyring::Result<()> {
 pub enum KeychainError {
     #[error("keychain error: {0}")]
     Keyring(#[from] keyring::Error),
+    /// Linux: the secret service could not be used, in words
+    /// ([`crate::secret_service::explain`]): a locked collection whose
+    /// unlock prompt failed or was dismissed, no default collection, no
+    /// service, or a call that never came back.
+    #[error("{0}")]
+    SecretService(String),
 }
 
 pub type Result<T> = std::result::Result<T, KeychainError>;
 
-fn entry(host: &str, login: &str) -> Result<Entry> {
-    ensure_store()?;
-    // Account column shows as "login@host" in Keychain Access.
-    Ok(Entry::new(SERVICE, &format!("{login}@{host}"))?)
+/// One `keyring` call on the entry for `account` (`login@host`, …).
+/// Linux: on a thread of its own, given up after
+/// [`crate::secret_service::timeout`] (a password prompt nobody sees would
+/// block it for good), and a failure to reach the keyring explained
+/// (desktop#22762).
+fn call<T: Send + 'static>(
+    account: String,
+    op: impl FnOnce(&Entry) -> keyring::Result<T> + Send + 'static,
+) -> Result<T> {
+    let run = move || -> keyring::Result<T> {
+        ensure_store()?;
+        op(&Entry::new(SERVICE, &account)?)
+    };
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+    {
+        use crate::secret_service::{self as ss, Bounded};
+        match ss::bounded(ss::timeout(), run) {
+            Bounded::Done(Ok(value)) => Ok(value),
+            Bounded::Done(Err(err)) => {
+                let collection = match &err {
+                    keyring::Error::NoEntry => ss::Collection::Unknown,
+                    _ => ss::default_collection(),
+                };
+                match ss::explain(&err, &collection) {
+                    Some(text) => {
+                        tracing::warn!(%err, ?collection, "keyring failed");
+                        Err(KeychainError::SecretService(text))
+                    }
+                    None => Err(err.into()),
+                }
+            }
+            Bounded::TimedOut(limit) => {
+                tracing::warn!(?limit, "keyring call timed out");
+                Err(KeychainError::SecretService(ss::timed_out(limit)))
+            }
+        }
+    }
+    #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "android")))))]
+    {
+        Ok(run()?)
+    }
+}
+
+fn get(account: String) -> Result<Option<String>> {
+    match call(account, |entry| entry.get_password()) {
+        Ok(secret) => Ok(Some(secret)),
+        Err(KeychainError::Keyring(keyring::Error::NoEntry)) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+fn set(account: String, secret: &str) -> Result<()> {
+    let secret = secret.to_string();
+    call(account, move |entry| entry.set_password(&secret))
+}
+
+fn delete(account: String) -> Result<()> {
+    match call(account, |entry| entry.delete_credential()) {
+        Ok(()) | Err(KeychainError::Keyring(keyring::Error::NoEntry)) => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+/// Account column shows as "login@host" in Keychain Access.
+fn token_account(host: &str, login: &str) -> String {
+    format!("{login}@{host}")
 }
 
 pub fn store_token(host: &str, login: &str, token: &str) -> Result<()> {
     debug!(host, login, "storing token in keychain");
-    entry(host, login)?.set_password(token)?;
-    Ok(())
+    set(token_account(host, login), token)
 }
 
 /// Tokens handed in by [`inject_token`], consulted before the keychain.
@@ -69,7 +144,7 @@ pub fn inject_token(host: &str, login: &str, token: &str) {
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    map.insert(format!("{login}@{host}"), token.to_string());
+    map.insert(token_account(host, login), token.to_string());
 }
 
 pub fn token(host: &str, login: &str) -> Result<Option<String>> {
@@ -77,106 +152,91 @@ pub fn token(host: &str, login: &str) -> Result<Option<String>> {
         && let Some(token) = map
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&format!("{login}@{host}"))
+            .get(&token_account(host, login))
     {
         return Ok(Some(token.clone()));
     }
-    match entry(host, login)?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    get(token_account(host, login))
 }
 
 /// Generic git server credentials (GHD `setGenericPassword`): one item per
 /// (host, username), separate from the GitHub token entries.
-fn generic_entry(host: &str, username: &str) -> Result<Entry> {
-    ensure_store()?;
-    Ok(Entry::new(SERVICE, &format!("git:{username}@{host}"))?)
+fn generic_account(host: &str, username: &str) -> String {
+    format!("git:{username}@{host}")
 }
 
 pub fn store_generic_password(host: &str, username: &str, password: &str) -> Result<()> {
     debug!(host, username, "storing generic git password in keychain");
-    generic_entry(host, username)?.set_password(password)?;
-    Ok(())
+    set(generic_account(host, username), password)
 }
 
 pub fn generic_password(host: &str, username: &str) -> Result<Option<String>> {
-    match generic_entry(host, username)?.get_password() {
-        Ok(password) => Ok(Some(password)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    get(generic_account(host, username))
 }
 
 pub fn delete_generic_password(host: &str, username: &str) -> Result<()> {
-    match generic_entry(host, username)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    delete(generic_account(host, username))
 }
 
 /// Corvene (`528-proxy-credentials`): a proxy's password, one item per
 /// (proxy `host:port`, username).
-fn proxy_entry(proxy: &str, username: &str) -> Result<Entry> {
-    ensure_store()?;
-    Ok(Entry::new(SERVICE, &format!("proxy:{username}@{proxy}"))?)
+fn proxy_account(proxy: &str, username: &str) -> String {
+    format!("proxy:{username}@{proxy}")
 }
 
 pub fn store_proxy_password(proxy: &str, username: &str, password: &str) -> Result<()> {
     debug!(proxy, username, "storing proxy password in keychain");
-    proxy_entry(proxy, username)?.set_password(password)?;
-    Ok(())
+    set(proxy_account(proxy, username), password)
 }
 
 pub fn proxy_password(proxy: &str, username: &str) -> Result<Option<String>> {
-    match proxy_entry(proxy, username)?.get_password() {
-        Ok(password) => Ok(Some(password)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    get(proxy_account(proxy, username))
 }
 
 pub fn delete_proxy_password(proxy: &str, username: &str) -> Result<()> {
-    match proxy_entry(proxy, username)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    delete(proxy_account(proxy, username))
+}
+
+/// Corvene (`530-front-door-credentials`): the password of a proxy in front
+/// of a server, one item per (server `host:port`, username).
+fn front_door_account(server: &str, username: &str) -> String {
+    format!("server:{username}@{server}")
+}
+
+pub fn store_front_door_password(server: &str, username: &str, password: &str) -> Result<()> {
+    debug!(server, username, "storing front door password in keychain");
+    set(front_door_account(server, username), password)
+}
+
+pub fn front_door_password(server: &str, username: &str) -> Result<Option<String>> {
+    get(front_door_account(server, username))
+}
+
+pub fn delete_front_door_password(server: &str, username: &str) -> Result<()> {
+    delete(front_door_account(server, username))
 }
 
 pub fn delete_token(host: &str, login: &str) -> Result<()> {
-    match entry(host, login)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    delete(token_account(host, login))
 }
 
 /// A GitHub Enterprise OAuth app's client secret (the browser flow's token
 /// exchange), one item per (host, client ID).
-fn oauth_secret_entry(host: &str, client_id: &str) -> Result<Entry> {
-    ensure_store()?;
-    Ok(Entry::new(SERVICE, &format!("oauth:{client_id}@{host}"))?)
+fn oauth_secret_account(host: &str, client_id: &str) -> String {
+    format!("oauth:{client_id}@{host}")
 }
 
 pub fn store_oauth_client_secret(host: &str, client_id: &str, secret: &str) -> Result<()> {
     debug!(host, client_id, "storing OAuth client secret in keychain");
-    oauth_secret_entry(host, client_id)?.set_password(secret)?;
-    Ok(())
+    set(oauth_secret_account(host, client_id), secret)
 }
 
 pub fn oauth_client_secret(host: &str, client_id: &str) -> Result<Option<String>> {
-    match oauth_secret_entry(host, client_id)?.get_password() {
-        Ok(secret) => Ok(Some(secret)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    get(oauth_secret_account(host, client_id))
 }
 
 pub fn delete_oauth_client_secret(host: &str, client_id: &str) -> Result<()> {
-    match oauth_secret_entry(host, client_id)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    delete(oauth_secret_account(host, client_id))
 }
 
 #[cfg(test)]
@@ -201,5 +261,25 @@ mod tests {
             super::delete_token(&host, "octocat").unwrap();
             assert_eq!(super::token(&host, "octocat").unwrap(), None);
         }
+    }
+
+    /// A keyring that cannot be used fails with a sentence that says why
+    /// (`packaging/linux/keyring-test-oo7.sh` sets
+    /// `CORVENE_KEYRING_EXPECT_ERROR` to a part of it).
+    #[test]
+    fn a_keyring_that_cannot_be_used_is_explained() {
+        let Some(expected) = std::env::var_os("CORVENE_KEYRING_EXPECT_ERROR") else {
+            return;
+        };
+        let expected = expected.to_string_lossy().into_owned();
+        let host = format!("corvene-test-{}.invalid", std::process::id());
+        let err = super::store_token(&host, "octocat", "gho_secret").unwrap_err();
+        let text = err.to_string();
+        eprintln!("keyring error: {text}");
+        assert!(
+            text.contains(&expected),
+            "{text:?} does not say {expected:?}"
+        );
+        assert!(text.contains("never in a plain text file"), "{text}");
     }
 }

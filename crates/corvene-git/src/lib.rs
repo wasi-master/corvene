@@ -19,6 +19,7 @@ pub mod diff;
 pub mod document_file;
 pub mod error;
 pub mod file_browser;
+pub mod file_mode;
 pub mod font_file;
 pub mod git_errors;
 pub mod handle;
@@ -183,8 +184,8 @@ pub use process::{
 };
 pub use proxy::{
     GitProxy, GitProxySource, effective_proxy, env_for_proxy, env_for_remote_operation,
-    is_proxy_auth_failure, parse_pac_string, resolve_git_proxy, set_proxy_logins,
-    set_system_proxy_resolver,
+    is_proxy_auth_failure, parse_pac_string, resolve_git_proxy, set_extra_headers,
+    set_proxy_logins, set_system_proxy_resolver,
 };
 pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot, UpdateRefs,
