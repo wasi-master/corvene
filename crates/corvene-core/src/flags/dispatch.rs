@@ -216,6 +216,11 @@ impl Dispatcher {
         if now.bool(ids::CLI_LIST_REPOSITORIES) != previous.bool(ids::CLI_LIST_REPOSITORIES) {
             Self::sync_repository_list_file(cx);
         }
+        if now.bool(ids::LAUNCHER_RECENT_REPOSITORIES)
+            != previous.bool(ids::LAUNCHER_RECENT_REPOSITORIES)
+        {
+            Self::sync_launcher_actions(cx);
+        }
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
         corvene_git::set_status_timeout(
             u32::try_from(now.number(ids::GIT_STATUS_TIMEOUT)).unwrap_or(0),

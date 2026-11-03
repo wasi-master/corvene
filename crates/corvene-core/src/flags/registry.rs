@@ -89,6 +89,16 @@ fn android_built_in() -> Availability {
     }
 }
 
+/// The freedesktop.org launcher's desktop entry actions (the Windows jump
+/// list and the macOS Dock menu are not built).
+fn linux_launcher() -> Availability {
+    if cfg!(any(target_os = "macos", windows, target_os = "android")) {
+        Availability::BuiltIn("Only the Linux version has this so far.")
+    } else {
+        Availability::Available
+    }
+}
+
 /// Unix file modes: Git for Windows never trusts them.
 fn unix_file_modes() -> Availability {
     if cfg!(windows) {
@@ -3653,6 +3663,24 @@ registry! {
         restart: true, visible: true, availability: macos_only,
         upstream: &[Upstream::issue(18139)],
         code: &["crates/corvene-core/src/widgets.rs", "packaging/widgets/CorveneWidgets.swift", "packaging/widgets/WidgetViews.swift"],
+    },
+
+    /// Recent repositories in the Linux launcher's context menu.
+    LAUNCHER_RECENT_REPOSITORIES = 434 "launcher-recent-repositories" {
+        title: "Recent repositories in the launcher",
+        summary: "Right-clicking Corvene in the GNOME, KDE Plasma, Cinnamon or Budgie launcher \
+                  lists the recently opened repositories; picking one opens it in Corvene. \
+                  For this Corvene keeps a copy of its desktop entry with those repositories in \
+                  ~/.local/share/applications, and removes it when the list is empty or this is \
+                  off. Not in Flatpak or Snap builds.",
+        ghd_behaviour: "GitHub Desktop has no Linux build; on Windows its taskbar entry has no \
+                        jump list of repositories.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: linux_launcher,
+        upstream: &[Upstream::issue(20943)],
+        code: &["crates/corvene-platform/src/desktop_entry.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
     // ---- 500 Settings & updates ----

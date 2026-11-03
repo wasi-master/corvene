@@ -300,6 +300,7 @@ impl Dispatcher {
             Self::set_banner(banner, cx);
         }
         Self::sync_repository_list_file(cx);
+        Self::sync_launcher_actions(cx);
         state
     }
 
@@ -327,6 +328,40 @@ impl Dispatcher {
                 }
             },
         );
+    }
+
+    /// Corvene (`434-launcher-recent-repositories`, desktop#20943): the
+    /// launcher's actions follow the recent repositories
+    /// (`corvene_platform::desktop_entry::set_recent_repositories`), or go
+    /// away while the flag is off. GHD has neither a Linux build nor a
+    /// Windows jump list.
+    pub(crate) fn sync_launcher_actions(cx: &mut dyn Host) {
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+        {
+            use corvene_platform::desktop_entry::RecentRepository;
+            let list = {
+                let s = Self::state(cx).read(cx);
+                s.flags
+                    .bool(crate::flags::ids::LAUNCHER_RECENT_REPOSITORIES)
+                    .then(|| {
+                        s.recent
+                            .iter()
+                            .filter_map(|id| s.repository(*id))
+                            .map(|repo| RecentRepository {
+                                name: repo.name(),
+                                url: crate::app_url::open_local_repo_url(&repo.path),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            };
+            crate::remote::spawn_bg(
+                cx,
+                move || corvene_platform::desktop_entry::set_recent_repositories(list),
+                |(), _| {},
+            );
+        }
+        #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "android")))))]
+        let _ = cx;
     }
 
     /// Corvene (`425-cli-list-repositories`): the repository list files
@@ -1216,6 +1251,7 @@ impl Dispatcher {
         });
         if changed {
             Self::stop_unwatched(cx);
+            Self::sync_launcher_actions(cx);
             Self::check_file_mode(id, cx);
             Self::refresh_repository(id, cx);
             Self::start_background_pruner(id, cx);
@@ -1301,6 +1337,7 @@ impl Dispatcher {
             Self::start_watching(next, cx);
         }
         Self::restart_pull_request_updater(cx);
+        Self::sync_launcher_actions(cx);
     }
 
     /// GHD `startBackgroundPruner` (`_selectRepositoryRefreshTasks`, which
@@ -4220,6 +4257,7 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+        Self::sync_launcher_actions(cx);
     }
 
     /// Corvene (`267-pinned-repositories`): pin or unpin a repository.
