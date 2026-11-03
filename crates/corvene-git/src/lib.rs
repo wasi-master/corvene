@@ -101,8 +101,8 @@ pub use clean::{clean_dry_run, clean_paths, parse_clean_dry_run, unquote_c_path}
 pub use commit::{
     CommitAuthor, CommitOptions, DiscardLeftovers, RECEIVE_LIMIT, add_paths,
     assume_unchanged_paths, commit, commit_with_terminal_output, delete_worktree_paths,
-    discard_changes, discard_leftovers, format_message, head_sha, hook_exists, large_file_paths,
-    merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
+    discard_changes, discard_leftovers, file_sizes, format_message, head_sha, hook_exists,
+    large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
     set_assume_unchanged, stage_files, stage_files_with_progress, staged_mode_changes,
     undo_last_commit, unstage_all,
 };

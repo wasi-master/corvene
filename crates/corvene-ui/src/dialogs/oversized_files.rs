@@ -8,6 +8,9 @@
 //! commit form. With `1308-ignore-oversized-files`, "Add to .gitignore"
 //! ignores the files, and "Ignore and Untrack" (some of them tracked) also
 //! removes those from the index; both go back to the commit form.
+//!
+//! Deviation (`1367-oversized-file-sizes`, desktop/desktop#23096): each
+//! file's size follows its name in the secondary colour.
 
 use corvene_core::Dispatcher;
 use corvene_core::commit_checks::CommitChecks;
@@ -33,10 +36,12 @@ pub struct OversizedFilesDialog {
     description: String,
     lfs_patterns: Vec<String>,
     ignore_tracked: Option<Vec<String>>,
+    sizes: Vec<u64>,
     checks: CommitChecks,
 }
 
 impl OversizedFilesDialog {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: u64,
         files: Vec<String>,
@@ -44,6 +49,7 @@ impl OversizedFilesDialog {
         description: String,
         lfs_patterns: Vec<String>,
         ignore_tracked: Option<Vec<String>>,
+        sizes: Vec<u64>,
         checks: CommitChecks,
     ) -> Self {
         Self {
@@ -53,6 +59,7 @@ impl OversizedFilesDialog {
             description,
             lfs_patterns,
             ignore_tracked,
+            sizes,
             checks,
         }
     }
@@ -92,7 +99,7 @@ impl Render for OversizedFilesDialog {
                     .flex()
                     .flex_col()
                     .font_family(mono_font())
-                    .children(self.files.iter().map(|p| {
+                    .children(self.files.iter().enumerate().map(|(ix, p)| {
                         // `PathText`: the directory in the secondary colour
                         let (dir, name) = match p.rfind('/') {
                             Some(i) => (&p[..=i], &p[i + 1..]),
@@ -107,6 +114,15 @@ impl Render for OversizedFilesDialog {
                                 d.child(div().text_color(t.text_secondary).child(dir.to_string()))
                             })
                             .child(name.to_string())
+                            // `1367-oversized-file-sizes`
+                            .when_some(self.sizes.get(ix), |d, &size| {
+                                d.child(div().ml(SPACING()).text_color(t.text_secondary).child(
+                                    crate::format::format_bytes(
+                                        i64::try_from(size).unwrap_or(i64::MAX),
+                                        1,
+                                    ),
+                                ))
+                            })
                     }))
                     .with_scrollbar(),
             )

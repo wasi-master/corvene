@@ -61,6 +61,15 @@ pub fn parse_commit_author(text: &str) -> std::result::Result<(String, String), 
     Ok((name.to_string(), email.to_string()))
 }
 
+/// Corvene `1367-oversized-file-sizes`: the size on disk of each of
+/// `paths` (0 for one that cannot be read).
+pub fn file_sizes<S: AsRef<str>>(workdir: &Path, paths: &[S]) -> Vec<u64> {
+    paths
+        .iter()
+        .map(|path| std::fs::metadata(workdir.join(path.as_ref())).map_or(0, |m| m.len()))
+        .collect()
+}
+
 /// GHD `ReceiveLimit` (`lib/large-files.ts`): GitHub.com refuses pushes of
 /// files over 100 MiB.
 pub const RECEIVE_LIMIT: u64 = 100 * 1024 * 1024;

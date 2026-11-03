@@ -407,6 +407,9 @@ pub enum Popup {
         /// `files` the index tracks) offers "Add to .gitignore", and "Ignore
         /// and Untrack" when it is not empty.
         ignore_tracked: Option<Vec<String>>,
+        /// Corvene `1367-oversized-file-sizes`: each file's size in bytes,
+        /// in `files` order; empty when the flag is off.
+        sizes: Vec<u64>,
         /// The commit's checks so far (Commit Anyway goes on with them).
         checks: crate::commit_checks::CommitChecks,
     },

@@ -9,6 +9,10 @@
 //! the commit form and those dialogs call, off the main thread.
 //!
 //! Deviation: with `784-suggest-lfs-tracking` (and Git LFS installed) the
+//! Deviation: with `1367-oversized-file-sizes` the dialog shows each
+//! file's size (desktop/desktop#23096).
+//!
+//! Deviation: with `784-suggest-lfs-tracking` (and Git LFS installed) the
 //! dialog can track the files' extensions in Git LFS instead
 //! ([`lfs_track_patterns`], [`Dispatcher::track_in_lfs`]).
 //!
@@ -45,6 +49,8 @@ struct Found {
     lfs_patterns: Vec<String>,
     /// `1308-ignore-oversized-files`: the oversized files the index tracks.
     ignore_tracked: Option<Vec<String>>,
+    /// `1367-oversized-file-sizes`: the oversized files' sizes.
+    sizes: Vec<u64>,
     embedded: Vec<corvene_git::EmbeddedRepository>,
 }
 
@@ -108,11 +114,12 @@ impl Dispatcher {
             checks.embedded = Some(Vec::new());
             return Self::create_commit(id, summary, description, checks, cx);
         }
-        let (suggest_lfs, suggest_ignore, hide_note) = {
+        let (suggest_lfs, suggest_ignore, show_sizes, hide_note) = {
             let s = Self::state(cx).read(cx);
             (
                 s.flags.bool(crate::flags::ids::SUGGEST_LFS_TRACKING),
                 s.flags.bool(crate::flags::ids::IGNORE_OVERSIZED_FILES),
+                s.flags.bool(crate::flags::ids::OVERSIZED_FILE_SIZES),
                 s.settings.hide_embedded_repository_note,
             )
         };
@@ -125,6 +132,7 @@ impl Dispatcher {
                     oversized: Vec::new(),
                     lfs_patterns: Vec::new(),
                     ignore_tracked: None,
+                    sizes: Vec::new(),
                     embedded: Vec::new(),
                 };
                 if check_size {
@@ -141,6 +149,10 @@ impl Dispatcher {
                         found.oversized =
                             corvene_git::files_not_tracked_by_lfs(git.clone(), &workdir, &large)
                                 .unwrap_or(large);
+                    }
+                    // `1367-oversized-file-sizes`
+                    if show_sizes {
+                        found.sizes = corvene_git::file_sizes(&workdir, &found.oversized);
                     }
                     // `784-suggest-lfs-tracking`
                     if suggest_lfs
@@ -173,6 +185,7 @@ impl Dispatcher {
                             description,
                             lfs_patterns: found.lfs_patterns,
                             ignore_tracked: found.ignore_tracked,
+                            sizes: found.sizes,
                             checks,
                         },
                         cx,

@@ -396,6 +396,7 @@ impl DialogHost {
                 description,
                 lfs_patterns,
                 ignore_tracked,
+                sizes,
                 checks,
             } => cx
                 .new(|_| {
@@ -406,6 +407,7 @@ impl DialogHost {
                         description.clone(),
                         lfs_patterns.clone(),
                         ignore_tracked.clone(),
+                        sizes.clone(),
                         checks.clone(),
                     )
                 })

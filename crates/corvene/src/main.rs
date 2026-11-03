@@ -2031,10 +2031,14 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // GHD `OversizedFiles` with two sample files (one of them tracked
         // for `1308-ignore-oversized-files`)
         ("oversized-files", Some(id)) => {
-            let ignore = corvene_core::AppState::global(cx)
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::IGNORE_OVERSIZED_FILES);
+            let flags = corvene_core::AppState::global(cx).read(cx).flags.clone();
+            let ignore = flags.bool(corvene_core::flags::ids::IGNORE_OVERSIZED_FILES);
+            // `1367-oversized-file-sizes`
+            let sizes = if flags.bool(corvene_core::flags::ids::OVERSIZED_FILE_SIZES) {
+                vec![152_043_520, 1_288_490_189]
+            } else {
+                Vec::new()
+            };
             Dispatcher::show_popup(
                 Popup::OversizedFiles {
                     repo: id,
@@ -2043,6 +2047,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                     description: String::new(),
                     lfs_patterns: Vec::new(),
                     ignore_tracked: ignore.then(|| vec!["data/dump.bin".into()]),
+                    sizes,
                     checks: Default::default(),
                 },
                 cx,

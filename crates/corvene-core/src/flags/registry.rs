@@ -8131,7 +8131,6 @@ registry! {
         code: &["crates/corvene-git/src/file_mode.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
-
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.
@@ -9675,6 +9674,20 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(14243)],
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-git/src/file_browser.rs"],
+    },
+
+    /// The oversized files dialog shows each file's size.
+    OVERSIZED_FILE_SIZES = 1367 "oversized-file-sizes" {
+        title: "Sizes in the oversized files warning",
+        summary: "The warning about files over 100 MB shows each file's size next to its \
+                  name, so you can see how far over the limit it is.",
+        ghd_behaviour: "The warning lists only the file names.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(23096)],
+        code: &["crates/corvene-core/src/commit_checks.rs", "crates/corvene-ui/src/dialogs/oversized_files.rs"],
     },
 
 }
