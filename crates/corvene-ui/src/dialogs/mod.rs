@@ -784,6 +784,7 @@ impl DialogHost {
                 .into(),
             Popup::ProxyAuthentication {
                 proxy,
+                server,
                 username,
                 rejected,
                 retry,
@@ -791,6 +792,7 @@ impl DialogHost {
                 .new(|cx| {
                     ProxyAuthenticationDialog::new(
                         proxy.clone(),
+                        *server,
                         username.clone(),
                         *rejected,
                         retry.clone(),

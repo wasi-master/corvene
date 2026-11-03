@@ -53,6 +53,7 @@ pub mod flags;
 pub mod fold;
 pub mod fork_checkout;
 pub mod forks;
+pub mod front_door;
 pub mod gh_cli_account;
 pub mod ghd_import;
 pub mod git_config_import;

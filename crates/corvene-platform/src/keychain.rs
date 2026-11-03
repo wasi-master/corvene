@@ -197,6 +197,25 @@ pub fn delete_proxy_password(proxy: &str, username: &str) -> Result<()> {
     delete(proxy_account(proxy, username))
 }
 
+/// Corvene (`530-front-door-credentials`): the password of a proxy in front
+/// of a server, one item per (server `host:port`, username).
+fn front_door_account(server: &str, username: &str) -> String {
+    format!("server:{username}@{server}")
+}
+
+pub fn store_front_door_password(server: &str, username: &str, password: &str) -> Result<()> {
+    debug!(server, username, "storing front door password in keychain");
+    set(front_door_account(server, username), password)
+}
+
+pub fn front_door_password(server: &str, username: &str) -> Result<Option<String>> {
+    get(front_door_account(server, username))
+}
+
+pub fn delete_front_door_password(server: &str, username: &str) -> Result<()> {
+    delete(front_door_account(server, username))
+}
+
 pub fn delete_token(host: &str, login: &str) -> Result<()> {
     delete(token_account(host, login))
 }

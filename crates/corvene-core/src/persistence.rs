@@ -1084,6 +1084,14 @@ pub trait StoreExt {
     /// `528-proxy-credentials`: the username saved per proxy `host:port`.
     fn proxy_logins(&self) -> Result<std::collections::HashMap<String, String>>;
     fn save_proxy_logins(&self, logins: &std::collections::HashMap<String, String>) -> Result<()>;
+    /// Corvene (`530-front-door-credentials`): the username per server
+    /// `host:port` whose front door wants credentials (passwords: the
+    /// keychain).
+    fn front_door_logins(&self) -> Result<std::collections::HashMap<String, String>>;
+    fn save_front_door_logins(
+        &self,
+        logins: &std::collections::HashMap<String, String>,
+    ) -> Result<()>;
     fn save_generic_logins(&self, logins: &std::collections::HashMap<String, String>)
     -> Result<()>;
     /// OAuth app client IDs entered per GitHub Enterprise host (host →
@@ -1355,6 +1363,17 @@ impl StoreExt for Store {
 
     fn save_proxy_logins(&self, logins: &std::collections::HashMap<String, String>) -> Result<()> {
         self.set("proxy_logins", logins)
+    }
+
+    fn front_door_logins(&self) -> Result<std::collections::HashMap<String, String>> {
+        Ok(self.get("front_door_logins")?.unwrap_or_default())
+    }
+
+    fn save_front_door_logins(
+        &self,
+        logins: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
+        self.set("front_door_logins", logins)
     }
 
     fn save_generic_logins(

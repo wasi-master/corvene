@@ -4123,6 +4123,25 @@ registry! {
         code: &["crates/corvene-core/src/gh_cli_account.rs", "crates/corvene-platform/src/gh_cli.rs", "crates/corvene-core/src/askpass.rs", "crates/corvene-core/src/persistence.rs"],
     },
 
+    /// Credentials for a proxy in front of a GitHub Enterprise server.
+    FRONT_DOOR_CREDENTIALS = 530 "front-door-credentials" {
+        title: "Sign in to proxies in front of GitHub Enterprise",
+        summary: "When a GitHub Enterprise server sits behind a proxy that asks for a username \
+                  and password of its own (it answers 401 without being GitHub), Corvene asks \
+                  for them and keeps them in the keychain. Corvene's requests and Git then send \
+                  them as Proxy-Authorization, with the session cookies the proxy hands out for \
+                  them, next to the token instead of in its place.",
+        ghd_behaviour: "Sends only the token: the proxy refuses sign-in and every request, and \
+                        Git's password prompt cannot hold both the proxy's password and the \
+                        token.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8783)],
+        code: &["crates/corvene-core/src/front_door.rs", "crates/corvene-platform/src/front_door.rs", "crates/corvene-platform/src/proxy.rs", "crates/corvene-git/src/proxy.rs", "crates/corvene-ui/src/dialogs/proxy_authentication.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

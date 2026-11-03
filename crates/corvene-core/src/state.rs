@@ -756,10 +756,13 @@ pub enum Popup {
         retry: RetryAction,
     },
     /// Corvene (`528-proxy-credentials`): a proxy answered 407 Proxy
-    /// Authentication Required.
+    /// Authentication Required; or (`530-front-door-credentials`, `server`)
+    /// a proxy in front of a server answered 401 with its own challenge.
     ProxyAuthentication {
         /// `host:port`.
         proxy: String,
+        /// The proxy is the front door of the server `proxy`.
+        server: bool,
         /// The username saved for it, if any.
         username: Option<String>,
         /// The saved credentials were refused.

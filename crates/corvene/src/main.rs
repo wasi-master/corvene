@@ -2243,6 +2243,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             Dispatcher::show_popup(
                 Popup::ProxyAuthentication {
                     proxy: "proxy.example.com:3128".into(),
+                    server: false,
                     username: user.then(|| "octocat".into()),
                     rejected: user,
                     retry,

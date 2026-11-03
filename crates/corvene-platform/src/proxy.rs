@@ -539,12 +539,17 @@ pub fn per_request(
                 .ok()
         })
     });
-    let request = match request.middleware_config() {
+    let mut request = match request.middleware_config() {
         Some(config) => config.proxy(proxy.clone()).build(),
         // not inside an agent's middleware chain: cannot happen
         None => return Err(ureq::Error::BadUri("no agent".into())),
     };
+    // `530-front-door-credentials`: a server behind a proxy of its own
+    let front_door = crate::front_door::before(&mut request);
     let result = next.handle(request);
+    if let (Some(sent), Ok(response)) = (&front_door, &result) {
+        crate::front_door::after(sent, response.status().as_u16(), response.headers());
+    }
     if let (Some(choice), Some(key), Some(_)) = (&choice, key, &proxy) {
         let refused = match &result {
             Ok(response) => response.status().as_u16() == 407,
@@ -692,7 +697,7 @@ fn connect_status(head: &[u8]) -> Option<u16> {
     parts.next()?.parse().ok()
 }
 
-fn base64_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

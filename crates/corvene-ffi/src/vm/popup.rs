@@ -587,11 +587,13 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         }
         Popup::ProxyAuthentication {
             proxy,
+            server,
             username,
             rejected,
             retry,
         } => {
             f.put("proxy", proxy)
+                .put("server", server)
                 .opt("username", username.as_ref())
                 .put("rejected", rejected)
                 .put("retry", format!("{retry:?}"));

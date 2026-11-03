@@ -228,6 +228,9 @@ impl Dispatcher {
         if now.bool(ids::PROXY_CREDENTIALS) != previous.bool(ids::PROXY_CREDENTIALS) {
             Self::sync_proxy_credentials(cx);
         }
+        if now.bool(ids::FRONT_DOOR_CREDENTIALS) != previous.bool(ids::FRONT_DOOR_CREDENTIALS) {
+            Self::sync_front_door_credentials(cx);
+        }
         if now.bool(ids::GH_CLI_ACCOUNT) != previous.bool(ids::GH_CLI_ACCOUNT) {
             Self::sync_gh_cli_account(cx);
         }
