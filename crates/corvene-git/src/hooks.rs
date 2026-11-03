@@ -44,7 +44,10 @@ use std::time::Instant;
 use tracing::{debug, warn};
 
 use crate::detect::GitBinary;
-use crate::process::GitCommand;
+use crate::process::{
+    GitCommand, OUTPUT_HELD, PIPE_BACKLOG, PipeChunk, StreamedPipe, boxed_pipe, read_pipe,
+    receive_until_exit,
+};
 
 /// `hooks-proxy.ts` `ignoredOnFailureHooks`: their failure never asks.
 const IGNORED_ON_FAILURE_HOOKS: &[&str] = &[
@@ -133,6 +136,9 @@ const PORT_VAR: &str = "CORVENE_HOOK_PROXY_PORT";
 const TOKEN_VAR: &str = "CORVENE_HOOK_PROXY_TOKEN";
 const GIT_VAR: &str = "CORVENE_HOOK_PROXY_GIT";
 const DIR_VAR: &str = "CORVENE_HOOK_PROXY_DIR";
+
+/// How long the proxy waits for the app to take in the hook's exit.
+const EXIT_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The argument a stand-in hook runs the Corvene binary with.
 pub const PROXY_ARG: &str = "--hook-proxy";
@@ -712,6 +718,15 @@ pub fn run_proxy(hook_path: &OsStr, args: &[OsString]) -> i32 {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
+    // the proxy is the GUI binary and has no console: without this git
+    // opens a console window of its own for every hook (the window
+    // desktop/desktop#23104 sees flash), where Corvene starts every other
+    // git with none
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    }
     for key in EXCLUDED_ENV_VARS {
         cmd.env_remove(key);
     }
@@ -721,18 +736,25 @@ pub fn run_proxy(hook_path: &OsStr, args: &[OsString]) -> i32 {
     let mut terminal_output = Vec::new();
     let status = match cmd.spawn() {
         Ok(mut child) => {
-            if let Some(mut pipe) = child.stderr.take() {
-                let mut buf = [0u8; 16 * 1024];
-                loop {
-                    match pipe.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            let _ = stderr.write_all(&buf[..n]);
-                            let _ = stderr.flush();
-                            terminal_output.extend_from_slice(&buf[..n]);
-                        }
-                    }
-                }
+            let (tx, pipe) = std::sync::mpsc::sync_channel(PIPE_BACKLOG);
+            if let Some(hook_stderr) = child.stderr.take() {
+                read_pipe(StreamedPipe::Stderr, boxed_pipe(hook_stderr), tx);
+            } else {
+                drop(tx);
+            }
+            // a process the hook left running keeps the pipe open: once the
+            // hook is done, git goes on without it (desktop/desktop#23104)
+            let ended = receive_until_exit(
+                || !matches!(child.try_wait(), Ok(None)),
+                &pipe,
+                |(_, chunk): PipeChunk| {
+                    let _ = stderr.write_all(&chunk);
+                    let _ = stderr.flush();
+                    terminal_output.extend_from_slice(&chunk);
+                },
+            );
+            if !ended {
+                debug!(hook = %hook_name, "{OUTPUT_HELD}");
             }
             child.wait()
         }
@@ -808,7 +830,8 @@ pub fn run_proxy(hook_path: &OsStr, args: &[OsString]) -> i32 {
     if let Some(c) = conn.as_mut() {
         let _ = c.write.write_all(format!("exit {exit_code}\n").as_bytes());
         // waits for the app to take the exit in, so progress lands before
-        // git goes on
+        // git goes on, but not for an app that stopped answering
+        let _ = c.write.set_read_timeout(Some(EXIT_ACK_TIMEOUT));
         let _ = c.read_line();
     }
     exit_code

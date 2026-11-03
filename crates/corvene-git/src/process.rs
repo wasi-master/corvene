@@ -689,12 +689,32 @@ impl GitCommand {
                 .timeout
                 .zip(cancel.clone())
                 .map(|(limit, token)| Watchdog::start(limit, token));
+            let pipes = read_pipes(
+                child.stdout.take().map(boxed_pipe),
+                child.stderr.take().map(boxed_pipe),
+            );
             if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
                 use std::io::Write;
                 // git may exit early; a broken pipe is then reported via the exit code
                 let _ = stdin.write_all(bytes);
             }
-            let output = child.wait_with_output();
+            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+            let ended = receive_until_exit(
+                || has_exited(&mut child),
+                &pipes,
+                |(kind, chunk)| match kind {
+                    StreamedPipe::Stdout => stdout.extend_from_slice(&chunk),
+                    StreamedPipe::Stderr => stderr.extend_from_slice(&chunk),
+                },
+            );
+            if !ended {
+                warn!(git = %args, "{OUTPUT_HELD}");
+            }
+            let output = child.wait().map(|status| std::process::Output {
+                status,
+                stdout,
+                stderr,
+            });
             if let Some(token) = &cancel {
                 token.detach();
             }
@@ -844,37 +864,49 @@ impl GitCommand {
                 "git was started without its output pipes",
             )));
         };
-        let (streamed, drained): (Box<dyn std::io::Read + Send>, Box<dyn std::io::Read + Send>) =
-            match pipe {
-                StreamedPipe::Stderr => (Box::new(stderr_pipe), Box::new(stdout_pipe)),
-                StreamedPipe::Stdout => (Box::new(stdout_pipe), Box::new(stderr_pipe)),
-            };
-        let drain_thread = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let mut drained = drained;
-            let _ = drained.read_to_end(&mut buf);
-            buf
+        let (streamed, drained) = match pipe {
+            StreamedPipe::Stderr => (boxed_pipe(stderr_pipe), boxed_pipe(stdout_pipe)),
+            StreamedPipe::Stdout => (boxed_pipe(stdout_pipe), boxed_pipe(stderr_pipe)),
+        };
+        let (tx, pipes) = std::sync::mpsc::sync_channel(PIPE_BACKLOG);
+        read_pipe(pipe.other(), drained, tx.clone());
+        // the streamed pipe a line at a time, split on \r and \n so that
+        // percentage updates arrive as they happen
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(streamed);
+            loop {
+                let mut chunk = Vec::new();
+                if read_until_any(&mut reader, b"\r\n", &mut chunk) == 0
+                    || tx.send((pipe, chunk)).is_err()
+                {
+                    break;
+                }
+            }
         });
 
         let mut streamed_all = String::new();
-        let mut reader = BufReader::new(streamed);
-        let mut chunk = Vec::new();
-        loop {
-            chunk.clear();
-            // read until \r or \n
-            let n = read_until_any(&mut reader, b"\r\n", &mut chunk);
-            if n == 0 {
-                break;
-            }
-            let line = String::from_utf8_lossy(&chunk);
-            let line = line.trim_end_matches(['\r', '\n']);
-            if !line.is_empty() {
-                on_line(line);
-            }
-            if !self.forget_streamed {
-                streamed_all.push_str(line);
-                streamed_all.push('\n');
-            }
+        let mut drained = Vec::new();
+        let ended = receive_until_exit(
+            || has_exited(&mut child),
+            &pipes,
+            |(kind, chunk)| {
+                if kind != pipe {
+                    drained.extend_from_slice(&chunk);
+                    return;
+                }
+                let line = String::from_utf8_lossy(&chunk);
+                let line = line.trim_end_matches(['\r', '\n']);
+                if !line.is_empty() {
+                    on_line(line);
+                }
+                if !self.forget_streamed {
+                    streamed_all.push_str(line);
+                    streamed_all.push('\n');
+                }
+            },
+        );
+        if !ended {
+            warn!(git = %args, "{OUTPUT_HELD}");
         }
 
         let status = child.wait();
@@ -882,7 +914,6 @@ impl GitCommand {
             token.detach();
         }
         let status = status.map_err(GitError::Spawn)?;
-        let drained = drain_thread.join().unwrap_or_default();
         if let Some(thread) = stdin_thread {
             let _ = thread.join();
         }
@@ -969,37 +1000,10 @@ impl GitCommand {
             }
             _ => None,
         };
-        let (tx, rx) = std::sync::mpsc::channel::<(StreamedPipe, Vec<u8>)>();
-        let readers: Vec<_> = [
-            child
-                .stdout
-                .take()
-                .map(|pipe| (StreamedPipe::Stdout, Box::new(pipe) as Box<dyn Read + Send>)),
-            child
-                .stderr
-                .take()
-                .map(|pipe| (StreamedPipe::Stderr, Box::new(pipe) as Box<dyn Read + Send>)),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|(kind, mut pipe)| {
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                let mut buf = vec![0u8; 64 * 1024];
-                loop {
-                    match pipe.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            if tx.send((kind, buf[..n].to_vec())).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            })
-        })
-        .collect();
-        drop(tx);
+        let pipes = read_pipes(
+            child.stdout.take().map(boxed_pipe),
+            child.stderr.take().map(boxed_pipe),
+        );
 
         // GHD calls `onTerminalOutputAvailable` from `processCallback`, as
         // soon as the process exists
@@ -1007,22 +1011,25 @@ impl GitCommand {
         on_terminal_output_available(live.listener());
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        // ends once both pipes are closed
-        for (kind, chunk) in rx {
-            match kind {
-                StreamedPipe::Stdout => stdout.extend_from_slice(&chunk),
-                StreamedPipe::Stderr => stderr.extend_from_slice(&chunk),
-            }
-            live.push(&chunk);
+        let ended = receive_until_exit(
+            || has_exited(&mut child),
+            &pipes,
+            |(kind, chunk)| {
+                match kind {
+                    StreamedPipe::Stdout => stdout.extend_from_slice(&chunk),
+                    StreamedPipe::Stderr => stderr.extend_from_slice(&chunk),
+                }
+                live.push(&chunk);
+            },
+        );
+        if !ended {
+            warn!(git = %args, "{OUTPUT_HELD}");
         }
         let status = child.wait();
         if let Some(token) = &cancel {
             token.detach();
         }
         let status = status.map_err(GitError::Spawn)?;
-        for reader in readers {
-            let _ = reader.join();
-        }
         if let Some(thread) = stdin_thread {
             let _ = thread.join();
         }
@@ -1065,10 +1072,121 @@ fn js_tail(s: &str, units: usize) -> &str {
     s
 }
 
-#[derive(Clone, Copy)]
-enum StreamedPipe {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StreamedPipe {
     Stdout,
     Stderr,
+}
+
+impl StreamedPipe {
+    fn other(self) -> Self {
+        match self {
+            StreamedPipe::Stdout => StreamedPipe::Stderr,
+            StreamedPipe::Stderr => StreamedPipe::Stdout,
+        }
+    }
+}
+
+/// How long git's output is still read once git has exited. A process a
+/// hook started and left running (a build server, a file watcher) inherits
+/// git's output pipes and keeps them open, so waiting for their end waited
+/// for that process too: on Windows, where such servers are common, a
+/// rebase or commit never finished (desktop/desktop#23104).
+pub(crate) const OUTPUT_LINGER: Duration = Duration::from_secs(2);
+
+pub(crate) const OUTPUT_HELD: &str =
+    "a process git started still holds its output; not waiting for it";
+
+pub(crate) type PipeChunk = (StreamedPipe, Vec<u8>);
+
+/// Chunks read ahead of their reader; a full channel leaves the rest in the
+/// pipe, so git waits as it did when its output was read directly.
+pub(crate) const PIPE_BACKLOG: usize = 256;
+
+pub(crate) fn boxed_pipe(pipe: impl Read + Send + 'static) -> Box<dyn Read + Send> {
+    Box::new(pipe)
+}
+
+/// Reads `pipe` on a thread of its own, a chunk at a time.
+pub(crate) fn read_pipe(
+    kind: StreamedPipe,
+    mut pipe: Box<dyn Read + Send>,
+    tx: std::sync::mpsc::SyncSender<PipeChunk>,
+) {
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send((kind, buf[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Reads stdout and stderr on threads of their own; the receiver ends once
+/// both have.
+fn read_pipes(
+    stdout: Option<Box<dyn Read + Send>>,
+    stderr: Option<Box<dyn Read + Send>>,
+) -> std::sync::mpsc::Receiver<PipeChunk> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(PIPE_BACKLOG);
+    for (kind, pipe) in [
+        (StreamedPipe::Stdout, stdout),
+        (StreamedPipe::Stderr, stderr),
+    ] {
+        if let Some(pipe) = pipe {
+            read_pipe(kind, pipe, tx.clone());
+        }
+    }
+    rx
+}
+
+/// Hands `on_item` what `rx` delivers until every sender is gone or, once
+/// `exited` says the process has ended, [`OUTPUT_LINGER`] has passed.
+/// Returns whether the output ended; the reader threads of output given up
+/// on stay until the process holding it ends.
+pub(crate) fn receive_until_exit<T>(
+    mut exited: impl FnMut() -> bool,
+    rx: &std::sync::mpsc::Receiver<T>,
+    mut on_item: impl FnMut(T),
+) -> bool {
+    use std::sync::mpsc::RecvTimeoutError;
+    const TICK: Duration = Duration::from_millis(50);
+    let mut checked = Instant::now();
+    let mut exited_at: Option<Instant> = None;
+    loop {
+        match rx.recv_timeout(TICK) {
+            Ok(item) => on_item(item),
+            Err(RecvTimeoutError::Disconnected) => return true,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        if exited_at.is_none() && checked.elapsed() >= TICK {
+            checked = Instant::now();
+            if exited() {
+                exited_at = Some(checked);
+            }
+        }
+        if exited_at.is_some_and(|at| at.elapsed() >= OUTPUT_LINGER) {
+            return false;
+        }
+    }
+}
+
+/// Whether `child` has ended (reaped: `wait` then returns its status).
+#[cfg(not(target_os = "android"))]
+fn has_exited(child: &mut std::process::Child) -> bool {
+    !matches!(child.try_wait(), Ok(None))
+}
+
+/// The Android spawner has no `try_wait`: its output is read to the end.
+#[cfg(target_os = "android")]
+fn has_exited(_child: &mut crate::spawn::Child) -> bool {
+    false
 }
 
 fn read_until_any(reader: &mut impl BufRead, delims: &[u8], out: &mut Vec<u8>) -> usize {
@@ -1129,6 +1247,7 @@ mod tests {
 
     /// A git that never finishes: an alias running `sleep` in a child
     /// process, as a `git status` waits on its submodules.
+    #[cfg(unix)]
     fn hanging(git: Arc<GitBinary>) -> GitCommand {
         GitCommand::new(git).args(["-c", "alias.hang=!sleep 30", "hang"])
     }
@@ -1145,6 +1264,34 @@ mod tests {
         );
         // `run` returns once the pipes close: the sleep was stopped too
         assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    /// desktop/desktop#23104: a process left running with git's output
+    /// pipes (a hook's build server) no longer holds the command up.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_left_behind_does_not_hold_the_output() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let left_behind = |git: &Arc<GitBinary>| {
+            GitCommand::new(git.clone()).args(["-c", "alias.bg=!sleep 15 & echo done", "bg"])
+        };
+        let started = Instant::now();
+        let output = left_behind(&git).run().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
+        let mut lines = Vec::new();
+        left_behind(&git)
+            .run_streaming_stdout(|line| lines.push(line.to_string()))
+            .unwrap();
+        assert_eq!(lines, ["done"]);
+        let output = left_behind(&git)
+            .run_with_terminal_output(&(std::rc::Rc::new(|_| {}) as TerminalOutputCallback))
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
+        assert!(
+            started.elapsed() < Duration::from_secs(12),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
