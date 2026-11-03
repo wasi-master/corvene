@@ -127,9 +127,17 @@ enum Method {
     OAuthAppEntry,
 }
 
+/// A click handler shared between buttons.
+type SharedHandler = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
+
 pub struct SignInDialog {
     state: Entity<AppState>,
     enterprise: bool,
+    /// Drawn inside the Welcome flow's "Sign in to your GitHub Enterprise"
+    /// step (GHD `SignInEnterprise` around the shared `SignIn`) instead of
+    /// as a dialog: no frame, and Cancel runs the step's handler (GHD's
+    /// `SignIn` children).
+    embedded: Option<SharedHandler>,
     method: Method,
     address: Entity<InputState>,
     token: Entity<InputState>,
@@ -168,11 +176,26 @@ impl SignInDialog {
         Self {
             state,
             enterprise,
+            embedded: None,
             method: Method::Authentication,
             address,
             token,
             client_id,
             client_secret,
+        }
+    }
+
+    /// The Enterprise form for the Welcome flow's sign-in step, whose
+    /// Cancel runs `on_cancel`.
+    pub fn new_embedded(
+        state: Entity<AppState>,
+        on_cancel: impl Fn(&mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            embedded: Some(std::rc::Rc::new(on_cancel)),
+            ..Self::new(state, true, window, cx)
         }
     }
 
@@ -692,6 +715,63 @@ impl Render for SignInDialog {
             })
             .child(body);
 
-        dialog("sign-in", self.title(), body, buttons, close, window, cx)
+        if let Some(on_cancel) = self.embedded.clone() {
+            return embedded_form(body.into_any_element(), buttons, on_cancel, cx);
+        }
+        dialog("sign-in", self.title(), body, buttons, close, window, cx).into_any_element()
     }
+}
+
+/// The form of an embedded [`SignInDialog`]: the body, then its buttons,
+/// Cancel running `on_cancel`, Enter in a text box taking the primary one
+/// (a `<form>`).
+fn embedded_form(
+    body: AnyElement,
+    buttons: Vec<DialogButton>,
+    on_cancel: SharedHandler,
+    cx: &App,
+) -> AnyElement {
+    let mut submit: Option<SharedHandler> = None;
+    let row: Vec<AnyElement> = buttons
+        .into_iter()
+        .map(|b| {
+            let on_click: SharedHandler = if b.id == "sign-in-cancel" {
+                on_cancel.clone()
+            } else {
+                std::rc::Rc::from(b.on_click)
+            };
+            if b.primary && !b.disabled {
+                submit = Some(on_click.clone());
+            }
+            let el = if b.primary {
+                primary_button(b.id, b.label, b.disabled, cx)
+            } else {
+                button(b.id, b.label, cx)
+            };
+            el.when(!b.disabled, |d| {
+                d.on_click(move |_, window, cx| on_click(window, cx))
+            })
+            .into_any_element()
+        })
+        .collect();
+    div()
+        .id("sign-in-embedded")
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(SPACING_DOUBLE())
+        .when_some(submit, |d, submit| {
+            d.on_action(
+                move |action: &gpui_kit::component::input::Enter, window, cx| {
+                    if action.secondary || action.shift {
+                        cx.propagate();
+                        return;
+                    }
+                    submit(window, cx);
+                },
+            )
+        })
+        .child(body)
+        .child(div().flex().flex_row().gap(SPACING()).children(row))
+        .into_any_element()
 }

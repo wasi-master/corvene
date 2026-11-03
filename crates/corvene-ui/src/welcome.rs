@@ -1,4 +1,8 @@
-//! First-launch Welcome flow (`ui/welcome/*`): Start → Configure Git.
+//! First-launch Welcome flow (`ui/welcome/*`): Start → Configure Git, with
+//! GHD's two sign-in steps in between: "Sign in to GitHub.com" waiting for
+//! the browser on the Start page (`SignInToDotComWithBrowser`) and "Sign in
+//! to your GitHub Enterprise" around the sign-in form (`SignInToEnterprise`,
+//! `ui/welcome/sign-in-enterprise.tsx`).
 //! `styles/ui/_welcome.scss`: left pane 60 % (40 px padding, content ≤ 500 px
 //! × scale, the two graphics pinned behind it), right pane 40 % on `#28373b`
 //! with the illustration cropped from the left; scale 1.2 at ≥ 1366×700.
@@ -10,7 +14,12 @@
 //!
 //! Deviations: the product name reads Corvene, and the start footer's
 //! second paragraph says Corvene sends no usage metrics where GHD links to
-//! its metrics page (see `.docs/deviations.md`).
+//! its metrics page (see `.docs/deviations.md`). GitHub.com's sign-in waits
+//! on the Start page only when it starts in the browser
+//! (`Dispatcher::browser_sign_in_first`); the device flow's one-time code
+//! needs the sign-in dialog, which opens as before. The Enterprise step's
+//! form is the sign-in dialog's (`SignInDialog::new_embedded`), so it has
+//! Corvene's token and OAuth app steps too.
 
 use corvene_core::{AppState, Dispatcher, Popup};
 use corvene_github::Endpoint;
@@ -89,12 +98,44 @@ fn linux_text_height() -> f32 {
     (14. * SCALE() * 1.369).round()
 }
 
-/// GHD `WelcomeStep` (the steps Corvene's flow has; GHD's sign-in steps are
-/// the sign-in dialog here).
+/// GHD `WelcomeStep`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WelcomeStep {
     Start,
+    /// The Start page while the browser signs in to GitHub.com.
+    SignInToDotComWithBrowser,
+    SignInToEnterprise,
     ConfigureGit,
+}
+
+/// What GHD `SignInEnterprise` (`ui/welcome/sign-in-enterprise.tsx`) shows
+/// around the shared sign-in form.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignInEnterpriseContent {
+    /// The `<h1>`.
+    pub title: String,
+    /// Its own buttons (the form's children): label and what each does.
+    pub buttons: Vec<(String, WelcomeAction)>,
+}
+
+/// GHD `SignInEnterprise` for the sign-in store's state: nothing without
+/// one, else the title and a Cancel back to the Start step.
+pub fn sign_in_enterprise_content(
+    sign_in_state: Option<&corvene_core::sign_in::SignInState>,
+) -> Option<SignInEnterpriseContent> {
+    sign_in_state?;
+    Some(SignInEnterpriseContent {
+        title: "Sign in to your GitHub Enterprise".into(),
+        buttons: vec![("Cancel".into(), WelcomeAction::Advance(WelcomeStep::Start))],
+    })
+}
+
+/// GHD `BrowserRedirectMessage` (`ui/lib/authentication-form.tsx`), with
+/// the product name.
+fn browser_redirect_message(name: &str) -> String {
+    format!(
+        "Your browser will redirect you back to {name} once you've signed in. If your browser          asks for your permission to launch {name} please allow it to."
+    )
 }
 
 /// What a button of a Welcome step does.
@@ -183,6 +224,8 @@ pub struct WelcomeView {
     sign_in_focus_visible: bool,
     /// `autoFocus`: focus the sign-in button on the next render.
     autofocus: bool,
+    /// The `SignInToEnterprise` step's form.
+    enterprise_form: Option<Entity<crate::dialogs::SignInDialog>>,
 }
 
 impl WelcomeView {
@@ -196,7 +239,12 @@ impl WelcomeView {
         // A successful sign-in advances to Configure Git (GHD `Welcome.componentWillReceiveProps`).
         crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             let has_account = !state.read(cx).accounts.is_empty();
-            if has_account && !this.had_account && this.step == WelcomeStep::Start {
+            // GHD `advanceOnSuccessfulSignIn` (and the sign-in dialog's
+            // success, which Corvene's Start opens for the device flow)
+            if has_account && !this.had_account && this.step != WelcomeStep::ConfigureGit {
+                if this.step != WelcomeStep::Start {
+                    Dispatcher::reset_sign_in_state(cx);
+                }
                 this.advance(window, cx);
             } else if this.prefilled {
                 this.sync_account(window, cx);
@@ -219,12 +267,48 @@ impl WelcomeView {
             sign_in_focus,
             sign_in_focus_visible: true,
             autofocus: true,
+            enterprise_form: None,
         }
     }
 
-    /// Configure Git › Cancel (`WelcomeStep.Start`).
+    /// GHD `advanceToStep`.
+    fn advance_to(&mut self, step: WelcomeStep, window: &mut Window, cx: &mut Context<Self>) {
+        match step {
+            WelcomeStep::Start => self.back_to_start(window, cx),
+            WelcomeStep::ConfigureGit => self.advance(window, cx),
+            // `requestBrowserAuthenticationToDotcom`
+            WelcomeStep::SignInToDotComWithBrowser => {
+                self.step = step;
+                Dispatcher::begin_sign_in_flow(false, cx);
+                Dispatcher::begin_sign_in(Endpoint::github_com(), cx);
+                cx.notify();
+            }
+            // `beginEnterpriseSignIn`
+            WelcomeStep::SignInToEnterprise => {
+                self.step = step;
+                Dispatcher::begin_sign_in_flow(true, cx);
+                let state = self.state.clone();
+                let welcome = cx.entity().downgrade();
+                self.enterprise_form = Some(cx.new(|cx| {
+                    crate::dialogs::SignInDialog::new_embedded(
+                        state,
+                        move |window, cx| {
+                            let _ = welcome
+                                .update(cx, |w, cx| w.advance_to(WelcomeStep::Start, window, cx));
+                        },
+                        window,
+                        cx,
+                    )
+                }));
+                cx.notify();
+            }
+        }
+    }
+
+    /// Configure Git › Cancel, the sign-in steps' Cancel (`WelcomeStep.Start`).
     fn back_to_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.step = WelcomeStep::Start;
+        self.enterprise_form = None;
         window.focus(&self.sign_in_focus, cx);
         self.sign_in_focus_visible = true;
         self.autofocus = true;
@@ -405,6 +489,20 @@ impl WelcomeView {
         .mt(px(10.))
     }
 
+    /// GHD `SignInEnterprise`: the title over the sign-in form, whose Cancel
+    /// goes back to Start.
+    fn sign_in_enterprise(&self, cx: &Context<Self>) -> impl IntoElement {
+        let store = self.state.read(cx).sign_in_store.get_state().cloned();
+        let content = sign_in_enterprise_content(store.as_ref());
+        div().id("sign-in-enterprise").flex().flex_col().when_some(
+            content.zip(self.enterprise_form.clone()),
+            |d, (content, form)| {
+                d.child(welcome_title(content.title))
+                    .child(div().mt(px(20.)).child(form))
+            },
+        )
+    }
+
     fn start(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.ghd();
         // `103-product-name`: "GitHub Desktop" under the GitHub Desktop preset
@@ -414,6 +512,20 @@ impl WelcomeView {
         let ring = self.sign_in_focus_visible && self.sign_in_focus.is_focused(window);
         let focused = self.sign_in_focus.is_focused(window);
         let focus = self.sign_in_focus.clone();
+        // GHD `loadingBrowserAuth`: the browser step with the flow running;
+        // a failed one says why here (GHD's store error has no place on Start)
+        let (loading, auth_error) = if self.step == WelcomeStep::SignInToDotComWithBrowser {
+            match self.state.read(cx).authentication.as_ref().map(|a| &a.step) {
+                Some(corvene_core::AuthenticationStep::Error(m)) => (false, Some(m.clone())),
+                Some(_) => (true, None),
+                None => (false, None),
+            }
+        } else {
+            (false, None)
+        };
+        let browser_first = Dispatcher::browser_sign_in_first(&Endpoint::github_com(), cx);
+        let enterprise_this = cx.entity();
+        let sign_in_this = cx.entity();
         // `#start`: at least the pane's height less its padding, content
         // centred above the footer (`.start-content { margin-top: 100px }`)
         div()
@@ -429,13 +541,20 @@ impl WelcomeView {
                     .justify_center()
                     .child(welcome_title_with_name("Welcome to", name.clone()))
                     .child(
-                        welcome_text(format!(
-                            "{name} is a seamless way to contribute to projects on GitHub and \
-                             GitHub Enterprise. Sign in below to get started with your existing \
-                             projects."
-                        ))
+                        welcome_text(if loading {
+                            browser_redirect_message(&name)
+                        } else {
+                            format!(
+                                "{name} is a seamless way to contribute to projects on GitHub \
+                                 and GitHub Enterprise. Sign in below to get started with your \
+                                 existing projects."
+                            )
+                        })
                         .mt(px(10.)),
                     )
+                    .when_some(auth_error, |d, message| {
+                        d.child(welcome_text(message).text_color(t.error).mt(px(10.)))
+                    })
                     .child(
                         // `.welcome-main-buttons`
                         div()
@@ -453,6 +572,15 @@ impl WelcomeView {
                                         welcome_button("welcome-sign-in", true, focused, cx)
                                             .track_focus(&focus)
                                             .px(px(20.))
+                                            // `disabled={loadingBrowserAuth}`, `<Loading />`
+                                            .when(loading, |d| {
+                                                d.opacity(0.6).cursor_default().child(
+                                                    div().mr(px(10.)).child(crate::icons::loading(
+                                                        "welcome-sign-in-loading",
+                                                        t.button_text,
+                                                    )),
+                                                )
+                                            })
                                             .child("Sign in to GitHub.com")
                                             .child(
                                                 octicon(Octicon::LinkExternal, t.button_text)
@@ -464,7 +592,22 @@ impl WelcomeView {
                                                     cx.notify();
                                                 })
                                             })
-                                            .on_click(|_, _, cx| {
+                                            .on_click(move |_, window, cx| {
+                                                if loading {
+                                                    return;
+                                                }
+                                                // the browser flow waits here; the device
+                                                // flow's code needs the dialog
+                                                if browser_first {
+                                                    sign_in_this.update(cx, |w, cx| {
+                                                        w.advance_to(
+                                                            WelcomeStep::SignInToDotComWithBrowser,
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    });
+                                                    return;
+                                                }
                                                 Dispatcher::show_popup(
                                                     Popup::SignIn { enterprise: false },
                                                     cx,
@@ -476,19 +619,34 @@ impl WelcomeView {
                                             }),
                                     ),
                             )
-                            .child(
+                            .child(if loading {
+                                // `cancelBrowserAuth`
+                                welcome_button("welcome-sign-in-cancel", false, false, cx)
+                                    .px(px(20.))
+                                    .mr(px(20.))
+                                    .mb(px(10.))
+                                    .child("Cancel")
+                                    .on_click(move |_, window, cx| {
+                                        enterprise_this.update(cx, |w, cx| {
+                                            w.advance_to(WelcomeStep::Start, window, cx)
+                                        })
+                                    })
+                            } else {
                                 welcome_button("welcome-sign-in-enterprise", false, false, cx)
                                     .px(px(20.))
                                     .mr(px(20.))
                                     .mb(px(10.))
                                     .child("Sign in to GitHub Enterprise")
-                                    .on_click(|_, _, cx| {
-                                        Dispatcher::show_popup(
-                                            Popup::SignIn { enterprise: true },
-                                            cx,
-                                        )
-                                    }),
-                            ),
+                                    .on_click(move |_, window, cx| {
+                                        enterprise_this.update(cx, |w, cx| {
+                                            w.advance_to(
+                                                WelcomeStep::SignInToEnterprise,
+                                                window,
+                                                cx,
+                                            )
+                                        })
+                                    })
+                            }),
                     )
                     .child(
                         // `.skip-action-container`
@@ -667,11 +825,8 @@ impl WelcomeView {
                                             .on_click(move |_, window, cx| {
                                                 this.update(cx, |w, cx| match action {
                                                     WelcomeAction::Done => w.finish(cx),
-                                                    WelcomeAction::Advance(
-                                                        WelcomeStep::ConfigureGit,
-                                                    ) => w.advance(window, cx),
-                                                    WelcomeAction::Advance(WelcomeStep::Start) => {
-                                                        w.back_to_start(window, cx)
+                                                    WelcomeAction::Advance(step) => {
+                                                        w.advance_to(step, window, cx)
                                                     }
                                                 })
                                             })
@@ -1005,7 +1160,12 @@ fn welcome_button(id: &'static str, primary: bool, focused: bool, cx: &App) -> S
 impl Render for WelcomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         WELCOME_SCALE.set(welcome_scale(crate::theme::page_size(window)));
-        if self.autofocus && self.step == WelcomeStep::Start {
+        if self.autofocus
+            && matches!(
+                self.step,
+                WelcomeStep::Start | WelcomeStep::SignInToDotComWithBrowser
+            )
+        {
             self.autofocus = false;
             window.focus(&self.sign_in_focus, cx);
         }
@@ -1016,7 +1176,10 @@ impl Render for WelcomeView {
         }
         let t = cx.ghd();
         let content: AnyElement = match self.step {
-            WelcomeStep::Start => self.start(window, cx).into_any_element(),
+            WelcomeStep::Start | WelcomeStep::SignInToDotComWithBrowser => {
+                self.start(window, cx).into_any_element()
+            }
+            WelcomeStep::SignInToEnterprise => self.sign_in_enterprise(cx).into_any_element(),
             WelcomeStep::ConfigureGit => self.configure_git(window, cx).into_any_element(),
         };
         let viewport = crate::theme::page_size(window);

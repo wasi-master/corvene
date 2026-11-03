@@ -18,11 +18,9 @@
 //! - `SignInEnterprise` (`ui/welcome/sign-in-enterprise.tsx`): the Welcome
 //!   step "Sign in to your GitHub Enterprise" around `SignIn`, nothing
 //!   without a sign-in state, Cancel returning to the Start step. Corvene's
-//!   Welcome flow (`crates/corvene-ui/src/welcome.rs`) has only Start and
-//!   Configure Git: its "Sign in to GitHub Enterprise" button opens the
-//!   sign-in dialog (`Popup::SignIn { enterprise: true }`, titled "Sign in
-//!   to GitHub Enterprise") instead of an in-flow step (`.docs/TODO.md` ›
-//!   UI parity gaps). [`sign_in_enterprise`] is a stand-in.
+//!   counterpart is `corvene_ui::welcome::sign_in_enterprise_content`,
+//!   which the Welcome flow's `SignInToEnterprise` step draws around the
+//!   embedded sign-in form.
 //! - `ConfigureGit` (`ui/welcome/configure-git.tsx`): "Configure Git", "This
 //!   is used to identify the commits you create. …", a Finish button
 //!   (`done`) and Cancel returning to Start without `done`. Corvene's
@@ -39,26 +37,10 @@
 use corvene_core::Account;
 use corvene_core::sign_in::SignInState;
 use corvene_ui::dialogs::{SignInAction, sign_in_content};
-use corvene_ui::welcome::{WelcomeAction, WelcomeStep, configure_git_content as configure_git};
-
-/// What GitHub Desktop's `SignInEnterprise` shows.
-#[allow(dead_code)] // filled by the real SignInEnterprise content
-struct SignInEnterpriseContent {
-    /// The `<h1>`.
-    title: String,
-    /// Its own buttons (the `SignIn` children): label and what each does.
-    buttons: Vec<(String, WelcomeAction)>,
-}
-
-/// Stand-in for GitHub Desktop's `SignInEnterprise`
-/// (`ui/welcome/sign-in-enterprise.tsx`), `None` when it renders nothing.
-/// Replace it with the Corvene function once there is one and remove the
-/// `#[ignore]`.
-fn sign_in_enterprise(_sign_in_state: Option<&SignInState>) -> Option<SignInEnterpriseContent> {
-    unimplemented!(
-        "Corvene's Welcome flow has no SignInEnterprise step: its Enterprise button opens the sign-in dialog"
-    )
-}
+use corvene_ui::welcome::{
+    WelcomeAction, WelcomeStep, configure_git_content as configure_git,
+    sign_in_enterprise_content as sign_in_enterprise,
+};
 
 /// The action of the button labelled `label`, `None` when there is none.
 fn action_of<A: Copy>(actions: &[(String, A)], label: &str) -> Option<A> {
@@ -118,7 +100,6 @@ fn renders_warning_and_browser_authentication_states_in_the_shared_sign_in_wrapp
 
 // GHD: unit/ui/welcome-and-sign-in-wrappers-test.tsx › welcome and sign-in wrappers › renders the enterprise welcome step only when sign-in state exists and its cancel button returns to start
 #[test]
-#[ignore = "ghd: todo: Welcome sign-in steps in the flow (ui/welcome/sign-in-enterprise.tsx); Corvene's Welcome opens the sign-in dialog (Popup::SignIn { enterprise: true }) instead of a SignInToEnterprise step"]
 fn renders_the_enterprise_welcome_step_only_with_sign_in_state_and_cancel_returns_to_start() {
     // `signInState={null}`: nothing at all
     assert!(sign_in_enterprise(None).is_none());

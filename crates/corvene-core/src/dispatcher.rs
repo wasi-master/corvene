@@ -745,6 +745,26 @@ impl Dispatcher {
         });
     }
 
+    /// GHD `beginDotComSignIn` / `beginEnterpriseSignIn` without the
+    /// dialog: the Welcome flow's sign-in steps, which draw the form
+    /// themselves.
+    pub fn begin_sign_in_flow(enterprise: bool, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            begin_sign_in_store(s, enterprise, None);
+            cx.notify();
+        });
+    }
+
+    /// GHD `resetSignInState`: the Welcome flow is done with the sign-in
+    /// store (any flow still running is stopped).
+    pub fn reset_sign_in_state(cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            cancel_authentication(s);
+            sign_in_store(s).reset();
+            cx.notify();
+        });
+    }
+
     /// Corvene (`527-multiple-accounts`): Settings › Accounts › Add
     /// account. The sign-in dialog for another account beside the signed-in
     /// ones; the browser shows GitHub's account picker, and the same
