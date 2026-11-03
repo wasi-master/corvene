@@ -17,6 +17,9 @@
 //! Deviation (`289-add-repositories-in-folder`): a folder that is not a
 //! repository but holds some (two levels down) offers "N repositories found
 //! inside. Add them all" under the not-a-repository warning.
+//!
+//! A path in double quotes (pasted from Explorer's Copy as Path) is read
+//! without them, as GHD does since desktop/desktop#23108 (after 3.6.6).
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -168,7 +171,7 @@ impl AddExistingRepositoryDialog {
 
     fn resolved_path(&self, cx: &App) -> Option<PathBuf> {
         let raw = self.path.read(cx).value();
-        let raw = raw.trim();
+        let raw = unquote(raw.trim());
         if raw.is_empty() {
             return None;
         }
@@ -265,6 +268,13 @@ fn add_several(paths: Vec<PathBuf>, cx: &mut App) {
             cx,
         );
     }
+}
+
+/// GHD `unquotePath`: one pair of surrounding double quotes is dropped.
+fn unquote(path: &str) -> &str {
+    path.strip_prefix('"')
+        .and_then(|p| p.strip_suffix('"'))
+        .unwrap_or(path)
 }
 
 fn dirs_home() -> PathBuf {
@@ -468,5 +478,18 @@ impl Render for AddExistingRepositoryDialog {
             window,
             cx,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unquote;
+
+    #[test]
+    fn quoted_paths_lose_one_pair_of_quotes() {
+        assert_eq!(unquote("\"/tmp/my repo\""), "/tmp/my repo");
+        assert_eq!(unquote("/tmp/repo"), "/tmp/repo");
+        assert_eq!(unquote("\"/tmp/repo"), "\"/tmp/repo");
+        assert_eq!(unquote("\""), "\"");
     }
 }
