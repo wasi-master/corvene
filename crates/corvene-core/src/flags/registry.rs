@@ -8162,6 +8162,23 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// Hook failures are reported whatever the shell environment option says.
+    HOOK_DIAGNOSTICS_WITHOUT_SHELL_ENV = 1121 "hook-diagnostics-without-shell-env" {
+        title: "Name failing hooks without loading the shell environment",
+        summary: "A Git hook that fails during a commit, pull or push is named and its output \
+                  shown (with the option to ignore it) even when Settings › Git › Hooks › \
+                  Load Git hook environment variables from shell is off. That option only \
+                  decides where the hooks' environment comes from.",
+        ghd_behaviour: "With the option off a failing hook only shows Git's generic error, \
+                        without naming the hook.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(23012)],
+        code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-git/src/hooks.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.

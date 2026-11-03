@@ -234,6 +234,11 @@ impl Dispatcher {
         if now.bool(ids::GH_CLI_ACCOUNT) != previous.bool(ids::GH_CLI_ACCOUNT) {
             Self::sync_gh_cli_account(cx);
         }
+        if now.bool(ids::HOOK_DIAGNOSTICS_WITHOUT_SHELL_ENV)
+            != previous.bool(ids::HOOK_DIAGNOSTICS_WITHOUT_SHELL_ENV)
+        {
+            Self::sync_hooks_interception(cx);
+        }
         // flags that change how diffs are read: the cached ones are stale
         let reads_diffs = |flags: &Flags| {
             [

@@ -1411,8 +1411,7 @@ impl Dispatcher {
             let s = Self::state(cx).read(cx).settings.clone();
             (s.enable_git_hook_env, s.cache_git_hook_env)
         };
-        // GHD `getHooksEnvEnabled()` also turns hooks interception on
-        corvene_git::hooks::set_enabled(enabled);
+        Self::sync_hooks_interception(cx);
         if !enabled {
             corvene_git::hook_env::clear_hook_env();
             return;
@@ -1430,6 +1429,20 @@ impl Dispatcher {
                 }
                 Err(err) => warn!(%err, "could not load the shell environment for git hooks"),
             },
+        );
+    }
+
+    /// GHD `getHooksEnvEnabled()` also turns hooks interception on.
+    /// Corvene `1121-hook-diagnostics-without-shell-env`
+    /// (desktop/desktop#23012): interception, which names the failing hook
+    /// and shows its output, is on whatever the shell environment option
+    /// says.
+    pub fn sync_hooks_interception(cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        corvene_git::hooks::set_enabled(
+            s.settings.enable_git_hook_env
+                || s.flags
+                    .bool(crate::flags::ids::HOOK_DIAGNOSTICS_WITHOUT_SHELL_ENV),
         );
     }
 

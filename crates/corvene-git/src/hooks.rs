@@ -1,7 +1,8 @@
 //! GitHub Desktop's hooks interception (`lib/hooks/with-hooks-env.ts`,
 //! `lib/hooks/hooks-proxy.ts`, `lib/hooks/get-repo-hooks.ts`): while
 //! Settings › Git › Hooks › "Load Git hook environment variables from shell"
-//! is on ([`set_enabled`]), a command built with
+//! is on ([`set_enabled`]; with Corvene's
+//! `1121-hook-diagnostics-without-shell-env` always), a command built with
 //! [`GitCommand::intercept_hooks`](crate::GitCommand::intercept_hooks) runs
 //! with `core.hooksPath` pointing at a temporary directory of stand-in
 //! hooks, one per hook of the repository it intercepts. Each stand-in runs
