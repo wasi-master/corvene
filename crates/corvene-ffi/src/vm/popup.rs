@@ -501,7 +501,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             f.opt("initial_branch_name", initial_branch_name.as_ref())
                 .opt("initial_worktree_name", initial_worktree_name.as_ref());
         }
-        Popup::RenameWorktree { repo: r, path } | Popup::DeleteWorktree { repo: r, path } => {
+        Popup::RenameWorktree { repo: r, path } | Popup::DeleteWorktree { repo: r, path, .. } => {
             repo = Some(*r);
             f.path("path", path);
         }
@@ -510,6 +510,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             path,
             error,
             original,
+            ..
         } => {
             repo = Some(*r);
             f.path("path", path).put("error", error).opt(

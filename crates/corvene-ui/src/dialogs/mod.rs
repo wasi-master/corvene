@@ -595,14 +595,19 @@ impl DialogHost {
             Popup::RenameWorktree { repo, path } => cx
                 .new(|cx| RenameWorktreeDialog::new(*repo, path.clone(), window, cx))
                 .into(),
-            Popup::DeleteWorktree { repo, path } => cx
-                .new(|_| DeleteWorktreeDialog::new(*repo, path.clone()))
+            Popup::DeleteWorktree {
+                repo,
+                path,
+                options,
+            } => cx
+                .new(|_| DeleteWorktreeDialog::new(*repo, path.clone(), options.clone()))
                 .into(),
             Popup::DeleteWorktreeFailed {
                 repo,
                 path,
                 error,
                 original,
+                options,
             } => cx
                 .new(|_| {
                     DeleteWorktreeFailedDialog::new(
@@ -610,6 +615,7 @@ impl DialogHost {
                         path.clone(),
                         error.clone(),
                         original.clone(),
+                        options.clone(),
                     )
                 })
                 .into(),

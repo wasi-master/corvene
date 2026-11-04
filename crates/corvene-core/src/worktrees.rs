@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
-use crate::state::Popup;
+use crate::state::{DeferredCheckout, DeleteWorktreeOptions, Popup};
 
 /// Where new worktrees go by default under the `241-worktree-location`
 /// template: `{clone-dir}` is Settings' clone directory, `{repo}` the
@@ -57,7 +57,12 @@ pub fn worktree_location(
 
 impl Dispatcher {
     /// GHD `_switchWorktree`: point the repository at `path` and reload it.
+    /// GHD 3.6.8 (desktop/desktop#22607): a worktree whose folder is gone
+    /// offers its removal instead.
     pub fn switch_worktree(id: u64, path: PathBuf, cx: &mut dyn Host) {
+        if Self::worktree_is_missing(id, &path, cx) {
+            return Self::request_delete_worktree_with(id, path, None, cx);
+        }
         let probe = path.clone();
         spawn_bg(
             cx,
@@ -224,18 +229,60 @@ impl Dispatcher {
         );
     }
 
+    /// Whether git lists the worktree at `path` as `prunable` (its folder
+    /// is gone).
+    pub(crate) fn worktree_is_missing(id: u64, path: &Path, cx: &mut dyn Host) -> bool {
+        Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.worktrees.iter().find(|w| same_path(&w.path, path)))
+            .is_some_and(|w| w.is_prunable)
+    }
+
     /// GHD `_requestDeleteWorktree`: confirm unless the user opted out.
     pub fn request_delete_worktree(id: u64, path: PathBuf, cx: &mut dyn Host) {
-        if Self::state(cx).read(cx).settings.confirm_worktree_removal {
-            Self::show_popup(Popup::DeleteWorktree { repo: id, path }, cx);
+        Self::request_delete_worktree_with(id, path, None, cx);
+    }
+
+    /// GHD 3.6.8 `_requestDeleteWorktree(repository, path, checkout)`: a
+    /// missing worktree is always confirmed, and `checkout` runs once it is
+    /// gone.
+    pub fn request_delete_worktree_with(
+        id: u64,
+        path: PathBuf,
+        checkout: Option<DeferredCheckout>,
+        cx: &mut dyn Host,
+    ) {
+        let options = DeleteWorktreeOptions {
+            force: false,
+            missing: Self::worktree_is_missing(id, &path, cx),
+            checkout,
+        };
+        if Self::state(cx).read(cx).settings.confirm_worktree_removal || options.missing {
+            Self::show_popup(
+                Popup::DeleteWorktree {
+                    repo: id,
+                    path,
+                    options,
+                },
+                cx,
+            );
         } else {
-            Self::delete_worktree(id, path, false, cx);
+            Self::delete_worktree(id, path, options, cx);
         }
     }
 
     /// GHD `_deleteWorktree`: switch to the main worktree first when the
-    /// current one is being removed; a failure offers `--force`.
-    pub fn delete_worktree(id: u64, path: PathBuf, force: bool, cx: &mut dyn Host) {
+    /// current one is being removed; a failure offers `--force`. GHD 3.6.8:
+    /// a missing worktree whose folder came back is left in place, and the
+    /// deferred checkout runs after either.
+    pub fn delete_worktree(
+        id: u64,
+        path: PathBuf,
+        options: DeleteWorktreeOptions,
+        cx: &mut dyn Host,
+    ) {
         let (current, main) = {
             let s = Self::state(cx).read(cx);
             let Some(repo) = s.repository(id) else { return };
@@ -270,14 +317,59 @@ impl Dispatcher {
             return;
         };
         let target = path.clone();
+        let (force, missing) = (options.force, options.missing);
         spawn_bg(
             cx,
             move || {
-                corvene_git::remove_worktree(git, &base, &target, force).map_err(|e| e.to_string())
+                if missing {
+                    let still_missing = corvene_git::list_worktrees(git.clone(), &base)
+                        .map_err(|e| e.to_string())?
+                        .iter()
+                        .any(|w| same_path(&w.path, &target) && w.is_prunable);
+                    if !still_missing {
+                        return Ok(false);
+                    }
+                }
+                corvene_git::remove_worktree(git, &base, &target, force)
+                    .map(|()| true)
+                    .map_err(|e| e.to_string())
             },
             move |result, cx| {
                 match result {
-                    Ok(()) => info!(id, path = %path.display(), "worktree removed"),
+                    Ok(true) => {
+                        info!(id, path = %path.display(), "worktree removed");
+                        // the checkout below must not find it again
+                        Self::state(cx).update(cx, |s, cx| {
+                            if let Some(rs) = s.repo_states.get_mut(&id) {
+                                rs.worktrees.retain(|w| !same_path(&w.path, &path));
+                            }
+                            cx.notify();
+                        });
+                    }
+                    Ok(false) => {
+                        // the checkout below switches to it instead
+                        Self::state(cx).update(cx, |s, cx| {
+                            if let Some(w) = s.repo_states.get_mut(&id).and_then(|rs| {
+                                rs.worktrees.iter_mut().find(|w| same_path(&w.path, &path))
+                            }) {
+                                w.is_prunable = false;
+                            }
+                            cx.notify();
+                        });
+                        if options.checkout.is_none() {
+                            let name = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            Self::show_error(
+                                "Could not delete worktree",
+                                format!(
+                                    "The worktree {name} is available again and was left in place."
+                                ),
+                                cx,
+                            );
+                        }
+                    }
                     Err(error) => {
                         warn!(%error, "worktree removal failed");
                         Self::show_popup(
@@ -286,12 +378,19 @@ impl Dispatcher {
                                 path,
                                 error,
                                 original,
+                                options,
                             },
                             cx,
                         );
+                        Self::refresh_repository(id, cx);
+                        return;
                     }
                 }
                 Self::refresh_repository(id, cx);
+                // GHD 3.6.8 `checkoutAfterRemoval`
+                if let Some(checkout) = options.checkout {
+                    Self::checkout_branch(id, checkout.branch, checkout.strategy, cx);
+                }
             },
         );
     }

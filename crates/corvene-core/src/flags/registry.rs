@@ -1296,8 +1296,8 @@ registry! {
         title: "Hide prunable worktrees",
         summary: "The worktree list leaves out worktrees git reports as prunable (their directory \
                   was deleted outside git), so they cannot be selected into an error.",
-        ghd_behaviour: "Lists them until `git worktree prune` runs; selecting one shows \"does not \
-                        appear to be a valid Git repository\".",
+        ghd_behaviour: "Lists them as \"(missing)\" until `git worktree prune` runs; selecting one \
+                        offers to remove it.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,

@@ -194,10 +194,10 @@ pub use repo_rules::{append_trailers, failed_rules, rule_matches};
 pub use shared_storage::{SharedStorageAccess, SharedStorageDestination};
 pub use state::{
     AfterSharedStorageMove, AppState, AuthenticationFlow, AuthenticationStep, CloneState,
-    CommitMessage, DropTarget, FileListFilter, FilterOption, Foldout, GitConfigLocation,
-    GlobalGitConfig, LastCommit, Popup, PreferencesTab, RepositorySettingsData,
-    RepositorySettingsTab, RepositoryState, RetryAction, SharedStorageMove, SharedStorageMoveStage,
-    SharedStorageMoveState, SigningConfig, UnreachableCommitsTab,
+    CommitMessage, DeferredCheckout, DeleteWorktreeOptions, DropTarget, FileListFilter,
+    FilterOption, Foldout, GitConfigLocation, GlobalGitConfig, LastCommit, Popup, PreferencesTab,
+    RepositorySettingsData, RepositorySettingsTab, RepositoryState, RetryAction, SharedStorageMove,
+    SharedStorageMoveStage, SharedStorageMoveState, SigningConfig, UnreachableCommitsTab,
 };
 pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};
 pub use workspace::{SavedWorkspace, WorkspaceId, WorkspaceState};

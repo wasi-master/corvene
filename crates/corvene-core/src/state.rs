@@ -103,6 +103,24 @@ impl From<corvene_git::GitError> for ErrorMessage {
     }
 }
 
+/// GHD 3.6.8 `IDeferredCheckout` (`models/worktree.ts`): a checkout to run
+/// once the worktree holding its branch has been removed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeferredCheckout {
+    pub branch: String,
+    pub strategy: Option<crate::persistence::UncommittedChangesStrategy>,
+}
+
+/// GHD 3.6.8 `IDeleteWorktreeOptions`: how a worktree is to be removed,
+/// carried through the confirmation and failure dialogs so a retry keeps it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeleteWorktreeOptions {
+    pub force: bool,
+    /// The worktree's folder was gone when removal was offered.
+    pub missing: bool,
+    pub checkout: Option<DeferredCheckout>,
+}
+
 /// Modal dialogs (`PopupType`, the subset Corvene has so far).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Popup {
@@ -590,6 +608,7 @@ pub enum Popup {
     DeleteWorktree {
         repo: u64,
         path: PathBuf,
+        options: DeleteWorktreeOptions,
     },
     /// `git worktree remove` failed: offer `--force`; dismissing switches
     /// back to `original` when the current worktree was the one deleted.
@@ -598,6 +617,7 @@ pub enum Popup {
         path: PathBuf,
         error: String,
         original: Option<PathBuf>,
+        options: DeleteWorktreeOptions,
     },
     DeleteBranch {
         repo: u64,

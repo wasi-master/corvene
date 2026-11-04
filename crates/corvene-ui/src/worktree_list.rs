@@ -6,8 +6,10 @@
 //! Corvene addition (flag `240-worktree-paths`): rows have a tooltip with the
 //! name and full path, and the filter also matches the path, so worktrees
 //! with the same folder name can be told apart.
-//! Deviation: worktrees git reports `prunable` (directory deleted outside
-//! git) are not listed (`243-hide-prunable-worktrees`); a new worktree's
+//! GHD 3.6.8 (desktop/desktop#22607): a worktree git reports `prunable`
+//! (directory deleted outside git) shows an alert icon and "(missing)", and
+//! picking it offers its removal (`Dispatcher::switch_worktree`).
+//! Deviation: those are not listed at all (`243-hide-prunable-worktrees`); a new worktree's
 //! default folder is the one holding the main worktree, not the clone
 //! folder (`242-worktree-dir-beside-repository`).
 
@@ -281,6 +283,7 @@ impl WorktreeFoldout {
         let t = cx.ghd();
         let name = worktree.display_name();
         let description = worktree.description();
+        let missing = worktree.is_prunable;
         // `.list-item:hover`: `--list-item-hover-background-color`, text unchanged
         let list_hover = t.list_item_hover_background;
         let path = worktree.path.clone();
@@ -313,7 +316,14 @@ impl WorktreeFoldout {
         };
         div()
             .id(SharedString::from(format!("worktree-{}", path.display())))
-            .a11y_row(format!("{name}, {description}"), current)
+            // GHD 3.6.8 `getWorktreeAriaLabel`
+            .a11y_row(
+                format!(
+                    "{name}{}, {description}",
+                    if missing { ", missing" } else { "" }
+                ),
+                current,
+            )
             .when(show_path, |d| {
                 d.ghd_tooltip(format!("{name}\n{}", path.display()))
             })
@@ -353,6 +363,8 @@ impl WorktreeFoldout {
                 octicon(
                     if current {
                         Octicon::Check
+                    } else if missing {
+                        Octicon::Alert
                     } else {
                         Octicon::FileDirectory
                     },
@@ -367,12 +379,24 @@ impl WorktreeFoldout {
             )
             .child(
                 div()
-                    .flex_grow(2.)
+                    // `&.missing-worktree .name { flex-grow: 0 }`
+                    .flex_grow(if missing { 0. } else { 2. })
                     .min_w_0()
                     .max_w(gpui_kit::relative(0.65))
                     .mr(SPACING_HALF())
                     .child(title),
             )
+            // `.missing-indicator`: beside the name so an ellipsis cannot hide it
+            .when(missing, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .mr(SPACING_HALF())
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child("(missing)"),
+                )
+            })
             .child(
                 div()
                     .flex_1()

@@ -4818,6 +4818,34 @@ impl Dispatcher {
         if tip_valid && current.as_deref() == Some(branch.name.as_str()) {
             return;
         }
+        // GHD `_checkoutBranch`: a branch another worktree has checked out
+        // switches to that worktree. GHD 3.6.8 (desktop/desktop#22607): git
+        // still counts a worktree whose folder is gone as using its branch,
+        // so that worktree is removed first and the checkout runs after
+        let holder = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| {
+                rs.worktrees
+                    .iter()
+                    .find(|w| w.branch.as_deref() == Some(branch.full_name.as_str()))
+            })
+            .cloned();
+        if let Some(worktree) = holder {
+            if worktree.is_prunable {
+                return Self::request_delete_worktree_with(
+                    id,
+                    worktree.path,
+                    Some(crate::state::DeferredCheckout {
+                        branch: name,
+                        strategy: explicit,
+                    }),
+                    cx,
+                );
+            }
+            return Self::switch_worktree(id, worktree.path, cx);
+        }
         let mut strategy = explicit.unwrap_or(setting);
         if explicit.is_none()
             && strategy == UncommittedChangesStrategy::StashOnCurrentBranch

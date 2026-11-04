@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use corvene_core::{AppState, BranchKind, Dispatcher};
+use corvene_core::{AppState, BranchKind, DeleteWorktreeOptions, Dispatcher};
 use gpui_kit::component::input::{
     Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp,
 };
@@ -476,18 +476,21 @@ impl Render for RenameWorktreeDialog {
 
 // ---------------------------------------------------------------------------
 
-/// GHD `DeleteWorktreeDialog`.
+/// GHD `DeleteWorktreeDialog`; GHD 3.6.8: "Remove Missing Worktree" for a
+/// worktree whose folder is gone, without "Do not show this message again".
 pub struct DeleteWorktreeDialog {
     repo: u64,
     path: PathBuf,
+    options: DeleteWorktreeOptions,
     dont_show_again: bool,
 }
 
 impl DeleteWorktreeDialog {
-    pub fn new(repo: u64, path: PathBuf) -> Self {
+    pub fn new(repo: u64, path: PathBuf, options: DeleteWorktreeOptions) -> Self {
         Self {
             repo,
             path,
+            options,
             dont_show_again: false,
         }
     }
@@ -502,40 +505,62 @@ impl Render for DeleteWorktreeDialog {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let (repo, path, dont_show_again) = (self.repo, self.path.clone(), self.dont_show_again);
+        let missing = self.options.missing;
+        let options = self.options.clone();
         let content = div()
             .flex()
             .flex_col()
             .gap(SPACING())
-            .child(paragraph(vec![
-                "Are you sure you want to delete the worktree ".into(),
-                Inline::Element(ref_chip(name, cx).into_any_element()),
-                "?".into(),
-            ]))
-            .child(
-                div()
-                    .id("delete-worktree-dont-show")
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(SPACING_HALF())
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.dont_show_again = !this.dont_show_again;
-                        cx.notify();
-                    }))
-                    .child(checkbox(
-                        "delete-worktree-dont-show-checkbox",
-                        self.dont_show_again,
-                        false,
-                        cx,
-                    ))
-                    .child("Do not show this message again"),
-            );
+            .child(paragraph(if missing {
+                vec![
+                    "The folder for the worktree ".into(),
+                    Inline::Element(ref_chip(name, cx).into_any_element()),
+                    " no longer exists. Remove it from this repository?".into(),
+                ]
+            } else {
+                vec![
+                    "Are you sure you want to delete the worktree ".into(),
+                    Inline::Element(ref_chip(name, cx).into_any_element()),
+                    "?".into(),
+                ]
+            }))
+            .when(!missing, |d| {
+                d.child(
+                    div()
+                        .id("delete-worktree-dont-show")
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(SPACING_HALF())
+                        .cursor_pointer()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.dont_show_again = !this.dont_show_again;
+                            cx.notify();
+                        }))
+                        .child(checkbox(
+                            "delete-worktree-dont-show-checkbox",
+                            self.dont_show_again,
+                            false,
+                            cx,
+                        ))
+                        .child("Do not show this message again"),
+                )
+            });
+        let title = if missing {
+            mac_or("Remove Missing Worktree", "Remove missing worktree")
+        } else {
+            mac_or("Delete Worktree", "Delete worktree")
+        };
+        let ok_label = if missing {
+            crate::dialog::confirm_label("Remove", "Remove Worktree", "Remove worktree", cx)
+        } else {
+            crate::dialog::confirm_label("Delete", "Delete Worktree", "Delete worktree", cx)
+        };
         // destructive Ok: Cancel is the default button
         dialog_with_kind(
             "delete-worktree",
             DialogKind::Warning,
-            mac_or("Delete Worktree", "Delete worktree"),
+            title,
             content,
             OkCancelButtonGroup {
                 destructive: true,
@@ -547,19 +572,14 @@ impl Render for DeleteWorktreeDialog {
                 },
                 ok: GroupButtonSpec {
                     id: "delete-worktree-ok",
-                    label: crate::dialog::confirm_label(
-                        "Delete",
-                        "Delete Worktree",
-                        "Delete worktree",
-                        cx,
-                    ),
+                    label: ok_label,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
                             Dispatcher::update_settings(cx, |s| s.confirm_worktree_removal = false);
                         }
                         Dispatcher::close_popup(cx);
-                        Dispatcher::delete_worktree(repo, path.clone(), false, cx);
+                        Dispatcher::delete_worktree(repo, path.clone(), options.clone(), cx);
                     }),
                 },
             }
@@ -573,21 +593,30 @@ impl Render for DeleteWorktreeDialog {
 
 // ---------------------------------------------------------------------------
 
-/// GHD `DeleteWorktreeFailedDialog`.
+/// GHD `DeleteWorktreeFailedDialog`; the retry keeps the removal's options
+/// (GHD 3.6.8).
 pub struct DeleteWorktreeFailedDialog {
     repo: u64,
     path: PathBuf,
     error: String,
     original: Option<PathBuf>,
+    options: DeleteWorktreeOptions,
 }
 
 impl DeleteWorktreeFailedDialog {
-    pub fn new(repo: u64, path: PathBuf, error: String, original: Option<PathBuf>) -> Self {
+    pub fn new(
+        repo: u64,
+        path: PathBuf,
+        error: String,
+        original: Option<PathBuf>,
+        options: DeleteWorktreeOptions,
+    ) -> Self {
         Self {
             repo,
             path,
             error,
             original,
+            options,
         }
     }
 }
@@ -601,6 +630,10 @@ impl Render for DeleteWorktreeFailedDialog {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let (repo, path) = (self.repo, self.path.clone());
+        let forced = DeleteWorktreeOptions {
+            force: true,
+            ..self.options.clone()
+        };
         // dismissing switches back to the worktree that was current
         let original = self.original.clone();
         let dismiss = move |_: &mut Window, cx: &mut App| {
@@ -659,7 +692,7 @@ impl Render for DeleteWorktreeFailedDialog {
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
-                        Dispatcher::delete_worktree(repo, path.clone(), true, cx);
+                        Dispatcher::delete_worktree(repo, path.clone(), forced.clone(), cx);
                     }),
                 },
             }
