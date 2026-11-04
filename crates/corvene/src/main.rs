@@ -143,8 +143,9 @@ pub(crate) fn main() {
         #[cfg(not(target_os = "macos"))]
         std::thread::spawn(corvene_platform::url_schemes::register);
         // Corvene (`434-launcher-recent-repositories`): this process keeps
-        // the launcher's actions (tests and harness instances do not)
-        #[cfg(not(target_os = "macos"))]
+        // the launcher's actions (tests and harness instances do not);
+        // `desktop_entry` is Linux only
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
         if std::env::var_os("CORVENE_DATA_DIR").is_none() {
             corvene_platform::desktop_entry::manage_launcher_actions();
         }
