@@ -150,12 +150,12 @@ fn group_for_repository(repository: &Repository) -> RepositoryListGroup {
         Some(gh) if is_dot_com(&gh.endpoint) => RepositoryListGroup::Dotcom {
             owner: gh.owner.clone(),
         },
-        // `getHostForRepository`: the host of `getHTMLURL(endpoint)`, which
-        // is the endpoint's scheme and host name alone
+        // `getHostForRepository`: `new URL(getHTMLURL(endpoint)).host`, which
+        // keeps a port that is not the default (GHD 3.6.8)
         Some(gh) => RepositoryListGroup::Enterprise {
-            host: corvene_core::host_of(
-                corvene_github::Endpoint::from_api_base(&gh.endpoint).host(),
-            ),
+            host: corvene_github::Endpoint::from_api_base(&gh.endpoint)
+                .host()
+                .to_lowercase(),
         },
         None => RepositoryListGroup::Other,
     }
@@ -1926,9 +1926,16 @@ mod tests {
             r.github = Some(github(endpoint));
             super::group_for_repository(&r)
         };
-        // `getHTMLURL` keeps the scheme and host name alone
+        // `getHTMLURL` keeps the scheme, host and a port that is not the
+        // default
         assert_eq!(
             group("https://GHE.example.com:8443/api/v3"),
+            super::RepositoryListGroup::Enterprise {
+                host: "ghe.example.com:8443".into()
+            }
+        );
+        assert_eq!(
+            group("https://ghe.example.com:443/api/v3"),
             super::RepositoryListGroup::Enterprise {
                 host: "ghe.example.com".into()
             }

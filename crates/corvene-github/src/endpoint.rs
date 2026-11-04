@@ -102,7 +102,15 @@ impl Endpoint {
                 api_base: api_base.to_string(),
             }
         } else {
-            let web_base = trimmed.trim_end_matches("/api/v3").to_string();
+            // `getHTMLURL`: `new URL(endpoint).origin`, so a port that is
+            // not the scheme's default stays (GHD 3.6.8,
+            // desktop/desktop#23046) and the API path goes
+            let web_base = match (trimmed.split_once("://"), url_host(trimmed)) {
+                (Some((scheme, _)), Some(host)) => {
+                    format!("{}://{host}", scheme.to_ascii_lowercase())
+                }
+                _ => trimmed.trim_end_matches("/api/v3").to_string(),
+            };
             Self {
                 web_base,
                 api_base: api_base.to_string(),
@@ -290,6 +298,14 @@ mod tests {
     fn round_trips_api_base() {
         let e = Endpoint::from_api_base("https://ghe.corp/api/v3");
         assert_eq!(e.web_base, "https://ghe.corp");
+        // GHD 3.6.8 `getHTMLURL`: the origin, a default port dropped
+        let port = Endpoint::from_api_base("https://ghe.corp:8443/api/v3");
+        assert_eq!(port.web_base, "https://ghe.corp:8443");
+        assert_eq!(port.web("o/r"), "https://ghe.corp:8443/o/r");
+        let default = Endpoint::from_api_base("https://ghe.corp:443/api/v3");
+        assert_eq!(default.web_base, "https://ghe.corp");
+        let plain = Endpoint::from_api_base("http://ghe.corp:8080/api");
+        assert_eq!(plain.web_base, "http://ghe.corp:8080");
         assert!(Endpoint::from_api_base("https://api.github.com").is_dotcom());
         assert!(Endpoint::from_api_base("https://api.github.com/").is_dotcom());
         assert_eq!(
