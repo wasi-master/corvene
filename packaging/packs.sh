@@ -104,15 +104,19 @@ else
   PACK_OS=linux LIB_EXT=so
 fi
 
+# A pack needs the app it was built with (its grammar table and which pack
+# holds which grammar): the workspace version is its `min_app`
+MIN_APP="$(sed -n '/^\[workspace.package\]/,/^\[/p' "$ROOT/Cargo.toml" | grep -m1 -oE '^version = "[^"]+"' | grep -oE '[0-9][^"]*')"
+
 # name version kind zip [target]
 add_entry() {
   local sha size
   sha="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$4")"
   size="$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$4")"
-  python3 - "$1" "$2" "$3" "$(basename "$4")" "$sha" "$size" "${5:-}" "$RELEASE_BASE" >> "$ENTRIES" <<'PY'
+  python3 - "$1" "$2" "$3" "$(basename "$4")" "$sha" "$size" "${5:-}" "$RELEASE_BASE" "$MIN_APP" >> "$ENTRIES" <<'PY'
 import json, sys
-name, version, kind, file, sha, size, target, base = sys.argv[1:]
-entry = {"name": name, "version": version, "min_app": "0.1.0", "url": f"{base}/{file}",
+name, version, kind, file, sha, size, target, base, min_app = sys.argv[1:]
+entry = {"name": name, "version": version, "min_app": min_app, "url": f"{base}/{file}",
          "sha256": sha, "size": int(size), "kind": kind}
 if target:
     entry["target"] = target
