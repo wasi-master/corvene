@@ -1041,7 +1041,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         branch.push(MenuItemConstructorOptions {
             enabled: Some(enabled),
             ..item(
-                l("Move Changes to Worktree…", "Move changes to wor&ktree…"),
+                l("Move Changes to Worktree…", "Move cha&nges to worktree…"),
                 MoveChangesToWorktree,
             )
         });
@@ -1088,7 +1088,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(
             l(
                 "Squash and Merge into Current Branch…",
-                "Squas&h and merge into current branch…",
+                "S&quash and merge into current branch…",
             ),
             SquashAndMergeIntoCurrentBranch,
         ),
