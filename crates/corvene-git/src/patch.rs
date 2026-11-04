@@ -612,6 +612,8 @@ mod tests {
             );
         };
         run(&["init", "-q"]);
+        // the cases compare against the bytes as written
+        run(&["config", "core.autocrlf", "false"]);
         std::fs::write(path.join("f"), old).unwrap();
         run(&["add", "f"]);
         std::fs::write(path.join("f"), new).unwrap();
@@ -713,6 +715,8 @@ mod tests {
     }
 
     #[test]
+    // a file name with a tab cannot exist on Windows
+    #[cfg(not(windows))]
     fn a_refused_patch_is_staged_from_the_selection() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();

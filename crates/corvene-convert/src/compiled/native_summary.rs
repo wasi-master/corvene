@@ -848,11 +848,15 @@ mod tests {
                 .iter()
                 .any(|(k, e)| *k == G::Sections && !e.is_empty())
         );
-        assert!(
-            side.groups
-                .iter()
-                .any(|(k, e)| *k == G::DefinedSymbols && e.iter().any(|e| e.size.is_some()))
-        );
+        // a Windows executable keeps its symbols in the PDB and a Linux
+        // test executable has no global ones
+        if cfg!(target_os = "macos") {
+            assert!(
+                side.groups
+                    .iter()
+                    .any(|(k, e)| *k == G::DefinedSymbols && e.iter().any(|e| e.size.is_some()))
+            );
+        }
     }
 
     #[test]

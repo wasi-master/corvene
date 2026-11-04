@@ -1147,6 +1147,8 @@ mod tests {
         };
         run(&["init", "-q", "-b", "main"]);
         run(&["config", "commit.gpgsign", "false"]);
+        // Git for Windows turns autocrlf on globally
+        run(&["config", "core.autocrlf", "false"]);
         // the code under test commits too; a CI runner has no identity
         run(&["config", "user.name", "T"]);
         run(&["config", "user.email", "t@example.com"]);

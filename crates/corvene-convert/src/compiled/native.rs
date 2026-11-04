@@ -461,7 +461,11 @@ mod tests {
             "{}",
             &text[..text.len().min(2000)]
         );
-        assert!(text.contains("Defined symbols"));
+        // a Windows executable keeps its symbols in the PDB and a Linux
+        // test executable has no global ones
+        if cfg!(target_os = "macos") {
+            assert!(text.contains("Defined symbols"));
+        }
     }
 
     #[test]
