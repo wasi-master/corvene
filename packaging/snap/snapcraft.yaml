@@ -40,6 +40,8 @@ apps:
       - network-bind
       - ssh-keys
       - password-manager-service
+      # the media diff's player
+      - audio-playback
 
 parts:
   corvene:
@@ -51,6 +53,7 @@ parts:
       - openssh-client
       - libvulkan1
       - libxkbcommon-x11-0
+      - libasound2t64
     override-prime: |
       craftctl default
       cd "$CRAFT_PRIME"

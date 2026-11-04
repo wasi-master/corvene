@@ -22,6 +22,8 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --device=dri
+  # the media diff's player (ALSA through the PulseAudio socket)
+  - --socket=pulseaudio
   # repositories live anywhere in the home folder
   - --filesystem=home
   # git over SSH with the user's agent

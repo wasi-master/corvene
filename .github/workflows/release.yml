@@ -270,7 +270,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang mold pkg-config rpm \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libfontconfig-dev libfreetype-dev libvulkan-dev
+            libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev
       - name: system packages (cross)
         if: matrix.target
         run: |
@@ -281,7 +281,7 @@ jobs:
             libxcb1-dev:${{ matrix.foreign }} libxkbcommon-dev:${{ matrix.foreign }} \
             libxkbcommon-x11-dev:${{ matrix.foreign }} libwayland-dev:${{ matrix.foreign }} \
             libfontconfig-dev:${{ matrix.foreign }} libfreetype-dev:${{ matrix.foreign }} \
-            libvulkan-dev:${{ matrix.foreign }}
+            libvulkan-dev:${{ matrix.foreign }} libasound2-dev:${{ matrix.foreign }}
           {
             echo "TARGET=${{ matrix.target }}"
             echo "PKG_CONFIG_ALLOW_CROSS=1"
