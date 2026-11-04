@@ -59,7 +59,6 @@ all = [
     "lang-csv",
     "lang-cuda",
     "lang-cue",
-    "lang-cylc",
     "lang-d",
     "lang-dart",
     "lang-desktop",
@@ -357,7 +356,6 @@ rest = [
     "lang-csv",
     "lang-cuda",
     "lang-cue",
-    "lang-cylc",
     "lang-d",
     "lang-desktop",
     "lang-devicetree",
@@ -662,7 +660,6 @@ lang-corn = []
 lang-cpon = []
 lang-csv = []
 lang-cue = []
-lang-cylc = []
 lang-desktop = []
 lang-devicetree = []
 lang-dhall = []

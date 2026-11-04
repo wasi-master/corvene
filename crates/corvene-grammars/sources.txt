@@ -24,7 +24,6 @@ corn -
 cpon -
 csv -
 cue scanner.c
-cylc -
 desktop -
 devicetree -
 dhall scanner.c

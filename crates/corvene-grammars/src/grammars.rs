@@ -273,13 +273,6 @@ grammars! {
         first_line: "",
         aliases: [],
         injects: ["comment"];
-    #[cfg(corvene_src = "cylc")]
-    "cylc" ("lang-cylc") => c_language!(tree_sitter_cylc),
-        extensions: ["cylc"],
-        filenames: ["suite.rc"],
-        first_line: "",
-        aliases: [],
-        injects: ["bash", "comment"];
     "d" ("lang-d") => tree_sitter_d::LANGUAGE,
         extensions: ["d", "di"],
         filenames: [],
@@ -2159,7 +2152,6 @@ pub const REST: &[&str] = &[
     "csv",
     "cuda",
     "cue",
-    "cylc",
     "d",
     "desktop",
     "devicetree",

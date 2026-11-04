@@ -25,7 +25,7 @@ pub const ABI: u32 = 1;
 
 macro_rules! pack_version {
     () => {
-        "1.0.0"
+        "1.1.0"
     };
 }
 

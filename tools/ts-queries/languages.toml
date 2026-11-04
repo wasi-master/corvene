@@ -998,14 +998,6 @@ license = "MIT"
 extensions = ["cue"]
 source = "nvim"
 
-[cylc]
-url = "https://github.com/elliotfontaine/tree-sitter-cylc"
-revision = "6d1d81137112299324b526477ce1db989ab58fb8"
-license = "MIT"
-extensions = ["cylc"]
-filenames = ["suite.rc"]
-source = "nvim"
-
 [desktop]
 url = "https://github.com/ValdezFOmar/tree-sitter-desktop"
 revision = "v1.1.1"

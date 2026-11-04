@@ -44,7 +44,6 @@ these grammars (compiled C parsers) and highlight queries.
 | csv | [tree-sitter-grammars/tree-sitter-csv f6bf6e35eb0b](https://github.com/tree-sitter-grammars/tree-sitter-csv) | MIT | nvim-treesitter@728e031f6b11 queries/csv (Apache-2.0) |
 | cuda | [tree-sitter-cuda 0.21.2](https://github.com/tree-sitter-grammars/tree-sitter-cuda) | MIT | nvim-treesitter@728e031f6b11 queries/cuda (Apache-2.0) |
 | cue | [eonpatapon/tree-sitter-cue dd7b90e0770f](https://github.com/eonpatapon/tree-sitter-cue) | MIT | nvim-treesitter@728e031f6b11 queries/cue (Apache-2.0) |
-| cylc | [elliotfontaine/tree-sitter-cylc 6d1d81137112](https://github.com/elliotfontaine/tree-sitter-cylc) | MIT | nvim-treesitter@728e031f6b11 queries/cylc (Apache-2.0) |
 | d | [tree-sitter-d 0.8.2](https://github.com/gdamore/tree-sitter-d) | MIT | nvim-treesitter@728e031f6b11 queries/d (Apache-2.0) |
 | dart | [tree-sitter-dart 0.2.0](https://github.com/nielsenko/tree-sitter-dart) | MIT | tree-sitter-dart 0.2.0 (MIT): queries/highlights.scm |
 | desktop | [ValdezFOmar/tree-sitter-desktop v1.1.1](https://github.com/ValdezFOmar/tree-sitter-desktop) | MIT | nvim-treesitter@728e031f6b11 queries/desktop (Apache-2.0) |

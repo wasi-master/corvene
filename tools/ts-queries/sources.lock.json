@@ -149,12 +149,6 @@
   "symbol": "tree_sitter_cue",
   "scanner": "scanner.c"
  },
- "cylc": {
-  "revision": "6d1d81137112299324b526477ce1db989ab58fb8",
-  "sha256": "e8ccc1aa2caf3894265f04f0f179fcdb0e5a365547fb55784d5679e8efc1fb1f",
-  "symbol": "tree_sitter_cylc",
-  "scanner": ""
- },
  "desktop": {
   "revision": "v1.1.1",
   "sha256": "51b8fac0bb94709bd7f18c073ed1e40415052484196b4fd6487a4016124af6df",
