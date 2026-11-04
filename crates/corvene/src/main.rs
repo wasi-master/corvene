@@ -2054,6 +2054,31 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 cx,
             )
         }
+        // `1123-confirm-sensitive-clone`: a clone into ~/.config
+        ("sensitive-clone", _) => Dispatcher::show_popup(
+            Popup::ConfirmSensitiveClone {
+                url: "https://github.com/octocat/dotfiles.git".into(),
+                path: std::env::home_dir()
+                    .unwrap_or_default()
+                    .join(".config")
+                    .join("nvim"),
+                default_branch: None,
+                depth: None,
+            },
+            cx,
+        ),
+        // GHD 3.6.8 Remove Missing Worktree for a sample linked worktree
+        ("missing-worktree", Some(id)) => Dispatcher::show_popup(
+            Popup::DeleteWorktree {
+                repo: id,
+                path: std::path::PathBuf::from("/tmp/repo-feature"),
+                options: corvene_core::DeleteWorktreeOptions {
+                    missing: true,
+                    ..Default::default()
+                },
+            },
+            cx,
+        ),
         // GHD `showFakeUpstreamAlreadyExists` (test UI components):
         // an in-memory fork of desktop/desktop whose `upstream`
         // points elsewhere
