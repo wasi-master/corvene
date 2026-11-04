@@ -137,7 +137,9 @@ workflow artifacts:
   `.AppImage`, `.flatpak`, `.snap`, `-setup.exe`, `.msi`, signed `.apk`),
   its notes ending in a Downloads table of them
   (`packaging/release-table.py`: platforms as rows, architectures as
-  columns, one short link per asset),
+  columns, one short link per asset; the Full builds are left to the
+  Assets list so the body stays under the 10,000 characters GitHub's
+  /releases page previews),
   the `cask` artifact: `corvene.rb` with the version and every sha256
   filled in (also in the run summary), and the `aur` artifact
   ([AUR](#aur)).

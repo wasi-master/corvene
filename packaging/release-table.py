@@ -5,8 +5,11 @@
 
 Reads `{"assets": [{"name": …}], "body": …}` on stdin and prints the body
 with a `## Downloads` section: platforms as rows, architectures as columns,
-every asset a short link in its cell (`.dmg`, `.deb`, `foss`, …). A section
-this script wrote earlier is replaced, the rest of the body is kept. The
+every asset a short link in its cell (`.dmg`, `.deb`, `foss`, …). The Full
+builds get one line pointing at the Assets list instead of links: GitHub's
+/releases page previews only the first 10,000 characters of a body, and a
+cut inside the table shows a half-written link. A section this script wrote
+earlier is replaced, the rest of the body is kept. The
 section goes last and under a heading, so the Release Notes dialog
 (`corvene_core::release_notes`) does not read it as notes.
 """
@@ -80,7 +83,8 @@ def table(names, base):
     for name in names:
         if found := classify(name):
             row, column, label = found
-            cells.setdefault((row, column), []).append((label, name))
+            if not label.startswith("Full "):
+                cells.setdefault((row, column), []).append((label, name))
     lines = [
         "| | " + " | ".join(COLUMNS) + " |",
         "|---|" + ":---:|" * len(COLUMNS),
@@ -91,6 +95,8 @@ def table(names, base):
             links = sorted(cells.get((row, column), []), key=lambda link: rank(link[0]))
             line.append(" · ".join(f"[{label}]({base}/{name})" for label, name in links) or "—")
         lines.append(f"| **{row}** | " + " | ".join(line) + " |")
+    if any((found := classify(name)) and found[2].startswith("Full ") for name in names):
+        lines += ["", "The `Corvene-Full` builds are in the Assets list below."]
     return "\n".join(lines)
 
 
