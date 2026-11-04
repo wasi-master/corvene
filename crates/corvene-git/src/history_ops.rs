@@ -142,7 +142,13 @@ pub fn format_patch_range(
     head: &str,
 ) -> Result<String> {
     let out = GitCommand::new(git)
-        .args(["format-patch", "--unified=1", "--minimal", "--stdout"])
+        .args([
+            "format-patch",
+            "--unified=1",
+            "--minimal",
+            "--stdout",
+            "--end-of-options",
+        ])
         .arg(format!("{base}..{head}"))
         .current_dir(workdir)
         .run()?;
@@ -197,33 +203,32 @@ pub enum ResetMode {
     Soft,
 }
 
-/// GHD `resetModeToArgs`: `reset [--hard | --soft] <ref>`.
-fn reset_command(
-    git: Arc<GitBinary>,
-    workdir: &Path,
-    mode: ResetMode,
-    reference: &str,
-) -> GitCommand {
-    let mut cmd = GitCommand::new(git).args(["reset"]).current_dir(workdir);
+/// GHD `resetModeToArgs`: `reset [--hard | --soft]`, the options before
+/// the `--end-of-options <ref>` the callers add.
+fn reset_command(git: Arc<GitBinary>, workdir: &Path, mode: ResetMode) -> GitCommand {
+    let cmd = GitCommand::new(git).args(["reset"]).current_dir(workdir);
     match mode {
-        ResetMode::Hard => cmd = cmd.arg("--hard"),
-        ResetMode::Mixed => {}
-        ResetMode::Soft => cmd = cmd.arg("--soft"),
+        ResetMode::Hard => cmd.arg("--hard"),
+        ResetMode::Mixed => cmd,
+        ResetMode::Soft => cmd.arg("--soft"),
     }
-    cmd.arg(reference)
 }
 
-/// `reset(repository, mode, ref)`
+/// `reset(repository, mode, ref)`: `reset [--hard | --soft]
+/// --end-of-options <ref>`.
 pub fn reset_to(git: Arc<GitBinary>, workdir: &Path, mode: ResetMode, sha: &str) -> Result<()> {
-    reset_command(git, workdir, mode, sha).run()?;
+    reset_command(git, workdir, mode)
+        .args(["--end-of-options", sha])
+        .run()?;
     Ok(())
 }
 
-/// GHD `resetPaths`: `git reset [--hard | --soft] <ref> -- <paths>`, the
-/// index entries of `paths` set from `reference`; nothing for no paths. On
-/// Windows a mixed reset reads the paths from stdin, which no command line
-/// length limit cuts short: `--pathspec-from-file=- --pathspec-file-nul`
-/// (git 2.26+) where GHD passes Git for Windows' deprecated `--stdin -z`.
+/// GHD `resetPaths`: `git reset [--hard | --soft] --end-of-options <ref> --
+/// <paths>`, the index entries of `paths` set from `reference`; nothing
+/// for no paths. On Windows a mixed reset reads the paths from stdin, which
+/// no command line length limit cuts short: `--pathspec-from-file=-
+/// --pathspec-file-nul` (git 2.26+) where GHD passes Git for Windows'
+/// deprecated `--stdin -z`.
 pub fn reset_paths<P: AsRef<std::ffi::OsStr>>(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -234,7 +239,7 @@ pub fn reset_paths<P: AsRef<std::ffi::OsStr>>(
     if paths.is_empty() {
         return Ok(());
     }
-    let cmd = reset_command(git, workdir, mode, reference);
+    let cmd = reset_command(git, workdir, mode);
     if cfg!(windows) && mode == ResetMode::Mixed {
         let mut list: Vec<u8> = Vec::new();
         for (i, path) in paths.iter().enumerate() {
@@ -243,11 +248,18 @@ pub fn reset_paths<P: AsRef<std::ffi::OsStr>>(
             }
             list.extend_from_slice(path.as_ref().to_string_lossy().as_bytes());
         }
-        cmd.args(["--pathspec-from-file=-", "--pathspec-file-nul"])
-            .stdin(list)
-            .run()?;
+        cmd.args([
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+            "--end-of-options",
+            reference,
+        ])
+        .stdin(list)
+        .run()?;
     } else {
-        cmd.arg("--").args(paths).run()?;
+        cmd.args(["--end-of-options", reference, "--"])
+            .args(paths)
+            .run()?;
     }
     Ok(())
 }
@@ -277,14 +289,15 @@ pub fn create_tag(
     if !message.is_empty() {
         cmd = cmd.arg("--cleanup=whitespace");
     }
-    cmd.args([name, sha]).run()?;
+    // GHD 3.6.7 (desktop/desktop#22862) separates names this way
+    cmd.args(["--", name, sha]).run()?;
     Ok(())
 }
 
-/// `deleteTag`
+/// `deleteTag`: `git tag -d -- <name>`.
 pub fn delete_tag(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["tag", "-d", name])
+        .args(["tag", "-d", "--", name])
         .current_dir(workdir)
         .run()?;
     Ok(())

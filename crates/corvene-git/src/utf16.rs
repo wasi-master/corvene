@@ -211,7 +211,7 @@ fn read_side(git: Arc<GitBinary>, workdir: &Path, side: Side) -> Option<Option<V
                 Some(bytes) => bytes?,
                 None => {
                     let size = GitCommand::new(git.clone())
-                        .args(["cat-file", "-s", &spec])
+                        .args(["cat-file", "-s", "--end-of-options", &spec])
                         .current_dir(workdir)
                         .run()
                         .ok()?

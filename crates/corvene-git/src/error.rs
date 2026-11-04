@@ -49,6 +49,11 @@ pub enum GitError {
         .0.display()
     )]
     SensitiveClonePath(PathBuf),
+    /// GHD 3.6.7 `pull` (desktop/desktop#22862): `git pull` hands the
+    /// remote's name to its `git fetch` without a `--`, so a name that
+    /// starts with `-` would be read as an option.
+    #[error("Cannot pull from a remote whose name starts with '-'.")]
+    DashRemoteName(String),
 }
 
 impl From<gix::Error> for GitError {

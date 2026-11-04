@@ -240,10 +240,11 @@ pub fn commits_in_range(
     let out = GitCommand::new(git)
         .args([
             "rev-list",
-            range,
             "--reverse",
             "--oneline",
             "--no-abbrev-commit",
+            "--end-of-options",
+            range,
             "--",
         ])
         .current_dir(workdir)
@@ -290,7 +291,14 @@ pub fn merge_commits_exist_after(
         None => "HEAD".to_string(),
     };
     let out = GitCommand::new(git)
-        .args(["rev-list", "-1", "--merges", &revision, "--"])
+        .args([
+            "rev-list",
+            "-1",
+            "--merges",
+            "--end-of-options",
+            &revision,
+            "--",
+        ])
         .current_dir(workdir)
         .allow_exit_code(128)
         .run()?;
@@ -702,7 +710,7 @@ fn classify_rebase(workdir: &Path, result: Result<crate::process::GitOutput>) ->
     }
 }
 
-/// GHD `rebase`: `git rebase <base> <target>` with progress from stderr.
+/// GHD `rebase`: `git rebase -- <base> <target>` with progress from stderr.
 /// `keep_messages`: see [`cleanup_config`].
 pub fn rebase(
     git: Arc<GitBinary>,
@@ -719,6 +727,7 @@ pub fn rebase(
             "-c",
             "rebase.backend=merge",
             "rebase",
+            "--",
             base_branch,
             target_branch,
         ])
@@ -734,8 +743,8 @@ pub fn rebase(
     result
 }
 
-/// Corvene (`356-stacked-pull-requests`): `git rebase --onto <onto> <upstream>
-/// <target> --update-refs`, for a stack whose lower branch landed: the commits
+/// Corvene (`356-stacked-pull-requests`): `git rebase --update-refs --onto
+/// <onto> -- <upstream> <target>`, for a stack whose lower branch landed: the commits
 /// of `upstream..target` move onto `onto`, and local branches among them move
 /// along.
 #[allow(clippy::too_many_arguments)]
@@ -758,6 +767,7 @@ pub fn rebase_onto(
             "--update-refs",
             "--onto",
             onto,
+            "--",
             upstream,
             target_branch,
         ])
@@ -776,7 +786,7 @@ pub fn rebase_onto(
 /// Whether commit `ancestor` is in `descendant`'s history.
 pub fn is_ancestor(git: Arc<GitBinary>, workdir: &Path, ancestor: &str, descendant: &str) -> bool {
     GitCommand::new(git)
-        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .args(["merge-base", "--is-ancestor", "--", ancestor, descendant])
         .current_dir(workdir)
         .run()
         .is_ok()
@@ -785,7 +795,7 @@ pub fn is_ancestor(git: Arc<GitBinary>, workdir: &Path, ancestor: &str, descenda
 /// The subject line of commit `rev`.
 pub fn commit_subject(git: Arc<GitBinary>, workdir: &Path, rev: &str) -> Result<String> {
     Ok(GitCommand::new(git)
-        .args(["log", "-1", "--format=%s", rev])
+        .args(["log", "-1", "--format=%s", "--end-of-options", rev])
         .current_dir(workdir)
         .run()?
         .stdout_string()?

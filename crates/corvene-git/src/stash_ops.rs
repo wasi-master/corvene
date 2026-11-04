@@ -613,7 +613,7 @@ pub fn create_stash_with_message(
     Ok(true)
 }
 
-/// Corvene (`797-stash-list`): `git stash branch <branch> <name>` of the
+/// Corvene (`797-stash-list`): `git stash branch -- <branch> <name>` of the
 /// entry whose commit is `stash_sha`: a new branch at the commit the stash
 /// was made on, checked out, with the stash applied and (when that worked)
 /// dropped. [`StashPop::Missing`] when the entry is gone.
@@ -627,7 +627,7 @@ pub fn create_branch_from_stash(
         return Ok(StashPop::Missing);
     };
     let out = GitCommand::new(git.clone())
-        .args(["stash", "branch", branch, &entry.name])
+        .args(["stash", "branch", "--", branch, &entry.name])
         .current_dir(workdir)
         .allow_any_exit_code()
         .run()?;

@@ -401,8 +401,8 @@ pub struct LoggedCommit {
 
 /// Corvene `886-history-search`: the commits reachable from `tip` that
 /// match the query's `git log` limits, newest first (`git log -i -F
-/// --format=%H [--author] [--committer] [--before] [--after] <tip> [--follow --name-only
-/// -- <path>]`). Free words are left to [`filtered_history_page`].
+/// --format=%H [--author] [--committer] [--before] [--after] [--follow --name-only]
+/// --end-of-options <tip> -- [<path>]`). Free words are left to [`filtered_history_page`].
 pub fn filtered_history(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -438,8 +438,7 @@ pub fn filtered_history(
         args.push("--follow".into());
         args.push("--name-only".into());
     }
-    args.push(tip.to_string());
-    args.push("--".into());
+    args.extend(["--end-of-options".into(), tip.to_string(), "--".into()]);
     if let Some(path) = &query.path {
         args.push(path.clone());
     }
@@ -713,9 +712,9 @@ pub fn local_commit_shas(
 }
 
 /// Corvene `883-unpublished-commit-links`: the commits reachable from `tip`
-/// but from no remote-tracking branch (`rev-list <tip> --not --remotes`),
-/// newest first, at most `limit`. They are not on any remote, so links to
-/// them on GitHub would be dead.
+/// but from no remote-tracking branch (`rev-list --not --remotes --not
+/// --end-of-options <tip> --`), newest first, at most `limit`. They are not
+/// on any remote, so links to them on GitHub would be dead.
 pub fn local_only_commits(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -726,9 +725,15 @@ pub fn local_only_commits(
         .args([
             "rev-list",
             &format!("--max-count={limit}"),
-            tip,
             "--not",
             "--remotes",
+            // GHD 3.6.7 (desktop/desktop#22862): `tip` after
+            // `--end-of-options`, which must come last, with the exclusion
+            // toggled off again
+            "--not",
+            "--end-of-options",
+            tip,
+            "--",
         ])
         .current_dir(workdir)
         .run()?;
@@ -1457,7 +1462,12 @@ pub fn remerge_file_diff(
 /// <commitish>^{commit}`): a pull request head may not be fetched yet.
 pub fn commit_exists(git: Arc<GitBinary>, workdir: &Path, commitish: &str) -> bool {
     GitCommand::new(git)
-        .args(["cat-file", "-e", &format!("{commitish}^{{commit}}")])
+        .args([
+            "cat-file",
+            "-e",
+            "--end-of-options",
+            &format!("{commitish}^{{commit}}"),
+        ])
         .current_dir(workdir)
         .allow_exit_code(1)
         .allow_exit_code(128)
@@ -1469,7 +1479,7 @@ pub fn commit_exists(git: Arc<GitBinary>, workdir: &Path, commitish: &str) -> bo
 /// (exit code 1) or a ref cannot be found (128).
 pub fn merge_base(git: Arc<GitBinary>, workdir: &Path, a: &str, b: &str) -> Result<Option<String>> {
     let out = GitCommand::new(git)
-        .args(["merge-base", a, b])
+        .args(["merge-base", "--", a, b])
         .current_dir(workdir)
         .allow_exit_code(1)
         .allow_exit_code(128)
@@ -1539,7 +1549,9 @@ pub fn range_changed_files(
     if merge_base {
         args.push("--merge-base");
     }
-    args.extend([from, to, "-C", "-M", "-z", "--raw", "--numstat", "--"]);
+    // GHD 3.6.7 (desktop/desktop#22862): the refs after `--end-of-options`
+    args.extend(["-C", "-M", "-z", "--raw", "--numstat", "--end-of-options"]);
+    args.extend([from, to, "--"]);
     let out = GitCommand::new(git).args(args).current_dir(workdir).run()?;
     Ok(Some(parse_raw_log_with_numstat(&out.stdout, newest)))
 }
@@ -1561,11 +1573,12 @@ pub fn range_file_diff(
     if merge_base {
         args.push("--merge-base");
     }
-    args.extend([from, to]);
     if hide_whitespace {
         args.push("-w");
     }
-    args.extend(["--patch-with-raw", "-z", "--no-color", "--"]);
+    // GHD 3.6.7 (desktop/desktop#22862): the refs after `--end-of-options`
+    args.extend(["--patch-with-raw", "-z", "--no-color", "--end-of-options"]);
+    args.extend([from, to, "--"]);
     let mut cmd = GitCommand::new(git.clone())
         .args(args)
         .current_dir(workdir)

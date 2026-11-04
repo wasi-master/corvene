@@ -24,7 +24,9 @@ fn nul_separated(stdout: &[u8]) -> Vec<String> {
 pub fn list_files(git: Arc<GitBinary>, workdir: &Path, rev: Option<&str>) -> Result<Vec<String>> {
     let command = GitCommand::new(git).current_dir(workdir);
     let command = match rev {
-        Some(rev) => command.args(["ls-tree", "-r", "-z", "--name-only", rev]),
+        // `--` ends ls-tree's options; it takes no `--end-of-options`
+        // before a tree and then reads a later `--` as a path
+        Some(rev) => command.args(["ls-tree", "-r", "-z", "--name-only", "--", rev]),
         None => command.args([
             "ls-files",
             "-z",

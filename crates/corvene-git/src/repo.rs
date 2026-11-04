@@ -267,6 +267,7 @@ pub fn symmetric_ahead_behind(
             "rev-list",
             "--left-right",
             "--count",
+            "--end-of-options",
             &format!("{base}...{other}"),
             "--",
         ])
@@ -283,7 +284,8 @@ pub fn symmetric_ahead_behind(
     Ok(Some(AheadBehind { ahead, behind }))
 }
 
-/// `git rev-list --left-right --count <branch>...<upstream>` → (ahead, behind).
+/// `git rev-list --left-right --count --end-of-options <branch>...<upstream>`
+/// → (ahead, behind).
 /// CLI for now; gix gains a revwalk-with-hidden helper later.
 pub fn ahead_behind(
     git: Arc<GitBinary>,
@@ -298,6 +300,7 @@ pub fn ahead_behind(
             "rev-list",
             "--left-right",
             "--count",
+            "--end-of-options",
             &format!("{}...{}", branch.full_name, upstream),
         ])
         .current_dir(workdir)

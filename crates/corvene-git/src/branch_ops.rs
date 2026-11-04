@@ -69,7 +69,7 @@ pub fn move_branch_back(
     Ok(())
 }
 
-/// `createBranch`: `git branch [--no-track] <name> [<start point>]`.
+/// `createBranch`: `git branch [--no-track] -- <name> [<start point>]`.
 pub fn create_branch(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -81,7 +81,8 @@ pub fn create_branch(
     if no_track {
         cmd = cmd.arg("--no-track");
     }
-    cmd = cmd.arg(name);
+    // GHD 3.6.7 (desktop/desktop#22862)
+    cmd = cmd.args(["--", name]);
     if let Some(start) = start_point {
         cmd = cmd.arg(start);
     }
@@ -89,7 +90,7 @@ pub fn create_branch(
     Ok(())
 }
 
-/// Corvene (`1223-checkout-from-fork`): `git branch --track <name>
+/// Corvene (`1223-checkout-from-fork`): `git branch --track -- <name>
 /// refs/remotes/<remote>/<branch>`, a branch tracking that remote branch
 /// whatever `branch.autoSetupMerge` says. The full ref keeps a local
 /// `<remote>/<branch>` branch from shadowing the start point.
@@ -104,6 +105,7 @@ pub fn create_tracking_branch(
         .args([
             "branch".to_string(),
             "--track".to_string(),
+            "--".to_string(),
             name.to_string(),
             format!("refs/remotes/{remote}/{branch}"),
         ])
@@ -152,8 +154,9 @@ pub fn checkout_branch(git: Arc<GitBinary>, workdir: &Path, branch: &Branch) -> 
     checkout_branch_with(git, workdir, branch, &CheckoutOptions::default())
 }
 
-/// `checkoutBranch`: local branches by name; remote branches become a
-/// tracking local branch (`checkout -b <short> <remote/short>`). Then the
+/// `checkoutBranch`: local branches by name (`checkout --end-of-options
+/// <name> --`); remote branches become a tracking local branch (`checkout
+/// -b <short> refs/remotes/<remote>/<short> --`, GHD 3.6.7). Then the
 /// submodules follow the checkout as `options.submodules` says (GHD 3.6.6
 /// `updateSubmodulesAfterOperation`); a failure there is returned although
 /// the branch is checked out, as in GHD. Inside
@@ -177,12 +180,20 @@ pub fn checkout_branch_with(
     for (key, value) in crate::proxy::env_for_fallback(git.clone(), workdir, false) {
         cmd = cmd.env(key, value);
     }
+    // GHD 3.6.7 (desktop/desktop#22862): a remote branch starts from its
+    // full ref and a local one comes after `--end-of-options`, so a name
+    // starting with `-` is not read as an option; the `--` ends the
+    // revisions (paths would follow)
     cmd = match branch.kind {
-        BranchKind::Local => cmd.arg(&branch.name).arg("--"),
+        BranchKind::Local => cmd.args(["--end-of-options", &branch.name, "--"]),
         BranchKind::Remote => cmd
             .arg("-b")
             .arg(branch.name_without_remote())
-            .arg(&branch.name)
+            .arg(if branch.full_name.is_empty() {
+                &branch.name
+            } else {
+                &branch.full_name
+            })
             .arg("--"),
     };
     // Corvene (`1114-hook-results`): GHD never intercepts a checkout's
@@ -247,10 +258,10 @@ pub fn checkout_new_branch(git: Arc<GitBinary>, workdir: &Path, name: &str) -> R
     Ok(())
 }
 
-/// `renameBranch`: `git branch -m <old> <new>`.
+/// `renameBranch`: `git branch -m -- <old> <new>`.
 pub fn rename_branch(git: Arc<GitBinary>, workdir: &Path, old: &str, new: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["branch", "-m", old, new])
+        .args(["branch", "-m", "--", old, new])
         .current_dir(workdir)
         .run()?;
     Ok(())
@@ -264,6 +275,7 @@ pub fn set_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str, upstream: &
         .args([
             "branch".to_string(),
             format!("--set-upstream-to={upstream}"),
+            "--".to_string(),
             name.to_string(),
         ])
         .current_dir(workdir)
@@ -276,22 +288,22 @@ pub fn set_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str, upstream: &
 /// own name).
 pub fn unset_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["branch", "--unset-upstream", name])
+        .args(["branch", "--unset-upstream", "--", name])
         .current_dir(workdir)
         .run()?;
     Ok(())
 }
 
-/// `deleteLocalBranch`: `git branch -D <name>`.
+/// `deleteLocalBranch`: `git branch -D -- <name>`.
 pub fn delete_local_branch(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["branch", "-D", name])
+        .args(["branch", "-D", "--", name])
         .current_dir(workdir)
         .run()?;
     Ok(())
 }
 
-/// `deleteRemoteBranch`: `git push <remote> :<name>`. When the remote no
+/// `deleteRemoteBranch`: `git push -- <remote> :<name>`. When the remote no
 /// longer has the branch (`BranchDeletionFailed`) the push failing is
 /// expected: the remote-tracking ref `refs/remotes/<remote>/<name>` is
 /// deleted instead, as the push would have done.
@@ -315,7 +327,7 @@ pub fn delete_remote_branch_with(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     let out = crate::remote_ops::remote_operation(git.clone(), workdir, remote, askpass)
-        .args(["push", remote])
+        .args(["push", "--", remote])
         .arg(format!(":{name}"))
         .expected_errors([KnownGitError::BranchDeletionFailed])
         .run()?;
@@ -367,8 +379,8 @@ pub fn get_merged_branches(
         .args([
             "branch",
             "--format=%(objectname)%00%(refname)",
-            "--merged",
-            branch_name,
+            // one argument, so a name starting with `-` stays the value
+            &format!("--merged={branch_name}"),
         ])
         .current_dir(workdir)
         .run()?;
@@ -660,7 +672,8 @@ pub fn merge_branch_with_message(
     if squash {
         cmd = cmd.arg("--squash");
     }
-    let out = cmd.arg(branch).allow_exit_code(1).run()?;
+    // GHD 3.6.7 (desktop/desktop#22862)
+    let out = cmd.args(["--", branch]).allow_exit_code(1).run()?;
     if !out.status.success() {
         let git_dir = crate::paths::git_dir(workdir);
         let stdout = out.stdout_string().unwrap_or_default();
@@ -713,7 +726,7 @@ pub fn abort_merge(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 /// Commits in `other` that are not in `base` (`getAheadBehind(base..other)`).
 pub fn commits_ahead(git: Arc<GitBinary>, workdir: &Path, base: &str, other: &str) -> Result<u32> {
     let out = GitCommand::new(git)
-        .args(["rev-list", "--count"])
+        .args(["rev-list", "--count", "--end-of-options"])
         .arg(format!("{base}..{other}"))
         .current_dir(workdir)
         .run()?;
@@ -721,8 +734,10 @@ pub fn commits_ahead(git: Arc<GitBinary>, workdir: &Path, base: &str, other: &st
 }
 
 /// Commits reachable from `branch` but from none of `bases`
-/// (`rev-list --count <branch> --not <bases…>`); the delete-branch warning.
-/// With no bases every commit of the branch counts.
+/// (`rev-list --count --not <bases…> --not --end-of-options <branch> --`);
+/// the delete-branch warning. With no bases every commit of the branch
+/// counts. Only `branch` is past `--end-of-options` (git refuses `^-…`, and
+/// the `--not` toggle must come before it), so `bases` are full ref names.
 pub fn commits_not_in(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -730,9 +745,9 @@ pub fn commits_not_in(
     bases: &[String],
 ) -> Result<u32> {
     let out = GitCommand::new(git)
-        .args(["rev-list", "--count", branch, "--not"])
+        .args(["rev-list", "--count", "--not"])
         .args(bases.iter().map(String::as_str))
-        .arg("--")
+        .args(["--not", "--end-of-options", branch, "--"])
         .current_dir(workdir)
         .run()?;
     Ok(out.stdout_string()?.trim().parse().unwrap_or(0))
@@ -1577,5 +1592,148 @@ eeee commit: something\n";
             },
         )
         .unwrap();
+    }
+
+    /// GHD 3.6.7 (desktop/desktop#22862): git refuses to create a branch
+    /// whose name starts with `-`, but `update-ref` or a fetch can still
+    /// make one, and it must never be read as an option.
+    #[test]
+    fn names_starting_with_a_dash_are_not_options() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let first = run(&["rev-parse", "HEAD"]);
+        run(&["update-ref", "refs/heads/--local", "HEAD"]);
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        run(&["commit", "-q", "-am", "second"]);
+        let second = run(&["rev-parse", "HEAD"]);
+
+        // rev-list, log, merge-base and diff
+        assert_eq!(
+            commits_ahead(git.clone(), path, "--local", "main").unwrap(),
+            1
+        );
+        let main = ["refs/heads/main".to_string()];
+        assert_eq!(
+            commits_not_in(git.clone(), path, "--local", &main).unwrap(),
+            0
+        );
+        let local = ["refs/heads/--local".to_string()];
+        assert_eq!(
+            commits_not_in(git.clone(), path, "main", &local).unwrap(),
+            1
+        );
+        let between = crate::rebase_ops::commits_between(git.clone(), path, "--local", "main")
+            .unwrap()
+            .unwrap();
+        assert_eq!(between.len(), 1);
+        assert_eq!(between[0].sha, second);
+        assert_eq!(
+            crate::log::merge_base(git.clone(), path, "--local", "main").unwrap(),
+            Some(first.clone())
+        );
+        assert!(crate::rebase_ops::is_ancestor(
+            git.clone(),
+            path,
+            "--local",
+            "main"
+        ));
+        assert_eq!(
+            crate::rebase_ops::commit_subject(git.clone(), path, "--local").unwrap(),
+            "first"
+        );
+        assert_eq!(
+            crate::log::local_only_commits(git.clone(), path, "--local", 10).unwrap(),
+            vec![first.clone()]
+        );
+        let history = crate::log::filtered_history(
+            git.clone(),
+            path,
+            "--local",
+            &crate::log::HistoryQuery::default(),
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].sha, first);
+        assert_eq!(
+            crate::repo::symmetric_ahead_behind(git.clone(), path, "--local", "main").unwrap(),
+            Some(corvene_models::AheadBehind {
+                ahead: 0,
+                behind: 1
+            })
+        );
+        let changed =
+            crate::log::range_changed_files(git.clone(), path, "--local", "main", true, &second)
+                .unwrap()
+                .unwrap();
+        assert_eq!(changed.files.len(), 1);
+        assert_eq!(
+            crate::diff::resolve_blob_revision(git.clone(), path, "--local").unwrap(),
+            first
+        );
+        assert_eq!(
+            crate::file_browser::list_files(git.clone(), path, Some("--local")).unwrap(),
+            vec!["a.txt".to_string()]
+        );
+
+        // branches and tags
+        create_branch(git.clone(), path, "from-dash", Some("--local"), false).unwrap();
+        assert_eq!(run(&["rev-parse", "from-dash"]), first);
+        assert!(
+            get_merged_branches(git.clone(), path, "--local")
+                .unwrap()
+                .contains_key("refs/heads/from-dash")
+        );
+        crate::history_ops::create_tag(git.clone(), path, "v1", "--local", "").unwrap();
+        assert_eq!(run(&["rev-parse", "v1^{commit}"]), first);
+        crate::history_ops::delete_tag(git.clone(), path, "v1").unwrap();
+        delete_local_branch(git.clone(), path, "from-dash").unwrap();
+
+        // checkout, then merge and reset by the dash name
+        let branch = Branch {
+            name: "--local".into(),
+            kind: BranchKind::Local,
+            full_name: "refs/heads/--local".into(),
+            tip: Some(first.clone()),
+            upstream: None,
+            tip_time: None,
+            tip_author: None,
+            remote_name: None,
+        };
+        checkout_branch(git.clone(), path, &branch).unwrap();
+        assert_eq!(run(&["symbolic-ref", "HEAD"]), "refs/heads/--local");
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "one\n"
+        );
+        run(&["checkout", "-q", "main"]);
+        crate::history_ops::reset_to(
+            git.clone(),
+            path,
+            crate::history_ops::ResetMode::Hard,
+            "--local",
+        )
+        .unwrap();
+        assert_eq!(run(&["rev-parse", "HEAD"]), first);
+        assert_eq!(
+            merge_branch(git.clone(), path, "--local", false).unwrap(),
+            MergeOutcome::AlreadyUpToDate
+        );
+        rename_branch(git, path, "--local", "renamed").unwrap();
+        assert_eq!(run(&["rev-parse", "renamed"]), first);
     }
 }

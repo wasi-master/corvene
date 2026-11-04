@@ -155,7 +155,7 @@ fn locate(
                 .and_then(|repo| Some(repo.rev_parse_single(spec.as_str()).ok()?.to_string()))
                 .or_else(|| {
                     GitCommand::new(git.clone())
-                        .args(["rev-parse", "--verify", "-q", &spec])
+                        .args(["rev-parse", "--verify", "-q", "--end-of-options", &spec])
                         .current_dir(workdir)
                         .run()
                         .ok()

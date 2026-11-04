@@ -195,6 +195,16 @@ pub fn blame(
     cancel: Option<CancelToken>,
     mut on_event: impl FnMut(BlameEvent),
 ) -> Result<()> {
+    // GHD 3.6.7 (desktop/desktop#22862): a revision starting with `-` as its
+    // sha; blame takes no `--end-of-options` before a revision
+    let resolved = match rev {
+        Some(rev) => Some(crate::diff::resolve_blob_revision(
+            git.clone(),
+            workdir,
+            rev,
+        )?),
+        None => None,
+    };
     let mut cmd = GitCommand::new(git)
         .args(["blame", "--incremental"])
         .current_dir(workdir);
@@ -216,8 +226,8 @@ pub fn blame(
     if let Some((first, last)) = options.line_range {
         cmd = cmd.args(["-L".to_string(), format!("{first},{last}")]);
     }
-    if let Some(rev) = rev {
-        cmd = cmd.arg(rev);
+    if let Some(rev) = &resolved {
+        cmd = cmd.arg(rev.as_ref());
     }
     cmd = cmd.args(["--", path]);
     if let Some(cancel) = cancel {

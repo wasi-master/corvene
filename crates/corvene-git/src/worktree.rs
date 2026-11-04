@@ -117,7 +117,7 @@ pub fn resolve_main_worktree_path(
         .filter(|main| main != path))
 }
 
-/// GHD `addWorktree`: `git worktree add [-b <branch>] <path> [<commitish>]`.
+/// GHD `addWorktree`: `git worktree add [-b <branch>] -- <path> [<commitish>]`.
 pub fn add_worktree(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -131,7 +131,8 @@ pub fn add_worktree(
     if let Some(branch) = create_branch {
         cmd = cmd.args(["-b", branch]);
     }
-    cmd = cmd.arg(path);
+    // GHD 3.6.7 (desktop/desktop#22862)
+    cmd = cmd.arg("--").arg(path);
     if let Some(commitish) = commitish {
         cmd = cmd.arg(commitish);
     }
@@ -139,7 +140,7 @@ pub fn add_worktree(
     Ok(())
 }
 
-/// GHD `removeWorktree`: `git worktree remove [--force] <path>`.
+/// GHD `removeWorktree`: `git worktree remove [--force] -- <path>`.
 pub fn remove_worktree(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -152,14 +153,14 @@ pub fn remove_worktree(
     if force {
         cmd = cmd.arg("--force");
     }
-    cmd.arg(path).run()?;
+    cmd.arg("--").arg(path).run()?;
     Ok(())
 }
 
-/// GHD `moveWorktree`: `git worktree move <old> <new>`.
+/// GHD `moveWorktree`: `git worktree move -- <old> <new>`.
 pub fn move_worktree(git: Arc<GitBinary>, workdir: &Path, old: &Path, new: &Path) -> Result<()> {
     GitCommand::new(git)
-        .args(["worktree", "move"])
+        .args(["worktree", "move", "--"])
         .arg(old)
         .arg(new)
         .current_dir(workdir)

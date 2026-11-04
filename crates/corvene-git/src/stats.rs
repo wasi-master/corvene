@@ -299,7 +299,7 @@ pub fn stats_commit_count(
             args.push("--branches".into());
             args.push("--remotes".into());
         }
-        StatsScope::Ref(name) => args.push(name.clone()),
+        StatsScope::Ref(name) => args.extend(["--end-of-options".into(), name.clone()]),
     }
     args.push("--".into());
     let out = GitCommand::new(git)
@@ -351,7 +351,7 @@ pub fn repository_stats(
             args.push("--branches".into());
             args.push("--remotes".into());
         }
-        StatsScope::Ref(name) => args.push(name.clone()),
+        StatsScope::Ref(name) => args.extend(["--end-of-options".into(), name.clone()]),
     }
     args.push("--".into());
     let mut builder = StatsBuilder::new();

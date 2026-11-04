@@ -919,11 +919,33 @@ pub fn blob_bytes(
     if let Some(bytes) = crate::handle::blob_bytes(workdir, commitish, path) {
         return Ok(bytes);
     }
+    let revision = resolve_blob_revision(git.clone(), workdir, commitish)?;
     let out = GitCommand::new(git)
-        .args(["show", &format!("{commitish}:{path}")])
+        .args(["show", &format!("{revision}:{path}")])
         .current_dir(workdir)
         .run()?;
     Ok(out.stdout)
+}
+
+/// GHD 3.6.7 `resolveBlobRevision` (desktop/desktop#22862): a revision
+/// that starts with `-` as the commit it names (`rev-parse --verify
+/// --end-of-options`), so `<revision>:<path>` is not read as an option and
+/// a missing path is reported as one (and for `git blame`, which takes no
+/// `--end-of-options` before a revision). Other revisions are returned as
+/// they are.
+pub(crate) fn resolve_blob_revision<'a>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    commitish: &'a str,
+) -> Result<std::borrow::Cow<'a, str>> {
+    if !commitish.starts_with('-') {
+        return Ok(commitish.into());
+    }
+    let out = GitCommand::new(git)
+        .args(["rev-parse", "--verify", "--end-of-options", commitish])
+        .current_dir(workdir)
+        .run()?;
+    Ok(out.stdout_string()?.trim().to_string().into())
 }
 
 /// File contents as lines for hunk expansion; a trailing newline does not

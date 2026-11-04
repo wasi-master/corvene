@@ -261,7 +261,7 @@ pub(crate) fn pin(
                 Some(found) => found,
                 None => {
                     let oid = GitCommand::new(git.clone())
-                        .args(["rev-parse", "--verify", "-q", &spec])
+                        .args(["rev-parse", "--verify", "-q", "--end-of-options", &spec])
                         .current_dir(workdir)
                         .run()
                         .ok()

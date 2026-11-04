@@ -672,7 +672,7 @@ pub fn find_default_remote(remotes: &[Remote]) -> Option<&Remote> {
 
 pub fn add_remote(git: Arc<GitBinary>, workdir: &Path, name: &str, url: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["remote", "add", name, url])
+        .args(["remote", "add", "--", name, url])
         .current_dir(workdir)
         .run()?;
     Ok(())
@@ -680,7 +680,7 @@ pub fn add_remote(git: Arc<GitBinary>, workdir: &Path, name: &str, url: &str) ->
 
 pub fn set_remote_url(git: Arc<GitBinary>, workdir: &Path, name: &str, url: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["remote", "set-url", name, url])
+        .args(["remote", "set-url", "--", name, url])
         .current_dir(workdir)
         .run()?;
     Ok(())
@@ -688,7 +688,7 @@ pub fn set_remote_url(git: Arc<GitBinary>, workdir: &Path, name: &str, url: &str
 
 pub fn remove_remote(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["remote", "remove", name])
+        .args(["remote", "remove", "--", name])
         .current_dir(workdir)
         .allow_exit_code(2)
         .allow_exit_code(128)
@@ -701,15 +701,16 @@ pub fn remove_remote(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<
 /// `branch.*.pushRemote` and `remote.pushDefault` settings naming it.
 pub fn rename_remote(git: Arc<GitBinary>, workdir: &Path, old: &str, new: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["remote", "rename", old, new])
+        .args(["remote", "rename", "--", old, new])
         .current_dir(workdir)
         .run()?;
     Ok(())
 }
 
 /// Corvene (`1109-remote-manager`): how many commits of `rev` no
-/// remote-tracking branch of `remote` has (`git rev-list --count <rev>
-/// --not --remotes=<remote>`), for a branch not on that remote yet.
+/// remote-tracking branch of `remote` has (`git rev-list --count --not
+/// --remotes=<remote> --not --end-of-options <rev> --`), for a branch not
+/// on that remote yet.
 pub fn commits_not_on_remote(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -720,9 +721,15 @@ pub fn commits_not_on_remote(
         .args([
             "rev-list".to_string(),
             "--count".to_string(),
-            rev.to_string(),
             "--not".to_string(),
             format!("--remotes={remote}"),
+            // GHD 3.6.7 (desktop/desktop#22862): `rev` after
+            // `--end-of-options`, which must come after the options, so the
+            // second `--not` turns the exclusion off again
+            "--not".to_string(),
+            "--end-of-options".to_string(),
+            rev.to_string(),
+            "--".to_string(),
         ])
         .current_dir(workdir)
         .run()?;
@@ -758,7 +765,7 @@ pub fn update_remote_head(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["remote", "set-head", "-a", remote])
+        .args(["remote", "set-head", "-a", "--", remote])
         .allow_exit_code(1)
         .allow_exit_code(128)
         .run()?;
@@ -797,7 +804,7 @@ pub fn prune_remote(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["remote", "prune", remote])
+        .args(["remote", "prune", "--", remote])
         .run()?;
     Ok(())
 }
@@ -887,7 +894,7 @@ pub fn fetch_with(
     } else {
         "--recurse-submodules=on-demand"
     });
-    args.push(remote);
+    args.extend(["--", remote]);
     let result = run_with_progress(
         remote_operation(git.clone(), workdir, remote, askpass).args(&args),
         &mut parser,
@@ -944,7 +951,7 @@ pub fn fetch_tags(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["fetch", "--tags", "--no-recurse-submodules", remote])
+        .args(["fetch", "--tags", "--no-recurse-submodules", "--", remote])
         .run()?;
     Ok(())
 }
@@ -958,7 +965,7 @@ pub fn fetch_refspec(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["fetch", remote, refspec])
+        .args(["fetch", "--", remote, refspec])
         .allow_exit_code(128)
         .run()?;
     Ok(())
@@ -973,7 +980,7 @@ pub fn ls_remote_heads(
     askpass: Option<&AskpassEnv>,
 ) -> Result<Vec<String>> {
     let out = remote_operation(git, workdir, url, askpass)
-        .args(["ls-remote", "--heads", url])
+        .args(["ls-remote", "--heads", "--", url])
         .run()?;
     let mut heads: Vec<String> = out
         .stdout_string()?
@@ -1001,6 +1008,7 @@ pub fn fetch_remote_branch(
         .args([
             "fetch".to_string(),
             "--no-tags".to_string(),
+            "--".to_string(),
             remote.to_string(),
             format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}"),
         ])
@@ -1024,6 +1032,7 @@ pub fn fast_forward_branch_from_remote(
     remote_operation(git, workdir, remote, askpass)
         .args([
             "fetch".to_string(),
+            "--".to_string(),
             remote.to_string(),
             format!("refs/heads/{remote_branch}:refs/heads/{local}"),
         ])
@@ -1087,9 +1096,10 @@ pub fn config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Option<St
         .filter(|s| !s.is_empty())
 }
 
-/// GHD `pull`: `pull [--ff] --recurse-submodules --progress <remote>`;
+/// GHD `pull`: `pull [--ff] --recurse-submodules --progress -- <remote>`;
 /// `skip_submodules` passes `--no-recurse-submodules` instead (Corvene
-/// addition, desktop#15758).
+/// addition, desktop#15758). A remote whose name starts with `-` is refused
+/// ([`GitError::DashRemoteName`]).
 pub fn pull(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -1098,6 +1108,11 @@ pub fn pull(
     askpass: Option<&AskpassEnv>,
     on_progress: ProgressFn<'_>,
 ) -> Result<()> {
+    // GHD 3.6.7 (desktop/desktop#22862): pull passes the name on to fetch
+    // without a separator
+    if remote.starts_with('-') {
+        return Err(GitError::DashRemoteName(remote.to_string()));
+    }
     let mut parser = ProgressParser::pull();
     let mut args: Vec<&str> = vec!["-c", "rebase.backend=merge", "pull"];
     let pull_ff = config_value(git.clone(), workdir, "pull.ff");
@@ -1109,7 +1124,7 @@ pub fn pull(
     } else {
         "--recurse-submodules"
     });
-    args.extend(["--progress", remote]);
+    args.extend(["--progress", "--", remote]);
     let cmd = remote_operation(git, workdir, remote, askpass)
         .args(&args)
         .env("GIT_EDITOR", ":")
@@ -1262,8 +1277,8 @@ pub struct PushProgress {
     pub branch: String,
 }
 
-/// GHD `push`: `push <remote> <local>[:<remote branch>] [tags…]
-/// [--set-upstream | --force-with-lease] --progress`, reporting
+/// GHD `push`: `push [--set-upstream | --force-with-lease] --progress --
+/// <remote> <local>[:<remote branch>] [tags…]`, reporting
 /// `(percent, description)` for every line git prints (GHD shows each one,
 /// at the last percent for a line that is not a step) and Git LFS's
 /// uploads. [`push_with_progress`] with GHD's `IPushProgress` callback
@@ -1316,14 +1331,15 @@ pub fn push_with_progress(
         Some(rb) => format!("{local_branch}:{rb}"),
         None => local_branch.to_string(),
     };
-    let mut args: Vec<String> = vec!["push".into(), remote.into(), refspec];
-    args.extend(tags.iter().cloned());
+    let mut args: Vec<String> = vec!["push".into()];
     if remote_branch.is_none() {
         args.push("--set-upstream".into());
     } else if force_with_lease {
         args.push("--force-with-lease".into());
     }
     args.push("--progress".into());
+    args.extend(["--".into(), remote.into(), refspec]);
+    args.extend(tags.iter().cloned());
     let title = format!("Pushing to {remote}");
     let mut report = |description: Option<String>, value: f32| {
         on_progress(PushProgress {
@@ -1347,7 +1363,7 @@ pub fn push_with_progress(
 
 /// GHD `fetchTagsToPush` (`lib/git/tag.ts`): the local tags a push of
 /// `branch` to `remote` would send, from the `[new tag]` lines of `git push
-/// <remote> <branch> --follow-tags --dry-run --no-verify --porcelain`. Exit
+/// --follow-tags --dry-run --no-verify --porcelain -- <remote> <branch>`. Exit
 /// code 1 (the branch itself would be rejected) still lists the tags; any
 /// other failure is an error. GHD 3.6.6 calls it only from its tests (the
 /// app keeps its own list of tags to push, as Corvene does).
@@ -1361,12 +1377,13 @@ pub fn fetch_tags_to_push(
     let out = remote_operation(git, workdir, remote, askpass)
         .args([
             "push",
-            remote,
-            branch,
             "--follow-tags",
             "--dry-run",
             "--no-verify",
             "--porcelain",
+            "--",
+            remote,
+            branch,
         ])
         .allow_exit_code(1)
         .run()?;
@@ -1387,7 +1404,7 @@ pub fn fetch_tags_to_push(
         .collect())
 }
 
-/// Corvene addition (flag `826`): `git push <remote> --delete
+/// Corvene addition (flag `826`): `git push --delete -- <remote>
 /// refs/tags/<tag>`.
 pub fn delete_remote_tag(
     git: Arc<GitBinary>,
@@ -1397,12 +1414,18 @@ pub fn delete_remote_tag(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["push", remote, "--delete", &format!("refs/tags/{tag}")])
+        .args([
+            "push",
+            "--delete",
+            "--",
+            remote,
+            &format!("refs/tags/{tag}"),
+        ])
         .run()?;
     Ok(())
 }
 
-/// Corvene (`346-releases`): `git push <remote> refs/tags/<tag>`, one
+/// Corvene (`346-releases`): `git push -- <remote> refs/tags/<tag>`, one
 /// tag on its own (a release needs its tag on GitHub first).
 pub fn push_tag(
     git: Arc<GitBinary>,
@@ -1412,7 +1435,7 @@ pub fn push_tag(
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
     remote_operation(git, workdir, remote, askpass)
-        .args(["push", remote, &format!("refs/tags/{tag}")])
+        .args(["push", "--", remote, &format!("refs/tags/{tag}")])
         .run()?;
     Ok(())
 }
@@ -1423,7 +1446,8 @@ pub fn push_tag(
 /// `target` has no parent.
 pub fn previous_tag(git: Arc<GitBinary>, workdir: &Path, target: &str) -> Result<Option<String>> {
     let out = GitCommand::new(git)
-        .args(["describe", "--tags", "--abbrev=0", &format!("{target}^")])
+        .args(["describe", "--tags", "--abbrev=0", "--end-of-options"])
+        .arg(format!("{target}^"))
         .current_dir(workdir)
         .allow_exit_code(128)
         .run()?;
@@ -1683,7 +1707,7 @@ pub fn upstream_tip_in_reflog(
     upstream: &str,
 ) -> bool {
     let Ok(out) = GitCommand::new(git.clone())
-        .args(["rev-parse", "-q", "--verify"])
+        .args(["rev-parse", "-q", "--verify", "--end-of-options"])
         .arg(format!("{upstream}^{{commit}}"))
         .current_dir(workdir)
         .run()
@@ -2843,5 +2867,150 @@ mod tests {
         assert_eq!(remote_tags().trim(), "v1");
         delete_remote_tag(git.clone(), &work, "origin", "v1", None).unwrap();
         assert_eq!(remote_tags().trim(), "");
+    }
+
+    /// GHD 3.6.7 (desktop/desktop#22862): a remote named `-r` and a branch
+    /// on it named `--remote` go through push, fetch, checkout and delete
+    /// without git reading them as options; pull refuses the remote.
+    #[test]
+    fn remotes_and_branches_starting_with_a_dash() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+        );
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", work.to_str().unwrap()],
+        );
+        run(&work, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(work.join("a.txt"), "one\n").unwrap();
+        run(&work, &["add", "."]);
+        run(&work, &["commit", "-q", "-m", "first"]);
+        run(&work, &["update-ref", "refs/heads/--local", "HEAD"]);
+        let rev = |r: &str| {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "--verify", "-q", "--end-of-options", r])
+                .current_dir(&work)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        let first = rev("HEAD");
+        add_remote(git.clone(), &work, "-r", bare.to_str().unwrap()).unwrap();
+        assert_eq!(get_remotes(git.clone(), &work).unwrap()[0].name, "-r");
+
+        // push
+        push(
+            git.clone(),
+            &work,
+            "-r",
+            "main",
+            None,
+            &[],
+            false,
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(
+            config_value(git.clone(), &work, "branch.main.remote").as_deref(),
+            Some("-r")
+        );
+        push(
+            git.clone(),
+            &work,
+            "-r",
+            "--local",
+            Some("--remote"),
+            &[],
+            false,
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        push(
+            git.clone(),
+            &work,
+            "-r",
+            "main",
+            Some("feature"),
+            &[],
+            false,
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(
+            ls_remote_heads(git.clone(), &work, "-r", None).unwrap(),
+            ["--remote", "feature", "main"]
+        );
+
+        // fetch
+        run(&work, &["update-ref", "-d", "refs/remotes/-r/--remote"]);
+        fetch(git.clone(), &work, "-r", None, &mut |_, _| {}).unwrap();
+        assert_eq!(rev("refs/remotes/-r/--remote"), first);
+        fetch_refspec(
+            git.clone(),
+            &work,
+            "-r",
+            "+refs/heads/--remote:refs/remotes/-r/copy",
+            None,
+        )
+        .unwrap();
+        assert_eq!(rev("refs/remotes/-r/copy"), first);
+        fetch_remote_branch(git.clone(), &work, "-r", "--remote", None).unwrap();
+        fetch_tags(git.clone(), &work, "-r", None).unwrap();
+        assert!(matches!(
+            pull(git.clone(), &work, "-r", false, None, &mut |_, _| {}),
+            Err(GitError::DashRemoteName(_))
+        ));
+
+        // a branch of the `-r` remote checks out as a tracking branch
+        let remote_branch = corvene_models::Branch {
+            name: "-r/feature".into(),
+            kind: corvene_models::BranchKind::Remote,
+            full_name: "refs/remotes/-r/feature".into(),
+            tip: Some(first.clone()),
+            upstream: None,
+            tip_time: None,
+            tip_author: None,
+            remote_name: Some("-r".into()),
+        };
+        crate::branch_ops::checkout_branch(git.clone(), &work, &remote_branch).unwrap();
+        assert_eq!(
+            config_value(git.clone(), &work, "branch.feature.merge").as_deref(),
+            Some("refs/heads/feature")
+        );
+        assert_eq!(
+            config_value(git.clone(), &work, "branch.feature.remote").as_deref(),
+            Some("-r")
+        );
+
+        // tags and branch deletion on the remote
+        run(&work, &["tag", "v1"]);
+        push_tag(git.clone(), &work, "-r", "v1", None).unwrap();
+        delete_remote_tag(git.clone(), &work, "-r", "v1", None).unwrap();
+        crate::branch_ops::delete_remote_branch(git.clone(), &work, "-r", "--remote").unwrap();
+        assert_eq!(
+            ls_remote_heads(git.clone(), &work, "-r", None).unwrap(),
+            ["feature", "main"]
+        );
+
+        // managing the remote
+        set_remote_url(git.clone(), &work, "-r", bare.to_str().unwrap()).unwrap();
+        prune_remote(git.clone(), &work, "-r", None).unwrap();
+        assert_eq!(rev("refs/remotes/-r/--remote"), "");
+        update_remote_head(git.clone(), &work, "-r", None).unwrap();
+        rename_remote(git.clone(), &work, "-r", "-s").unwrap();
+        assert_eq!(
+            commits_not_on_remote(git.clone(), &work, "--local", "-s").unwrap(),
+            0
+        );
+        remove_remote(git.clone(), &work, "-s").unwrap();
+        assert!(get_remotes(git, &work).unwrap().is_empty());
     }
 }
