@@ -8131,21 +8131,6 @@ registry! {
         code: &["crates/corvene-git/src/file_mode.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
-    /// Cloning into the home folder or a keys / settings folder asks first.
-    CONFIRM_SENSITIVE_CLONE = 1123 "confirm-sensitive-clone" {
-        title: "Clone into a sensitive folder after confirming",
-        summary: "Cloning into your home folder or a folder that holds keys or settings \
-                  (such as ~/.config or ~/.ssh) asks first and clones there when you confirm, \
-                  for example a dotfiles repository in ~/.config/nvim.",
-        ghd_behaviour: "Shows an error that cloning into this directory is not allowed.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: ON, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(23002)],
-        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/confirm_sensitive_clone.rs"],
-    },
-
     /// Fetch moves local tags that were moved on the remote.
     FETCH_UPDATES_MOVED_TAGS = 1120 "fetch-updates-moved-tags" {
         title: "Fetch updates tags moved on the remote",
@@ -8195,6 +8180,21 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-platform/src/lib.rs", "crates/corvene-platform/src/windows.rs"],
     },
 
+
+    /// Cloning into the home folder or a keys / settings folder asks first.
+    CONFIRM_SENSITIVE_CLONE = 1123 "confirm-sensitive-clone" {
+        title: "Clone into a sensitive folder after confirming",
+        summary: "Cloning into your home folder or a folder that holds keys or settings \
+                  (such as ~/.config or ~/.ssh) asks first and clones there when you confirm, \
+                  for example a dotfiles repository in ~/.config/nvim.",
+        ghd_behaviour: "Shows an error that cloning into this directory is not allowed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(23002)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/confirm_sensitive_clone.rs"],
+    },
 
     // ---- 1200 History & branches (overflow) ----
 
