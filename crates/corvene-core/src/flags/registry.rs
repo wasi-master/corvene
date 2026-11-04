@@ -2061,7 +2061,7 @@ registry! {
                         worktree it was switched to last.",
         nature: Nature::Feature,
         kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(22376)],
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/worktrees.rs", "crates/corvene-core/src/state.rs"],
