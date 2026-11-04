@@ -469,14 +469,19 @@ fn row(ix: usize, hit: &Hit, selected: bool, on_pick: PickHandler, cx: &mut App)
                     .truncate()
                     .font_weight(FontWeight::SEMIBOLD)
                     .italic()
+                    // GHD 3.6.8 (desktop/desktop#21820): room for the italic
+                    // overhang the clip would cut
+                    .pr(zpx(2.))
                     .mr(SPACING_HALF())
                     .child(format!("@{name}")),
             )
             .child(
+                // GHD 3.6.8: `white-space: nowrap` without the ellipsis, so
+                // the description is not clipped mid-glyph
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
+                    .whitespace_nowrap()
                     .italic()
                     .text_size(FONT_SIZE_SM())
                     .text_color(secondary)
