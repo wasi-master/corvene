@@ -260,13 +260,19 @@ impl CiCheckPopover {
                 octicon(Octicon::SyncClockwise, t.text_secondary).size(zpx(30.)),
                 "ci-check-run-loading",
             )
-        } else if all_success {
-            octicon(Octicon::CheckCircleFill, c(primer::GREEN_500))
-                .size(zpx(30.))
-                .into_any_element()
-        } else if all_failure {
-            octicon(Octicon::XCircleFill, c(primer::RED_500))
-                .size(zpx(30.))
+        } else if all_success || all_failure {
+            // GHD 3.6.7 (desktop/desktop#22900): the glyph sits on a circle
+            // of the background colour so its check or x keeps its contrast
+            let (icon, color) = if all_success {
+                (Octicon::CheckCircleFill, primer::GREEN_500)
+            } else {
+                (Octicon::XCircleFill, primer::RED_500)
+            };
+            div()
+                .flex_none()
+                .rounded_full()
+                .bg(t.background)
+                .child(octicon(icon, c(color)).size(zpx(30.)))
                 .into_any_element()
         } else {
             donut(checks)
