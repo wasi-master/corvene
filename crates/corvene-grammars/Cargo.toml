@@ -506,7 +506,6 @@ rest = [
     "lang-strace",
     "lang-styled",
     "lang-supercollider",
-    "lang-svelte-ng",
     "lang-systemverilog",
     "lang-t32",
     "lang-tablegen",

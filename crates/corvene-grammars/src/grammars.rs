@@ -2309,7 +2309,6 @@ pub const REST: &[&str] = &[
     "strace",
     "styled",
     "supercollider",
-    "svelte",
     "systemverilog",
     "t32",
     "tablegen",

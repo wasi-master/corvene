@@ -101,6 +101,8 @@ pub fn mime_for_extension(ext: &str) -> Option<&'static str> {
         ".scss" => "text/x-scss",
         ".less" => "text/x-less",
         ".vue" => "text/x-vue",
+        // GHD 3.6.8 (desktop/desktop#22969)
+        ".svelte" => "text/x-vue",
         ".markdown" => "text/x-markdown",
         ".md" => "text/x-markdown",
         ".mdx" => "text/x-markdown",
