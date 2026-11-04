@@ -102,6 +102,9 @@ pub struct Settings {
     pub confirm_discard_stash: bool,
     /// GHD `confirmWorktreeRemoval` (Prompts › Removing worktrees).
     pub confirm_worktree_removal: bool,
+    /// GHD 3.6.7 `alwaysShowWorktreeList` (Appearance › Miscellaneous): the
+    /// toolbar's worktree dropdown shows without linked worktrees too.
+    pub always_show_worktree_list: bool,
     /// GHD `confirmCommitMessageOverride` (Prompts › Overriding commit
     /// message with generated message). Corvene generates no commit messages:
     /// kept only for the checkbox flag `512-copilot-prompt-omitted` shows.
@@ -727,6 +730,7 @@ impl Default for Settings {
             uncommitted_changes_strategy: UncommittedChangesStrategy::default(),
             confirm_discard_stash: true,
             confirm_worktree_removal: true,
+            always_show_worktree_list: false,
             confirm_commit_message_override: true,
             ask_to_move_to_applications_folder: true,
             confirm_force_push: true,

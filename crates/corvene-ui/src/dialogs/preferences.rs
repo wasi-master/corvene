@@ -1,13 +1,13 @@
 //! Settings dialog (`ui/preferences/preferences.tsx` + the per-tab
 //! components). 600 px wide, a 190 px vertical tab bar beside tab content at
-//! least 440 px tall; Cancel / Save.
+//! least 500 px tall (GHD 3.6.7; 440 px in 3.6.6); Cancel / Save.
 //!
 //! Deviations from GHD 3.6.6: no Copilot tab, no Copilot prompt checkbox (flag
 //! `512-copilot-prompt-omitted`; with it off the checkbox is shown and only
 //! stored), no Hooks sub-tab under Git (hook environment loading is not
 //! implemented), no
 //! Usage section under Advanced (no telemetry; "Save crash reports locally"
-//! and Optional components sit there instead, scrolling within 440 px), and
+//! and Optional components sit there instead, scrolling within 500 px), and
 //! no Formatting section (behind a feature flag in GHD).
 //! With flag `custom-editor-name` the custom editor form has a Name box used
 //! in "Open in …" labels (GHD `CustomIntegrationForm` has path and arguments).
@@ -1899,10 +1899,11 @@ impl PreferencesDialog {
             .child(section_heading("Theme", cx))
             .child(swatches)
             .child(self.formatting_section(cx))
-            // the absolute-dates checkbox's 10 px margin spaces the section
-            .child(section_heading("Diff", cx))
+            // the absolute-dates checkbox's 10 px margin spaces the section;
+            // GHD 3.6.7 `renderMiscellaneous` (was "Diff" with "Tab Size")
+            .child(section_heading("Miscellaneous", cx))
             .child(labeled(
-                mac_or("Tab Size", "Tab size"),
+                mac_or("Diff Tab Size", "Diff tab size"),
                 select_button(
                     "prefs-tab-size",
                     options
@@ -1917,6 +1918,14 @@ impl PreferencesDialog {
                 ),
                 cx,
             ))
+            // `.always-show-worktree-list { margin-top: var(--spacing) }`
+            .child(div().mt(SPACING()).child(checkbox_row(
+                "prefs-always-show-worktree-list",
+                self.draft.always_show_worktree_list,
+                "Always show worktree list",
+                self.edit(cx, |s, v| s.always_show_worktree_list = v),
+                cx,
+            )))
             // Corvene addition: `105-tree-sitter-highlighting`
             .when(tree_sitter, |d| d.child(self.syntax_highlighter_field(cx)))
             // Corvene addition: `111-language-extensions`
@@ -3305,8 +3314,9 @@ impl Render for PreferencesDialog {
             })
             .child(
                 div()
-                    // `dialog#preferences .dialog-content { min-height: 440px }`
-                    .min_h(zpx(440.))
+                    // `dialog#preferences .dialog-content { min-height: 500px }`
+                    // (`$default-tab-height`, 440 px before GHD 3.6.7)
+                    .min_h(zpx(500.))
                     .flex()
                     .flex_row()
                     .items_stretch()
@@ -3321,9 +3331,9 @@ impl Render for PreferencesDialog {
                             .p(SPACING_DOUBLE())
                             // Advanced carries Corvene's extra sections (crash
                             // reports, optional components): it scrolls inside
-                            // GHD's 440 px instead of growing the dialog
+                            // GHD's 500 px instead of growing the dialog
                             .when(self.tab == PreferencesTab::Advanced || compact, |d| {
-                                d.max_h(zpx(440.)).overflow_y_scroll()
+                                d.max_h(zpx(500.)).overflow_y_scroll()
                             })
                             .child(body),
                     ),

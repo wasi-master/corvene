@@ -199,13 +199,17 @@ pub struct PrBadge {
     pub bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
-/// GHD `renderWorktreeToolbarButton`: only with linked worktrees, or while
-/// the foldout is open (so it can be reached from the menu).
+/// GHD `shouldShowWorktreeDropdown`: with linked worktrees, while the
+/// foldout is open (so it can be reached from the menu), or always with
+/// Appearance › Always show worktree list (GHD 3.6.7).
 pub fn worktree_button_visible(state: &AppState) -> bool {
     let has_linked = state
         .selected_state()
         .is_some_and(|rs| crate::worktree_list::listed_worktrees(state, &rs.worktrees).len() > 1);
-    state.selected.is_some() && (has_linked || state.foldout == Some(Foldout::Worktree))
+    state.selected.is_some()
+        && (state.settings.always_show_worktree_list
+            || has_linked
+            || state.foldout == Some(Foldout::Worktree))
 }
 
 /// GHD `Toolbar` render: repository, worktree, branch, push/pull - from the app state.
