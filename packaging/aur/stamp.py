@@ -32,6 +32,7 @@ DEPENDS = [
     "fontconfig",
     "freetype2",
     "vulkan-icd-loader",
+    "alsa-lib",
     "xdg-utils",
     "perl",
     "hicolor-icon-theme",
