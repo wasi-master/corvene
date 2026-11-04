@@ -1196,10 +1196,17 @@ fn derived_path(base: &Path, url: &str, with_owner: bool, local_ok: bool) -> Pat
     }
 }
 
-/// `validateEmptyFolder`: the destination must be missing or an empty folder.
+/// `validateClonePath` (GHD 3.6.7, desktop/desktop#22891): on macOS a
+/// destination ending in `.app` would become an application bundle; then
+/// `validateEmptyFolder`, the destination must be missing or an empty folder.
 fn validate_empty_folder(path: &Path) -> Option<&'static str> {
     if path.as_os_str().is_empty() {
         return None;
+    }
+    if cfg!(target_os = "macos") && is_app_bundle_path(path) {
+        return Some(
+            "The local path cannot end in .app on macOS. Choose a different folder name to avoid creating an application bundle.",
+        );
     }
     match std::fs::read_dir(path) {
         Ok(mut entries) => {
@@ -1215,6 +1222,12 @@ fn validate_empty_folder(path: &Path) -> Option<&'static str> {
         }
         Err(_) => Some("Unable to read path on disk. Please check the path and try again."),
     }
+}
+
+/// `Path.basename(Path.resolve(path)).toLowerCase().endsWith('.app')`.
+fn is_app_bundle_path(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().to_lowercase().ends_with(".app"))
 }
 
 /// `330-clone-path-validation`: a leading `~` or `~/` is the home folder.
@@ -1432,6 +1445,14 @@ impl Render for CloneRepositoryDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[::core::prelude::v1::test]
+    fn app_bundle_destinations_are_recognised() {
+        assert!(is_app_bundle_path(Path::new("/Users/me/GitHub/Tool.app")));
+        assert!(is_app_bundle_path(Path::new("/Users/me/GitHub/tool.APP/")));
+        assert!(!is_app_bundle_path(Path::new("/Users/me/GitHub/app")));
+        assert!(!is_app_bundle_path(Path::new("/Users/me/my.app.d")));
+    }
 
     #[::core::prelude::v1::test]
     #[cfg(unix)]
